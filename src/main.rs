@@ -26,7 +26,7 @@ async fn execute_gpu(numbers: Vec<u32>) -> Vec<u32> {
     let size = slice_size as wgpu::BufferAddress;
 
     let s = shader!{
-        buffer indices;
+        [buffer uint[]] indices;
 
         void main() {
             uint index = gl_GlobalInvocationID.x;

@@ -12,8 +12,14 @@ fn compile_shader(contents: SHADER, shader: ShaderType, device: &wgpu::Device) -
     // https://en.wikipedia.org/wiki/Standard_Portable_Intermediate_Representation
     print!("{}", contents.to_string());
     print!("\n\n");
-    let mut vert_file = glsl_to_spirv::compile(&contents.to_string(), shader)
-        .unwrap_or_else(|_| panic!("{}: {}", "You gave a bad shader source", contents.to_string()));
+    let mut vert_file =
+        glsl_to_spirv::compile(&contents.to_string(), shader).unwrap_or_else(|_| {
+            panic!(
+                "{}: {}",
+                "You gave a bad shader source",
+                contents.to_string()
+            )
+        });
     let mut vs = Vec::new();
     vert_file
         .read_to_end(&mut vs)
@@ -152,8 +158,12 @@ pub fn run(cpass: &mut wgpu::ComputePass) {
 
 // TODO
 // Identify list of input/output variables
-// Check that all input variables for shader are bound when we run
+//     May or may not have a strict order of parameter types
 // Develop the syntax for binding a variable
+//     Scoping for bind operations?
+//     Type level struct for bindings. Check that the binding type is not None
+// Check that all input variables for shader are bound when we run
+//
 
 /*
 #version 450
@@ -169,24 +179,90 @@ void main() {
 }
 */
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum GLSL_TYPE {
+    INT,
+    UINT,
+    FLOAT,
+}
+
+impl fmt::Display for GLSL_TYPE {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let printable = match *self {
+            GLSL_TYPE::INT => "int",
+            GLSL_TYPE::UINT => "uint",
+            GLSL_TYPE::FLOAT => "float",
+        };
+        write!(f, "{}", printable)
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub enum QUALIFIER {
+    BUFFER,
+    IN,
+    OUT,
+}
+
+#[derive(Debug)]
+pub struct PARAMETER {
+    pub qual: QUALIFIER,
+    pub gtype: GLSL_TYPE,
+    pub name: String,
+}
+
 #[derive(Debug)]
 pub struct SHADER {
-    pub buffer_names : Vec<String>,
-    pub body : String
+    pub params: Vec<PARAMETER>, // buffer_names * type => Vec<String * Type>
+    // Input_names
+    // Output_names
+    pub body: String,
 }
 
 impl fmt::Display for SHADER {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-
         let mut buffer = Vec::new();
         buffer.push("layout(binding = 0) buffer BINDINGS {\n".to_string());
-        for i in &self.buffer_names[..]{
-            buffer.push("uint[] ".to_string() + i + ";\n");
+        for i in &self.params[..] {
+            if QUALIFIER::BUFFER == i.qual {
+                buffer.push(i.gtype.to_string() + "[] " + &i.name + ";\n");
+            }
         }
         buffer.push("};\n".to_string());
 
-        write!(fmt, "#version 450\nlayout(local_size_x = 1) in;\n{}\nvoid main() {{\n{}\n}}", buffer.join(""), self.body)
+        write!(
+            fmt,
+            "#version 450\nlayout(local_size_x = 1) in;\n{}\nvoid main() {{\n{}\n}}",
+            buffer.join(""),
+            self.body
+        )
     }
+}
+
+#[macro_export]
+macro_rules! typing {
+    (uint) => {
+        wgpu_compute_header::GLSL_TYPE::UINT
+    };
+    (int) => {
+        wgpu_compute_header::GLSL_TYPE::INT
+    };
+    (float) => {
+        wgpu_compute_header::GLSL_TYPE::FLOAT
+    };
+}
+
+#[macro_export]
+macro_rules! qualifying {
+    (buffer) => {
+        wgpu_compute_header::QUALIFIER::BUFFER
+    };
+    (in) => {
+        wgpu_compute_header::QUALIFIER::IN
+    };
+    (out) => {
+        wgpu_compute_header::QUALIFIER::OUT
+    };
 }
 
 // To help view macros
@@ -197,15 +273,18 @@ impl fmt::Display for SHADER {
 // https://doc.rust-lang.org/stable/rust-by-example/macros.html
 #[macro_export]
 macro_rules! shader {
-    ( $( buffer $param:expr;)* void main() { $($tt:tt)* }) => {
+    ( $([$qualifier:ident $btype:ident $($brack:tt)*] $bparam:ident;)*
+      void main() { $($tt:tt)* }) => {
         {
             let mut s = Vec::new();
-            $(s.push(stringify!($param).to_string());)*
+            $(s.push(wgpu_compute_header::PARAMETER{qual:qualifying!($qualifier), gtype:typing!($btype), name:stringify!($bparam).to_string()});)*
+
             let mut b = String::new();
-            $(let x = stringify!($tt); if (x == "uint") {b.push_str(&(x.to_string() + " "));} else {b.push_str(x);} )*
-/*             let mut b = Vec::new();
-            $(b.push(stringify!($tt).to_string());)* */
-            wgpu_compute_header::SHADER{buffer_names:s, body:b}
+            // we need to space out type tokens from the identifiers so they don't look like one word
+            $(let x = stringify!($tt); if (x == "uint" || x =="int" || x== "float") {b.push_str(&(x.to_string() + " "));} else {b.push_str(x);} )*
+
+            wgpu_compute_header::SHADER{params:s, body:b}
         }
     };
+    // repeat with in and out
 }
