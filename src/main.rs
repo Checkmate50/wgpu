@@ -25,7 +25,16 @@ async fn execute_gpu(numbers: Vec<u32>) -> Vec<u32> {
     let slice_size = numbers.len() * std::mem::size_of::<u32>();
     let size = slice_size as wgpu::BufferAddress;
 
-    let s = shader!{
+    /*     let s = shader! {
+        [buffer uint[]] indices;
+        [buffer uint[]] indices2;
+
+        void main() {
+            uint index = gl_GlobalInvocationID.x;
+            indices[index] = indices[index]+indices2[index];
+        }
+    }; */
+    let s = shader! {
         [buffer uint[]] indices;
 
         void main() {
@@ -34,7 +43,7 @@ async fn execute_gpu(numbers: Vec<u32>) -> Vec<u32> {
         }
     };
 
-    let (program, mut encoder) = wgpu_compute_header::compile(s).await;
+    let (program, mut encoder, bindings) = wgpu_compute_header::compile(s).await;
 
     let staging_buffer = program.device.create_buffer_with_data(
         numbers.as_slice().as_bytes(),
@@ -49,27 +58,16 @@ async fn execute_gpu(numbers: Vec<u32>) -> Vec<u32> {
         label: None,
     });
 
-    let bind_group = program
-        .device
-        .create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &program.bind_group_layout,
-            bindings: &[wgpu::Binding {
-                binding: 0,
-                resource: wgpu::BindingResource::Buffer {
-                    buffer: &storage_buffer,
-                    range: 0..size,
-                },
-            }],
-            label: None,
-        });
     encoder.copy_buffer_to_buffer(&staging_buffer, 0, &storage_buffer, 0, size);
-
     {
-        let mut cpass = wgpu_compute_header::with(&program, &mut encoder);
-        wgpu_compute_header::bind_group(&mut cpass, &bind_group);
-
-        wgpu_compute_header::run(&mut cpass);
+        let new_bindings =
+            wgpu_compute_header::bind(&bindings, &storage_buffer, size, "indices".to_string());
+        // This all will be put back into run when run is fixed
+        {
+            wgpu_compute_header::run(&mut encoder, &program, new_bindings);
+        }
     }
+
     encoder.copy_buffer_to_buffer(&storage_buffer, 0, &staging_buffer, 0, size);
     program.queue.submit(&[encoder.finish()]);
 
