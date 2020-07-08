@@ -36,10 +36,11 @@ async fn execute_gpu(numbers: Vec<u32>) -> Vec<u32> {
     }; */
     let s = shader! {
         [buffer uint[]] indices;
+        [buffer uint[]] indices2;
 
         void main() {
             uint index = gl_GlobalInvocationID.x;
-            indices[index] = indices[index]+1;
+            indices[index] = indices[index]+indices2[index];
         }
     };
 
@@ -62,9 +63,11 @@ async fn execute_gpu(numbers: Vec<u32>) -> Vec<u32> {
     {
         let new_bindings =
             wgpu_compute_header::bind(&bindings, &storage_buffer, size, "indices".to_string());
-        // This all will be put back into run when run is fixed
+
+        let final_bindings =
+            wgpu_compute_header::bind(&new_bindings, &storage_buffer, size, "indices2".to_string());
         {
-            wgpu_compute_header::run(&mut encoder, &program, new_bindings);
+            wgpu_compute_header::run(&mut encoder, &program, final_bindings);
         }
     }
 

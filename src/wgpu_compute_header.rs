@@ -46,15 +46,13 @@ fn create_bindings<'a>(
     device: &wgpu::Device,
 ) -> (wgpu::BindGroupLayout, ProgramBindings<'a>) {
     let mut binding_struct = Vec::new();
-    let mut acc = 0;
     for i in &compute.params {
         if i.qual == QUALIFIER::BUFFER {
             binding_struct.push(BINDING {
-                binding_number: acc,
+                binding_number: i.number,
                 name: i.name.clone(),
                 binding: None,
             });
-            acc = acc + 1;
         }
     }
 
@@ -174,8 +172,7 @@ pub fn bind<'a>(
         .expect("You are trying to bind to something that doesn't exist");
 
     let binding = new_bindings.bindings.remove(index);
-    // Check that binding.binding is None
-    if binding.binding.is_some(){
+    if binding.binding.is_some() {
         panic!("you are trying to bind to something that has already been bound");
     }
 
@@ -199,9 +196,10 @@ pub fn compute(cpass: &mut wgpu::ComputePass, length: u32) {
 }
 
 pub fn run(encoder: &mut wgpu::CommandEncoder, program: &PROGRAM, new_bindings: ProgramBindings) {
+    // TODO order on binding_number
     let mut empty_vec = Vec::new();
     for i in new_bindings.bindings.clone() {
-        empty_vec.push(i.binding.unwrap());
+        empty_vec.push(i.binding.expect(&i.name));
     }
 
     let bgd = &wgpu::BindGroupDescriptor {
@@ -215,7 +213,8 @@ pub fn run(encoder: &mut wgpu::CommandEncoder, program: &PROGRAM, new_bindings: 
     let mut cpass = encoder.begin_compute_pass();
     cpass.set_pipeline(&program.pipeline);
     cpass.set_bind_group(0, &bind_group, &[]);
-    cpass.dispatch(4, 1, 1); // switch this to compute later
+    // TODO Use loop annotations to get this number
+    compute(&mut cpass, 4);
 }
 
 // TODO
@@ -276,7 +275,9 @@ pub struct PARAMETER {
     pub qual: QUALIFIER,
     pub gtype: GLSLTYPE,
     pub name: String,
+    pub number: u32,
 }
+// todo move number over to binding
 
 #[derive(Debug)]
 pub struct SHADER {
@@ -287,13 +288,14 @@ pub struct SHADER {
 impl fmt::Display for SHADER {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         let mut buffer = Vec::new();
-        buffer.push("layout(binding = 0) buffer BINDINGS {\n".to_string());
         for i in &self.params[..] {
             if QUALIFIER::BUFFER == i.qual {
+                buffer.push(format!("layout(binding = {}) buffer BINDINGS{} {{\n", i.number, i.number));
+
                 buffer.push(i.gtype.to_string() + "[] " + &i.name + ";\n");
+                buffer.push("};\n".to_string());
             }
         }
-        buffer.push("};\n".to_string());
 
         write!(
             fmt,
@@ -329,7 +331,8 @@ macro_rules! shader {
       void main() { $($tt:tt)* }) => {
         {
             let mut s = Vec::new();
-            $(s.push(wgpu_compute_header::PARAMETER{qual:qualifying!($qualifier), gtype:typing!($type), name:stringify!($param).to_string()});)*
+            let mut acc = 0;
+            $(s.push(wgpu_compute_header::PARAMETER{qual:qualifying!($qualifier), gtype:typing!($type), name:stringify!($param).to_string(), number:acc}); acc = acc+1;)*
 
             let mut b = String::new();
             // we need to space out type tokens from the identifiers so they don't look like one word
