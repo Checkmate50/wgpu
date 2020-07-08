@@ -115,13 +115,8 @@ pub async fn compile<'a>(compute: SHADER) -> (PROGRAM, wgpu::CommandEncoder, Pro
         })
         .await;
 
-    // todo vertex shader -> string + main entry point + descriptors...
-
     // Our compiled vertex shader
     let cs_module = compile_shader(&compute, ShaderType::Compute, &device);
-
-    // todo Set up the bindings for the pipeline
-    // Basically uniforms
 
     let (bind_group_layout, program_bindings) = create_bindings(&compute, &device);
 
@@ -180,6 +175,9 @@ pub fn bind<'a>(
 
     let binding = new_bindings.bindings.remove(index);
     // Check that binding.binding is None
+    if binding.binding.is_some(){
+        panic!("you are trying to bind to something that has already been bound");
+    }
 
     new_bindings.bindings.push(BINDING {
         binding_number: binding.binding_number,
@@ -221,7 +219,6 @@ pub fn run(encoder: &mut wgpu::CommandEncoder, program: &PROGRAM, new_bindings: 
 }
 
 // TODO
-// Make sure a binding is not rebound
 // Develop the syntax for binding a variable
 //     Scoping for bind operations?
 // Check that all input variables for shader are bound when we run
