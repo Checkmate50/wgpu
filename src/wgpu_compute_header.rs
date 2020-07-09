@@ -6,6 +6,12 @@ use std::io::Read;
 
 use std::fmt;
 
+use std::collections::HashMap;
+
+use std::convert::TryInto;
+
+use zerocopy::AsBytes as _;
+
 // Read in a given file that should be a certain shader type and create a shader module out of it
 fn compile_shader(contents: &SHADER, shader: ShaderType, device: &wgpu::Device) -> ShaderModule {
     // Convert our shader(in GLSL) to SPIR-V format
@@ -29,29 +35,32 @@ fn compile_shader(contents: &SHADER, shader: ShaderType, device: &wgpu::Device) 
 }
 
 #[derive(Debug, Clone)]
-pub struct BINDING<'a> {
+struct BINDING {
     binding_number: u32,
     name: String,
-    pub binding: Option<wgpu::Binding<'a>>,
-    // type todo
+    data: Option<Vec<u8>>,
+    size: Option<u64>,
+    gtype: GLSLTYPE,
 }
 
 #[derive(Debug, Clone)]
-pub struct ProgramBindings<'a> {
-    pub bindings: Vec<BINDING<'a>>,
+pub struct ProgramBindings {
+    bindings: Vec<BINDING>,
 }
 
-fn create_bindings<'a>(
+fn create_bindings(
     compute: &SHADER,
     device: &wgpu::Device,
-) -> (wgpu::BindGroupLayout, ProgramBindings<'a>) {
+) -> (wgpu::BindGroupLayout, ProgramBindings) {
     let mut binding_struct = Vec::new();
     for i in &compute.params {
         if i.qual == QUALIFIER::BUFFER {
             binding_struct.push(BINDING {
                 binding_number: i.number,
                 name: i.name.clone(),
-                binding: None,
+                data: None,
+                size: None,
+                gtype: i.gtype.clone(),
             });
         }
     }
@@ -86,13 +95,13 @@ fn create_bindings<'a>(
 }
 
 pub struct PROGRAM {
-    pub device: wgpu::Device,
-    pub queue: wgpu::Queue,
-    pub pipeline: wgpu::ComputePipeline,
-    pub bind_group_layout: wgpu::BindGroupLayout,
+    device: wgpu::Device,
+    queue: wgpu::Queue,
+    pipeline: wgpu::ComputePipeline,
+    bind_group_layout: wgpu::BindGroupLayout,
 }
 
-pub async fn compile<'a>(compute: SHADER) -> (PROGRAM, wgpu::CommandEncoder, ProgramBindings<'a>) {
+pub async fn compile(compute: SHADER) -> (PROGRAM, ProgramBindings) {
     // the adapter is the handler to the physical graphics unit
     let adapter = wgpu::Adapter::request(
         &wgpu::RequestAdapterOptions {
@@ -131,8 +140,6 @@ pub async fn compile<'a>(compute: SHADER) -> (PROGRAM, wgpu::CommandEncoder, Pro
         },
     });
 
-    let encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-
     return (
         PROGRAM {
             device,
@@ -140,7 +147,6 @@ pub async fn compile<'a>(compute: SHADER) -> (PROGRAM, wgpu::CommandEncoder, Pro
             pipeline,
             bind_group_layout,
         },
-        encoder,
         program_bindings,
     );
 }
@@ -157,12 +163,13 @@ pub fn with<'a>(
     return cpass;
 }
 
-pub fn bind<'a>(
+fn bind<'a>(
     bindings: &'a ProgramBindings,
-    buffer: &'a wgpu::Buffer,
+    data: Vec<u8>,
     size: u64,
+    acceptable_types: Vec<GLSLTYPE>,
     name: String,
-) -> ProgramBindings<'a> {
+) -> ProgramBindings {
     let mut new_bindings = bindings.clone();
 
     let index = new_bindings
@@ -172,73 +179,151 @@ pub fn bind<'a>(
         .expect("You are trying to bind to something that doesn't exist");
 
     let binding = new_bindings.bindings.remove(index);
-    if binding.binding.is_some() {
-        panic!("you are trying to bind to something that has already been bound");
+    if binding.data.is_some() {
+        panic!("You are trying to bind to something that has already been bound");
+    }
+    if !acceptable_types.contains(&binding.gtype) {
+        panic!("The type of the value you provided is not what was expected, {:?}", &binding.gtype);
     }
 
     new_bindings.bindings.push(BINDING {
         binding_number: binding.binding_number,
         name,
-        binding: Some(wgpu::Binding {
-            binding: binding.binding_number,
-            resource: wgpu::BindingResource::Buffer {
-                buffer: buffer,
-                range: 0..size,
-            },
-        }),
+        gtype: binding.gtype,
+        data: Some(data),
+        size: Some(size),
     });
 
     return new_bindings;
+}
+
+pub fn bind_vec<'a>(
+    bindings: &'a ProgramBindings,
+    numbers: &'a Vec<u32>,
+    name: String,
+) -> ProgramBindings {
+    bind(
+        bindings,
+        numbers.as_slice().as_bytes().to_vec(),
+        (numbers.len() * std::mem::size_of::<u32>()) as u64,
+        vec![
+            GLSLTYPE::ARRAY(Box::new(GLSLTYPE::INT)),
+            GLSLTYPE::ARRAY(Box::new(GLSLTYPE::UINT)),
+        ],
+        name,
+    )
 }
 
 pub fn compute(cpass: &mut wgpu::ComputePass, length: u32) {
     cpass.dispatch(length, 1, 1);
 }
 
-pub fn run(encoder: &mut wgpu::CommandEncoder, program: &PROGRAM, new_bindings: ProgramBindings) {
-    // TODO order on binding_number
+pub async fn run(program: &PROGRAM, new_bindings: ProgramBindings) -> Vec<u32> {
+    let mut encoder = program
+        .device
+        .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+
     let mut empty_vec = Vec::new();
+    let mut buffer_map = HashMap::new();
+
     for i in new_bindings.bindings.clone() {
-        empty_vec.push(i.binding.expect(&i.name));
+        let data_vec = i.data.expect(&format!("{} was not bound", &i.name));
+        let data = data_vec.as_slice();
+
+        let buffer = program.device.create_buffer_with_data(
+            data,
+            wgpu::BufferUsage::MAP_READ
+                | wgpu::BufferUsage::COPY_DST
+                | wgpu::BufferUsage::STORAGE
+                | wgpu::BufferUsage::COPY_SRC,
+        );
+        buffer_map.insert(i.binding_number, buffer);
     }
+    // Todo use an out annotation to find this value
+    let result_buffer = 0;
+    {
+        for i in 0..(buffer_map.len()) {
+            let b = new_bindings.bindings[i].clone();
+            empty_vec.push(wgpu::Binding {
+                binding: b.binding_number,
+                resource: wgpu::BindingResource::Buffer {
+                    buffer: &buffer_map.get(&(i as u32)).expect(&format!("I assumed all bindings would be buffers but I guess that has been invalidated")),
+                    range: 0..b
+                        .size
+                        .expect(&format!("The size of {} was not set", &b.name)),
+                },
+            });
+        }
 
-    let bgd = &wgpu::BindGroupDescriptor {
-        layout: &program.bind_group_layout,
-        bindings: empty_vec.as_slice(),
-        label: None,
-    };
+        let bgd = &wgpu::BindGroupDescriptor {
+            layout: &program.bind_group_layout,
+            bindings: empty_vec.as_slice(),
+            label: None,
+        };
 
-    let bind_group = program.device.create_bind_group(bgd);
+        let bind_group = program.device.create_bind_group(bgd);
 
-    let mut cpass = encoder.begin_compute_pass();
-    cpass.set_pipeline(&program.pipeline);
-    cpass.set_bind_group(0, &bind_group, &[]);
-    // TODO Use loop annotations to get this number
-    compute(&mut cpass, 4);
+        let mut cpass = encoder.begin_compute_pass();
+        cpass.set_pipeline(&program.pipeline);
+        cpass.set_bind_group(0, &bind_group, &[]);
+        // TODO Use loop annotations to get this number
+        compute(&mut cpass, 4);
+    }
+    program.queue.submit(&[encoder.finish()]);
+
+    // Note that we're not calling `.await` here.
+    let buffer_future = buffer_map.get(&result_buffer).unwrap().map_read(
+        0,
+        new_bindings.bindings[(result_buffer as usize)]
+            .size
+            .unwrap(),
+    );
+
+    // Poll the device in a blocking manner so that our future resolves.
+    // In an actual application, `device.poll(...)` should
+    // be called in an event loop or on another thread.
+    program.device.poll(wgpu::Maintain::Wait);
+
+    if let Ok(mapping) = buffer_future.await {
+        let x: Vec<u32> = mapping
+            .as_slice()
+            .chunks_exact(4)
+            .map(|b| u32::from_ne_bytes(b.try_into().unwrap()))
+            .collect();
+        x
+    } else {
+        panic!("failed to run compute on gpu!")
+    }
 }
 
 // TODO
 // Develop the syntax for binding a variable
 //     Scoping for bind operations?
-// Check that all input variables for shader are bound when we run
 // Extract types and do type checking
 //
+// Bind means bind
+//      Not copying data
+//      Mutation is bad!
+//
+// In and out qualifiers should do something
 
 #[derive(Debug, Clone, PartialEq)]
+#[allow(dead_code)]
 pub enum GLSLTYPE {
     INT,
     UINT,
     FLOAT,
+    ARRAY(Box<GLSLTYPE>),
 }
 
 impl fmt::Display for GLSLTYPE {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let printable = match *self {
-            GLSLTYPE::FLOAT => "float",
-            GLSLTYPE::INT => "int",
-            GLSLTYPE::UINT => "uint",
-        };
-        write!(f, "{}", printable)
+        match self {
+            GLSLTYPE::FLOAT =>  write!(f, "float"),
+            GLSLTYPE::INT =>  write!(f, "int"),
+            GLSLTYPE::UINT =>  write!(f, "uint"),
+            GLSLTYPE::ARRAY(x) =>  write!(f, "{}[]", x),
+        }
     }
 }
 
@@ -255,6 +340,14 @@ macro_rules! typing {
     };
 }
 
+pub fn array_type(gtype: GLSLTYPE, depth: i64) -> GLSLTYPE {
+    if depth <= 0 {
+        gtype
+    } else {
+        array_type(GLSLTYPE::ARRAY(Box::new(gtype)), depth - 1)
+    }
+}
+
 pub fn is_glsltype(s: &str) -> bool {
     match s {
         "uint" | "int" | "float" => true,
@@ -263,6 +356,7 @@ pub fn is_glsltype(s: &str) -> bool {
 }
 
 #[derive(Debug, PartialEq)]
+#[allow(dead_code)]
 pub enum QUALIFIER {
     BUFFER,
     // opengl compute shaders don't have in and out variables so these are purely to try and interface at this library level
@@ -277,7 +371,6 @@ pub struct PARAMETER {
     pub name: String,
     pub number: u32,
 }
-// todo move number over to binding
 
 #[derive(Debug)]
 pub struct SHADER {
@@ -290,9 +383,12 @@ impl fmt::Display for SHADER {
         let mut buffer = Vec::new();
         for i in &self.params[..] {
             if QUALIFIER::BUFFER == i.qual {
-                buffer.push(format!("layout(binding = {}) buffer BINDINGS{} {{\n", i.number, i.number));
+                buffer.push(format!(
+                    "layout(binding = {}) buffer BINDINGS{} {{\n",
+                    i.number, i.number
+                ));
 
-                buffer.push(i.gtype.to_string() + "[] " + &i.name + ";\n");
+                buffer.push(i.gtype.to_string() + &i.name + ";\n");
                 buffer.push("};\n".to_string());
             }
         }
@@ -331,8 +427,10 @@ macro_rules! shader {
       void main() { $($tt:tt)* }) => {
         {
             let mut s = Vec::new();
+            let mut num_brackets = 0;
+
             let mut acc = 0;
-            $(s.push(wgpu_compute_header::PARAMETER{qual:qualifying!($qualifier), gtype:typing!($type), name:stringify!($param).to_string(), number:acc}); acc = acc+1;)*
+            $($(let _:[u8;0] = $brack; num_brackets = num_brackets + 1)*; s.push(wgpu_compute_header::PARAMETER{qual:qualifying!($qualifier), gtype:wgpu_compute_header::array_type(typing!($type), num_brackets), name:stringify!($param).to_string(), number:acc}); acc = acc+1; num_brackets = 0;)*
 
             let mut b = String::new();
             // we need to space out type tokens from the identifiers so they don't look like one word
