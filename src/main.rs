@@ -3,9 +3,10 @@ mod wgpu_compute_header;
 async fn execute_gpu() {
     // todo needs out and loop annotations
     // values currently hardcoded
+    // in and out don't do anything yet
     let s = shader! {
-        [buffer uint[]] indices;
-        [buffer uint[]] indices2;
+        [[buffer in out] uint[]] indices;
+        [[buffer in] uint[]] indices2;
 
         void main() {
             uint index = gl_GlobalInvocationID.x;
@@ -13,22 +14,35 @@ async fn execute_gpu() {
         }
     };
 
-    let (program, bindings) = wgpu_compute_header::compile(s).await;
+    let (program, mut bindings) = wgpu_compute_header::compile(s).await;
 
-    let new_bindings =
-        wgpu_compute_header::bind_vec(&bindings, &vec![1, 2, 3, 4], "indices".to_string());
+    let indices = vec![1, 2, 3, 4];
+    let indices2_1 = vec![1, 2, 3, 4];
+    let indices2_2 = vec![4, 3, 2, 1];
+
+    wgpu_compute_header::bind_vec(&program, &mut bindings, &indices, "indices".to_string());
     {
-        let final_bindings =
-            wgpu_compute_header::bind_vec(&new_bindings, &vec![1, 2, 3, 4], "indices2".to_string());
-        // Todo have some write or result function that captures/uses the result instead of returning it
-        println!("{:?}", wgpu_compute_header::run(&program, final_bindings).await);
+        wgpu_compute_header::bind_vec(&program, &mut bindings, &indices2_1, "indices2".to_string());
+        {
+            // Todo have some write or result function that captures/uses the result instead of returning it
+            println!(
+                "{:?}",
+                wgpu_compute_header::run(&program, &mut bindings).await
+            );
+        }
     }
 
-    let new_bindings =
-        wgpu_compute_header::bind_vec(&bindings, &vec![1, 2, 3, 4], "indices".to_string());
-    let final_bindings2 =
-        wgpu_compute_header::bind_vec(&new_bindings, &vec![4, 3, 2, 1], "indices2".to_string());
-    println!("{:?}", wgpu_compute_header::run(&program, final_bindings2).await);
+    wgpu_compute_header::bind_vec(&program, &mut bindings, &indices, "indices".to_string());
+    {
+        /*     wgpu_compute_header::bind_vec(&program, &mut bindings, &indices, "indices".to_string()); */
+        wgpu_compute_header::bind_vec(&program, &mut bindings, &indices2_2, "indices2".to_string());
+        {
+            println!(
+                "{:?}",
+                wgpu_compute_header::run(&program, &mut bindings).await
+            );
+        }
+    }
 }
 
 fn main() {
