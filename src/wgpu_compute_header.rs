@@ -158,18 +158,6 @@ pub async fn compile(compute: SHADER) -> (PROGRAM, ProgramBindings) {
     );
 }
 
-pub fn with<'a>(
-    program: &'a PROGRAM,
-    encoder: &'a mut wgpu::CommandEncoder,
-) -> wgpu::ComputePass<'a> {
-    let mut cpass = encoder.begin_compute_pass();
-
-    // The order must be set_pipeline -> set a bind_group if needed -> set a vertex buffer -> set an index buffer -> do draw
-    // Otherwise we crash out
-    cpass.set_pipeline(&program.pipeline);
-    return cpass;
-}
-
 fn bind<'a>(
     program: &PROGRAM,
     bindings: &mut ProgramBindings,
@@ -383,7 +371,6 @@ pub enum QUALIFIER {
     // opengl compute shaders don't have in and out variables so these are purely to try and interface at this library level
     IN,
     OUT,
-    MUTABLE,
 }
 
 #[macro_export]
@@ -397,9 +384,6 @@ macro_rules! qualifying {
     (out) => {
         wgpu_compute_header::QUALIFIER::OUT
     };
-    (mut) => {
-        wgpu_compute_header::QUALIFIER::MUTABLE
-    }
 }
 
 #[derive(Debug)]
