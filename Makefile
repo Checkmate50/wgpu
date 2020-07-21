@@ -1,11 +1,18 @@
-all:
-	build
+.PHONY: trivial
+trivial:
+	export RUST_BACKTRACE=1 && cargo +nightly run --example trivial_compute
 
-build:
-	cargo build
+.PHONY: trivial2
+trivial2:
+	export RUST_BACKTRACE=1 && cargo +nightly run --example trivial_2_func_compute
 
-run: build
-	export RUST_BACKTRACE=1 && cargo run
+.PHONY: pipeline
+pipeline:
+	export RUST_BACKTRACE=1 && cargo +nightly run --example trivial_pipeline
+
+.PHONY: hello
+hello: hello
+	export RUST_BACKTRACE=1 && cargo +nightly run --example hello_compute
 
 release:
 	cargo build --release
