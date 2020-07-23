@@ -77,7 +77,7 @@ async fn execute_gpu() {
     {
         ready_to_run(BIND_CONTEXT_1);
         let result = run(&program, &mut bindings, out_bindings);
-        println!("{:?}", read_vec(&program, &result, "indices").await);
+        println!("{:?}", read_vec(&program, &result, "indicies").await);
     }
 }
 

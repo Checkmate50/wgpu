@@ -24,11 +24,7 @@ async fn execute_gpu() {
 
     const ADD_ONE: (SHADER, [&str; 32], [&str; 32]) = shader! {
         [[buffer loop in] uint[]] add_one_in;
-        // todo 
-        // ->
-        // [[varying in] uint] add_one_int;
-        [[buffer out] uint[]] add_two_in;
-        //unit ->
+        [[buffer out] uint[]] add_one_result;
         {{
             void main() {
                 // uint xindex = gl_GlobalInvocationID.x;
@@ -73,11 +69,9 @@ async fn execute_gpu() {
         ready_to_run(BIND_CONTEXT_1);
         let result = run(&program1, &mut bindings1, out_bindings1);
         println!("{:?}", read_vec(&program1, &result, "add_two_in").await);
-
-        // todo all people to
         static_assertions::const_assert!(can_pipe(&ENDING_BIND_CONTEXT, &NEXT_STARTING_CONTEXT));
         let pipe_result = pipe(&program2, bindings2, out_bindings2, result);
-        /*         println!("{:?}", read_vec(&program2, &pipe_result, "add_two_in").await); */
+/*         println!("{:?}", read_vec(&program2, &pipe_result, "add_two_in").await); */
         println!("{:?}", read_vec(&program2, &pipe_result, "add_two_result").await);
     }
 }

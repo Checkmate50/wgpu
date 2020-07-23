@@ -1,6 +1,6 @@
 pub use self::wgpu_compute_header::{
-    array_type, bind_vec, can_pipe, compile, has_in_qual, has_out_qual, new_bind_scope, pipe,
-    read_vec, ready_to_run, run, GLSLTYPE, PARAMETER, QUALIFIER, SHADER,
+    array_type, bind_float, bind_vec, bind_vec2, can_pipe, compile, has_in_qual, has_out_qual,
+    new_bind_scope, pipe, read_uvec, read_fvec, ready_to_run, run, GLSLTYPE, PARAMETER, QUALIFIER, SHADER,
 };
 
 pub mod wgpu_compute_header {
@@ -23,24 +23,30 @@ pub mod wgpu_compute_header {
     // Remove spaces between tokens that should be one token
     // Strip off the starting and ending { }
     fn process_body(body: &str) -> String {
-        let re = Regex::new(r"\+(\n| )*\+").unwrap();
+        let plus = Regex::new(r"\+(\n| )*\+").unwrap();
+        let define = Regex::new(r"\#(\n| )*define").unwrap();
         //println!("{:?}", body);
         let in_progress = body.strip_prefix("{").unwrap().strip_suffix("}").unwrap();
-        re.replace_all(in_progress, "++").into_owned()
+        let plus_corrected = plus.replace_all(in_progress, "++").into_owned();
+        define.replace_all(&plus_corrected, "#define").into_owned()
     }
 
     fn stringify_shader(s: &SHADER, b: &ProgramBindings, b_out: &OutProgramBindings) -> String {
         let mut buffer = Vec::new();
         for i in &b.bindings[..] {
-            if i.qual.contains(&QUALIFIER::BUFFER) {
-                buffer.push(format!(
-                    "layout(binding = {}) buffer BINDINGS{} {{\n",
-                    i.binding_number, i.binding_number
-                ));
+            buffer.push(format!(
+                "layout(binding = {}) {} BINDINGS{} {{\n",
+                i.binding_number,
+                if i.qual.contains(&QUALIFIER::BUFFER) {
+                    "buffer"
+                } else if i.qual.contains(&QUALIFIER::UNIFORM) {
+                    "uniform"
+                } else {panic!("You are trying to do something with something that isn't a buffer or uniform")},
+                i.binding_number
+            ));
 
-                buffer.push(i.gtype.to_string() + &i.name + ";\n");
-                buffer.push("};\n".to_string());
-            }
+            buffer.push(i.gtype.to_string() + " " + &i.name + ";\n");
+            buffer.push("};\n".to_string());
         }
         for i in &b_out.bindings[..] {
             if i.qual.contains(&QUALIFIER::BUFFER) {
@@ -49,11 +55,12 @@ pub mod wgpu_compute_header {
                     i.binding_number, i.binding_number
                 ));
 
-                buffer.push(i.gtype.to_string() + &i.name + ";\n");
+                buffer.push(i.gtype.to_string() + " " + &i.name + ";\n");
                 buffer.push("};\n".to_string());
             }
         }
         format!(
+            //todo figure out how to use a non-1 local size
             "#version 450\nlayout(local_size_x = 1) in;\n{}\n\n{}\n",
             buffer.join(""),
             process_body(s.body)
@@ -64,8 +71,8 @@ pub mod wgpu_compute_header {
     fn compile_shader(contents: String, shader: ShaderType, device: &wgpu::Device) -> ShaderModule {
         // Convert our shader(in GLSL) to SPIR-V format
         // https://en.wikipedia.org/wiki/Standard_Portable_Intermediate_Representation
-        print!("{}", contents);
-        print!("\n\n");
+        /*         print!("{}", contents);
+        print!("\n\n"); */
         let mut vert_file = glsl_to_spirv::compile(&contents, shader)
             .unwrap_or_else(|_| panic!("{}: {}", "You gave a bad shader source", contents));
         let mut vs = Vec::new();
@@ -104,30 +111,28 @@ pub mod wgpu_compute_header {
         let mut binding_number = 0;
         let mut out_binding_struct = Vec::new();
         for i in &compute.params[..] {
-            if i.qual.contains(&QUALIFIER::BUFFER) {
-                // Bindings that are kept between runs
-                if i.qual.contains(&QUALIFIER::IN) && !i.qual.contains(&QUALIFIER::OUT) {
-                    binding_struct.push(BINDING {
-                        binding_number: binding_number,
-                        name: i.name.to_string(),
-                        data: None,
-                        size: None,
-                        gtype: i.gtype.clone(),
-                        qual: i.qual.to_vec(),
-                    });
-                    binding_number += 1;
-                // Bindings that are invalidated after a run
-                } else if i.qual.contains(&QUALIFIER::OUT) {
-                    out_binding_struct.push(BINDING {
-                        binding_number: binding_number,
-                        name: i.name.to_string(),
-                        data: None,
-                        size: None,
-                        gtype: i.gtype.clone(),
-                        qual: i.qual.to_vec(),
-                    });
-                    binding_number += 1;
-                }
+            // Bindings that are kept between runs
+            if i.qual.contains(&QUALIFIER::IN) && !i.qual.contains(&QUALIFIER::OUT) {
+                binding_struct.push(BINDING {
+                    binding_number: binding_number,
+                    name: i.name.to_string(),
+                    data: None,
+                    size: None,
+                    gtype: i.gtype.clone(),
+                    qual: i.qual.to_vec(),
+                });
+                binding_number += 1;
+            // Bindings that are invalidated after a run
+            } else if i.qual.contains(&QUALIFIER::OUT) {
+                out_binding_struct.push(BINDING {
+                    binding_number: binding_number,
+                    name: i.name.to_string(),
+                    data: None,
+                    size: None,
+                    gtype: i.gtype.clone(),
+                    qual: i.qual.to_vec(),
+                });
+                binding_number += 1;
             }
         }
 
@@ -140,9 +145,13 @@ pub mod wgpu_compute_header {
             bind_entry.push(wgpu::BindGroupLayoutEntry {
                 binding: i.binding_number,
                 visibility: wgpu::ShaderStage::COMPUTE,
-                ty: wgpu::BindingType::StorageBuffer {
-                    dynamic: false,
-                    readonly: false,
+                ty: if i.qual.contains(&QUALIFIER::UNIFORM) {
+                    wgpu::BindingType::UniformBuffer { dynamic: false }
+                } else {
+                    wgpu::BindingType::StorageBuffer {
+                        dynamic: false,
+                        readonly: false,
+                    }
                 },
             });
         }
@@ -151,9 +160,13 @@ pub mod wgpu_compute_header {
             bind_entry.push(wgpu::BindGroupLayoutEntry {
                 binding: i.binding_number,
                 visibility: wgpu::ShaderStage::COMPUTE,
-                ty: wgpu::BindingType::StorageBuffer {
-                    dynamic: false,
-                    readonly: false,
+                ty: if i.qual.contains(&QUALIFIER::UNIFORM) {
+                    wgpu::BindingType::UniformBuffer { dynamic: false }
+                } else {
+                    wgpu::BindingType::StorageBuffer {
+                        dynamic: false,
+                        readonly: false,
+                    }
                 },
             });
         }
@@ -267,10 +280,14 @@ pub mod wgpu_compute_header {
 
         let buffer = program.device.create_buffer_with_data(
             data,
-            wgpu::BufferUsage::MAP_READ
-                | wgpu::BufferUsage::COPY_DST
-                | wgpu::BufferUsage::STORAGE
-                | wgpu::BufferUsage::COPY_SRC,
+            if binding.qual.contains(&QUALIFIER::UNIFORM) {
+                wgpu::BufferUsage::UNIFORM | wgpu::BufferUsage::COPY_DST
+            } else {
+                wgpu::BufferUsage::MAP_READ
+                    | wgpu::BufferUsage::COPY_DST
+                    | wgpu::BufferUsage::STORAGE
+                    | wgpu::BufferUsage::COPY_SRC
+            },
         );
 
         binding.data = Some(buffer);
@@ -291,6 +308,49 @@ pub mod wgpu_compute_header {
             numbers.as_slice().as_bytes(),
             (numbers.len() * std::mem::size_of::<u32>()) as u64,
             vec![GLSLTYPE::ArrayInt, GLSLTYPE::ArrayUint],
+            name,
+        )
+    }
+
+    pub fn bind_vec2(
+        program: &PROGRAM,
+        bindings: &mut ProgramBindings,
+        out_bindings: &mut OutProgramBindings,
+        numbers: &Vec<f32>,
+        name: String,
+    ) {
+        if numbers.len() % 2 != 0 {
+            panic!("Your trying to bind to vec to but your not giving a vector that can be split into 2's")
+        }
+        bind(
+            program,
+            bindings,
+            out_bindings,
+            numbers.as_slice().as_bytes(),
+            (numbers.len() * std::mem::size_of::<u32>()) as u64,
+            if numbers.len() == 2 {
+                vec![GLSLTYPE::Vec2, GLSLTYPE::ArrayVec2]
+            } else {
+                vec![GLSLTYPE::ArrayVec2]
+            },
+            name,
+        )
+    }
+
+    pub fn bind_float(
+        program: &PROGRAM,
+        bindings: &mut ProgramBindings,
+        out_bindings: &mut OutProgramBindings,
+        numbers: &f32,
+        name: String,
+    ) {
+        bind(
+            program,
+            bindings,
+            out_bindings,
+            numbers.as_bytes(),
+            std::mem::size_of::<f32>() as u64,
+            vec![GLSLTYPE::Float],
             name,
         )
     }
@@ -415,7 +475,11 @@ pub mod wgpu_compute_header {
                 .iter()
                 .find(|i| i.qual.contains(&QUALIFIER::LOOP));
         }
-        let size = if bind.is_none() {1} else {bind.unwrap().size.unwrap()};
+        let size = if bind.is_none() {
+            1
+        } else {
+            bind.unwrap().size.unwrap()
+        };
 
         for i in 0..(out_bindings.bindings.len()) {
             if !(out_bindings.bindings[i].qual.contains(&QUALIFIER::IN)) {
@@ -436,7 +500,6 @@ pub mod wgpu_compute_header {
 
         let mut empty_vec = Vec::new();
 
-        // Todo use an out annotation to find this value
         {
             for i in 0..(buffer_map.len()) {
                 let b = buffer_map.get(&(i as u32)).expect(&format!(
@@ -474,7 +537,7 @@ pub mod wgpu_compute_header {
         out_bindings.bindings
     }
 
-    pub async fn read_vec(program: &PROGRAM, results: &Vec<BINDING>, name: &str) -> Vec<u32> {
+    pub async fn read_uvec(program: &PROGRAM, results: &Vec<BINDING>, name: &str) -> Vec<u32> {
         for i in results.iter() {
             if i.name == name {
                 let result_buffer = i.data.as_ref().unwrap();
@@ -486,6 +549,31 @@ pub mod wgpu_compute_header {
                         .as_slice()
                         .chunks_exact(4)
                         .map(|b| u32::from_ne_bytes(b.try_into().unwrap()))
+                        .collect();
+                    return x;
+                } else {
+                    panic!("failed to run compute on gpu!");
+                }
+            }
+        }
+        panic!(
+            "We didn't find the binding you were looking to read from: {}",
+            name
+        )
+    }
+
+    pub async fn read_fvec(program: &PROGRAM, results: &Vec<BINDING>, name: &str) -> Vec<f32> {
+        for i in results.iter() {
+            if i.name == name {
+                let result_buffer = i.data.as_ref().unwrap();
+                let buffer_future = result_buffer.map_read(0, i.size.unwrap());
+                program.device.poll(wgpu::Maintain::Wait);
+
+                if let Ok(mapping) = buffer_future.await {
+                    let x: Vec<f32> = mapping
+                        .as_slice()
+                        .chunks_exact(4)
+                        .map(|b| f32::from_ne_bytes(b.try_into().unwrap()))
                         .collect();
                     return x;
                 } else {
@@ -547,15 +635,22 @@ pub mod wgpu_compute_header {
     //
     // Find a realistic compute shader and implement it
 
+
+    // End to end boids examples
+
+    // Use github issues for project management
+
     #[derive(Debug, Clone, PartialEq)]
     #[allow(dead_code)]
     pub enum GLSLTYPE {
         Int,
         Uint,
         Float,
+        Vec2,
         ArrayInt,
         ArrayUint,
         ArrayFloat,
+        ArrayVec2,
     }
 
     impl fmt::Display for GLSLTYPE {
@@ -564,9 +659,11 @@ pub mod wgpu_compute_header {
                 GLSLTYPE::Float => write!(f, "float"),
                 GLSLTYPE::Int => write!(f, "int"),
                 GLSLTYPE::Uint => write!(f, "uint"),
+                GLSLTYPE::Vec2 => write!(f, "vec2"),
                 GLSLTYPE::ArrayInt => write!(f, "int[]"),
                 GLSLTYPE::ArrayUint => write!(f, "uint[]"),
                 GLSLTYPE::ArrayFloat => write!(f, "float[]"),
+                GLSLTYPE::ArrayVec2 => write!(f, "vec2[]"),
             }
         }
     }
@@ -582,6 +679,9 @@ pub mod wgpu_compute_header {
         (float) => {
             wgpu_compute_header::GLSLTYPE::Float
         };
+        (vec2) => {
+            wgpu_compute_header::GLSLTYPE::Vec2
+        };
     }
 
     pub const fn array_type(gtype: GLSLTYPE, depth: i64) -> GLSLTYPE {
@@ -590,6 +690,7 @@ pub mod wgpu_compute_header {
                 GLSLTYPE::Float => GLSLTYPE::ArrayFloat,
                 GLSLTYPE::Int => GLSLTYPE::ArrayInt,
                 GLSLTYPE::Uint => GLSLTYPE::ArrayUint,
+                GLSLTYPE::Vec2 => GLSLTYPE::ArrayVec2,
                 x =>
                 /* todo panic!("yikes") I want to panic but I can't as of the current nightly re;ease so we will just return itself*/
                 {
@@ -605,6 +706,7 @@ pub mod wgpu_compute_header {
     #[allow(dead_code)]
     pub enum QUALIFIER {
         BUFFER,
+        UNIFORM,
         // opengl compute shaders don't have in and out variables so these are purely to try and interface at this library level
         IN,
         OUT,
@@ -615,6 +717,9 @@ pub mod wgpu_compute_header {
     macro_rules! qualifying {
         (buffer) => {
             wgpu_compute_header::QUALIFIER::BUFFER
+        };
+        (uniform) => {
+            wgpu_compute_header::QUALIFIER::UNIFORM
         };
         (in) => {
             wgpu_compute_header::QUALIFIER::IN
@@ -639,25 +744,6 @@ pub mod wgpu_compute_header {
         pub params: &'static [PARAMETER],
         pub body: &'static str,
     }
-
-    /*     #[macro_export]
-    macro_rules! add_space {
-        (int) => {
-            "int "
-        };
-        (uint) => {
-            "uint "
-        };
-        (float) => {
-            "float "
-        };
-        (void) => {
-            "void "
-        };
-        ($token:tt) => {
-            stringify!($token)
-        };
-    } */
 
     #[macro_export]
     macro_rules! munch_body {

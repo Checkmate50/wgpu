@@ -5,8 +5,9 @@ extern crate pipeline;
 pub use pipeline::wgpu_compute_header;
 
 pub use pipeline::wgpu_compute_header::{
-    bind_vec, compile, new_bind_scope, read_uvec, ready_to_run, run, SHADER,
+    bind_vec, compile, new_bind_scope, read_vec, ready_to_run, run, SHADER,
 };
+
 pub use static_assertions::const_assert;
 
 async fn execute_gpu() {
@@ -23,26 +24,14 @@ async fn execute_gpu() {
 
     const TRIVIAL: (SHADER, [&str; 32], [&str; 32]) = shader! {
         [[buffer loop in out] uint[]] indices;
+        [[buffer in] uint[]] indices2;
         //[[buffer out] uint[]] result;
         //[... uint] xindex;
         {{
-            uint collatz_iterations(uint n) {
-                uint i = 0;
-                while(n > 1) {
-                    if (mod(n, 2) == 0) {
-                        n = n / 2;
-                    }
-                    else {
-                        n = (3 * n) + 1;
-                    }
-                    i++;
-                }
-                return i;
-            }
-
             void main() {
+                // uint xindex = gl_GlobalInvocationID.x;
                 uint index = gl_GlobalInvocationID.x;
-                indices[index] = collatz_iterations(indices[index]);
+                indices[index] = indices[index]+indices2[index];
             }
         }}
     };
@@ -51,19 +40,11 @@ async fn execute_gpu() {
     const STARTING_BIND_CONTEXT: [&str; 32] = TRIVIAL.1;
 
     let (program, mut bindings, mut out_bindings) = compile(&S).await;
+    let (_, _, mut out_bindings2) = compile(&S).await;
 
     let indices: Vec<u32> = vec![1, 2, 3, 4];
-
-    /*     const BIND_CONTEXT_1: ([&str; 32], bool) = new_bind_scope(&STARTING_BIND_CONTEXT, "indices");
-    const_assert!(BIND_CONTEXT_1.1); */
-
-    macro_rules! update_bind_context {
-        ($bind_context:tt, $bind_name:tt) => {{
-            const BIND_CONTEXT: ([&str; 32], bool) = new_bind_scope(&$bind_context, $bind_name);
-            const_assert!(BIND_CONTEXT.1);
-            BIND_CONTEXT.0
-        }};
-    }
+    let indices2_1: Vec<u32> = vec![1, 2, 3, 4];
+    let indices2_2: Vec<u32> = vec![4, 3, 2, 1];
 
     const BIND_CONTEXT_1: [&str; 32] = update_bind_context!(STARTING_BIND_CONTEXT, "indices");
     bind_vec(
@@ -73,11 +54,34 @@ async fn execute_gpu() {
         &indices,
         "indices".to_string(),
     );
-
     {
+        // Todo have some write or result function that captures/uses the result instead of returning it
         ready_to_run(BIND_CONTEXT_1);
-        let result = run(&program, &mut bindings, out_bindings);
-        println!("{:?}", read_vec(&program, &result, "indices").await);
+        let result1 = run(&program, &mut bindings, out_bindings);
+        println!("{:?}", read_vec(&program, &result1, "indices").await);
+    }
+    const BIND_CONTEXT_3: [&str; 32] = update_bind_context!(STARTING_BIND_CONTEXT, "indices");
+    bind_vec(
+        &program,
+        &mut bindings,
+        &mut out_bindings2,
+        &indices,
+        "indices".to_string(),
+    );
+    {
+        const BIND_CONTEXT_4: [&str; 32] = update_bind_context!(BIND_CONTEXT_3, "indices2");
+        bind_vec(
+            &program,
+            &mut bindings,
+            &mut out_bindings2,
+            &indices2_2,
+            "indices2".to_string(),
+        );
+        {
+            ready_to_run(BIND_CONTEXT_4);
+            let result1 = run(&program, &mut bindings, out_bindings2);
+            println!("{:?}", read_vec(&program, &result1, "indices").await);
+        }
     }
 }
 

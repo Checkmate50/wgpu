@@ -13,6 +13,11 @@ hello: hello
 	#export RUST_BACKTRACE=1 && cargo +nightly run --example hello_compute
 	cargo +nightly run --example hello_compute
 
+.PHONY: boids
+boids: boids
+	#export RUST_BACKTRACE=1 && cargo +nightly run --example boids_compute
+	cargo +nightly run --example boids_compute
+
 release:
 	cargo build --release
 

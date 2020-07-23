@@ -1,80 +1,80 @@
 /* #version 450
 
-    // These should match the Rust constants defined in main.rs
-    #define NUM_PARTICLES 1500
-    #define PARTICLES_PER_GROUP 64
+// These should match the Rust constants defined in main.rs
+#define NUM_PARTICLES 1500
+#define PARTICLES_PER_GROUP 64
 
-    layout(local_size_x = PARTICLES_PER_GROUP) in;
+layout(local_size_x = PARTICLES_PER_GROUP) in;
 
-    struct Particle {
-        vec2 pos;
-        vec2 vel;
-    };
-    layout(std140, set = 0, binding = 0) uniform SimParams {
-        float deltaT;
-        float rule1Distance;
-        float rule2Distance;
-        float rule3Distance;
-        float rule1Scale;
-        float rule2Scale;
-        float rule3Scale;
-    } params;
-    layout(std140, set = 0, binding = 1) buffer SrcParticles {
-        Particle particles[NUM_PARTICLES];
-    } srcParticles;
-    layout(std140, set = 0, binding = 2) buffer DstParticles {
-        Particle particles[NUM_PARTICLES];
-    } dstParticles;
+struct Particle {
+    vec2 pos;
+    vec2 vel;
+};
+layout(std140, set = 0, binding = 0) uniform SimParams {
+    float deltaT;
+    float rule1Distance;
+    float rule2Distance;
+    float rule3Distance;
+    float rule1Scale;
+    float rule2Scale;
+    float rule3Scale;
+} params;
+layout(std140, set = 0, binding = 1) buffer SrcParticles {
+    Particle particles[NUM_PARTICLES];
+} srcParticles;
+layout(std140, set = 0, binding = 2) buffer DstParticles {
+    Particle particles[NUM_PARTICLES];
+} dstParticles;
 
-    void main() {
-        // https://github.com/austinEng/Project6-Vulkan-Flocking/blob/master/data/shaders/computeparticles/particle.comp
-        uint index = gl_GlobalInvocationID.x;
+void main() {
+    // https://github.com/austinEng/Project6-Vulkan-Flocking/blob/master/data/shaders/computeparticles/particle.comp
+    uint index = gl_GlobalInvocationID.x;
 
-        if (index >= NUM_PARTICLES) { return; }
-        vec2 vPos = srcParticles.particles[index].pos;
-        vec2 vVel = srcParticles.particles[index].vel;
-        vec2 cMass = vec2(0.0, 0.0);
-        vec2 cVel = vec2(0.0, 0.0);
-        vec2 colVel = vec2(0.0, 0.0);
-        int cMassCount = 0;
-        int cVelCount = 0;
-        vec2 pos;
-        vec2 vel;
-        for (int i = 0; i < NUM_PARTICLES; ++i) {
-            if (i == index) { continue; }
-            pos = srcParticles.particles[i].pos.xy;
-            vel = srcParticles.particles[i].vel.xy;
-            if (distance(pos, vPos) < params.rule1Distance) {
-                cMass += pos;
-                cMassCount++;
-            }
-            if (distance(pos, vPos) < params.rule2Distance) {
-                colVel -= (pos - vPos);
-            }
-            if (distance(pos, vPos) < params.rule3Distance) {
-                cVel += vel;
-                cVelCount++;
-            }
+    if (index >= NUM_PARTICLES) { return; }
+    vec2 vPos = srcParticles.particles[index].pos;
+    vec2 vVel = srcParticles.particles[index].vel;
+    vec2 cMass = vec2(0.0, 0.0);
+    vec2 cVel = vec2(0.0, 0.0);
+    vec2 colVel = vec2(0.0, 0.0);
+    int cMassCount = 0;
+    int cVelCount = 0;
+    vec2 pos;
+    vec2 vel;
+    for (int i = 0; i < NUM_PARTICLES; ++i) {
+        if (i == index) { continue; }
+        pos = srcParticles.particles[i].pos.xy;
+        vel = srcParticles.particles[i].vel.xy;
+        if (distance(pos, vPos) < params.rule1Distance) {
+            cMass += pos;
+            cMassCount++;
         }
-        if (cMassCount > 0) {
-            cMass = cMass / cMassCount - vPos;
+        if (distance(pos, vPos) < params.rule2Distance) {
+            colVel -= (pos - vPos);
         }
-        if (cVelCount > 0) {
-            cVel = cVel / cVelCount;
+        if (distance(pos, vPos) < params.rule3Distance) {
+            cVel += vel;
+            cVelCount++;
         }
-        vVel += cMass * params.rule1Scale + colVel * params.rule2Scale + cVel * params.rule3Scale;
-        // clamp velocity for a more pleasing simulation.
-        vVel = normalize(vVel) * clamp(length(vVel), 0.0, 0.1);
-        // kinematic update
-        vPos += vVel * params.deltaT;
-        // Wrap around boundary
-        if (vPos.x < -1.0) vPos.x = 1.0;
-        if (vPos.x > 1.0) vPos.x = -1.0;
-        if (vPos.y < -1.0) vPos.y = 1.0;
-        if (vPos.y > 1.0) vPos.y = -1.0;
-        dstParticles.particles[index].pos = vPos;
-        // Write back
-        dstParticles.particles[index].vel = vVel;
+    }
+    if (cMassCount > 0) {
+        cMass = cMass / cMassCount - vPos;
+    }
+    if (cVelCount > 0) {
+        cVel = cVel / cVelCount;
+    }
+    vVel += cMass * params.rule1Scale + colVel * params.rule2Scale + cVel * params.rule3Scale;
+    // clamp velocity for a more pleasing simulation.
+    vVel = normalize(vVel) * clamp(length(vVel), 0.0, 0.1);
+    // kinematic update
+    vPos += vVel * params.deltaT;
+    // Wrap around boundary
+    if (vPos.x < -1.0) vPos.x = 1.0;
+    if (vPos.x > 1.0) vPos.x = -1.0;
+    if (vPos.y < -1.0) vPos.y = 1.0;
+    if (vPos.y > 1.0) vPos.y = -1.0;
+    dstParticles.particles[index].pos = vPos;
+    // Write back
+    dstParticles.particles[index].vel = vVel;
 } */
 
 #[macro_use]
@@ -130,13 +130,13 @@ async fn execute_gpu() {
         vec2 vel;
     }; */
 
-
+    // TODO This is inserted in the wgpu example
 
     void main() {
         // https://github.com/austinEng/Project6-Vulkan-Flocking/blob/master/data/shaders/computeparticles/particle.comp
         uint index = gl_GlobalInvocationID.x;
 
-        /*     if (index >= NUM_PARTICLES) { return; } */
+    /*     if (index >= NUM_PARTICLES) { return; } */
         vec2 vPos = srcParticlePos[index];
         vec2 vVel = srcParticleVel[index];
         vec2 cMass = vec2(0.0, 0.0);
@@ -146,7 +146,7 @@ async fn execute_gpu() {
         int cVelCount = 0;
         vec2 pos;
         vec2 vel;
-        // TODO The iteration of the number of particles was set by a #define value
+        // The iteration of the number of particles was set by a #define value
         for (int i = 0; i < 2; ++i) {
             if (i == index) { continue; }
             pos = srcParticlePos[i].xy;
@@ -186,7 +186,7 @@ async fn execute_gpu() {
             }}
         };
 
-    let mut srcParticlePos: Vec<f32> = vec![0.0, 0.0, 0.3, 0.2];
+    let mut srcParticlePos: Vec<f32> = vec![0.0, 0.0, 0.3, 0.2, 0.5];
     let mut srcParticleVel: Vec<f32> = vec![0.01, -0.02, -0.05, -0.03];
     let deltaT: f32 = 0.04;
     let rule1Distance: f32 = 0.1;

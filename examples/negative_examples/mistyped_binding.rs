@@ -52,7 +52,7 @@ async fn execute_gpu() {
 
     let (program, mut bindings, mut out_bindings) = compile(&S).await;
 
-    let indices: Vec<u32> = vec![1, 2, 3, 4];
+    let indices: Vec<f32> = vec![1.0, 2.0, 3.0, 4.0];
 
     /*     const BIND_CONTEXT_1: ([&str; 32], bool) = new_bind_scope(&STARTING_BIND_CONTEXT, "indices");
     const_assert!(BIND_CONTEXT_1.1); */
@@ -66,7 +66,7 @@ async fn execute_gpu() {
     }
 
     const BIND_CONTEXT_1: [&str; 32] = update_bind_context!(STARTING_BIND_CONTEXT, "indices");
-    bind_vec(
+    bind_vec2(
         &program,
         &mut bindings,
         &mut out_bindings,
