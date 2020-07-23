@@ -1,6 +1,6 @@
 pub use self::wgpu_compute_header::{
-    array_type, bind_vec, can_pipe, compile, has_in_qual, has_out_qual, new_bind_scope, read_vec,
-    ready_to_run, run, GLSLTYPE, PARAMETER, QUALIFIER, SHADER,
+    array_type, bind_vec, can_pipe, compile, has_in_qual, has_out_qual, new_bind_scope, pipe,
+    read_vec, ready_to_run, run, GLSLTYPE, PARAMETER, QUALIFIER, SHADER,
 };
 
 pub mod wgpu_compute_header {
@@ -20,41 +20,13 @@ pub mod wgpu_compute_header {
 
     use zerocopy::AsBytes as _;
 
-    // Add spaces after a bunch of keywords to create valid code
-    // Also does some psuedo tokenization
+    // Remove spaces between tokens that should be one token
+    // Strip off the starting and ending { }
     fn process_body(body: &str) -> String {
         let re = Regex::new(r"\+(\n| )*\+").unwrap();
-        let re2 = Regex::new(r"(\n| )*\{").unwrap();
-        println!("{:?}", body);
+        //println!("{:?}", body);
         let in_progress = body.strip_prefix("{").unwrap().strip_suffix("}").unwrap();
-        let in_progress2 = re.replace_all(in_progress, "++").into_owned();
-        re2.replace_all(&in_progress2, "{").into_owned()
-
-        /*             .replace("+ +", "++")
-        .replace(r"+\n+", "++") */
-        /*             .replace("(", " ( ")
-        .replace(")", " ) ")
-        .replace(",", " , ")
-        .split_whitespace()
-        .map(|x| match x {
-            "void" => "void ",
-            "int" => "int ",
-            "uint" => "uint ",
-            "float" => "float ",
-            "return" => "return ",
-            "if" => "if ",
-            "else" => "else ",
-            "," => ", ",
-            "{" => "{\n",
-            ";" => ";\n",
-            "=" => " = ",
-            "==" => " == ",
-            "!=" => " != ",
-            "/" => " / ",
-            "*" => " * ",
-            x => x,
-        })
-        .collect::<String>() */
+        re.replace_all(in_progress, "++").into_owned()
     }
 
     fn stringify_shader(s: &SHADER, b: &ProgramBindings, b_out: &OutProgramBindings) -> String {
@@ -285,10 +257,7 @@ pub mod wgpu_compute_header {
                 &mut out_bindings.bindings[x]
             }
         };
-        // Todo re-enable this
-        /*     if binding.data.is_some() {
-            panic!("You are trying to bind to something that has already been bound");
-        } */
+
         if !acceptable_types.contains(&binding.gtype) {
             panic!(
                 "The type of the value you provided is not what was expected, {:?}",
@@ -424,28 +393,29 @@ pub mod wgpu_compute_header {
         return buffer_map;
     }
 
-    pub async fn run(
+    pub fn run(
         program: &PROGRAM,
         bindings: &ProgramBindings,
         mut out_bindings: OutProgramBindings,
-    ) -> Vec<u32> {
+    ) -> Vec<BINDING> {
         let mut encoder = program
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
-        // Look for a loop qualifier in bindings, if it isn't there, it must be in out_bindings
+        // Look for a loop qualifier in bindings, if it isn't there, it must be in out_bindings or we just give 1
         // Use this to get the size that the program should run over
         let mut bind = bindings
             .bindings
             .iter()
             .find(|i| i.qual.contains(&QUALIFIER::LOOP));
+
         if bind.is_none() {
             bind = out_bindings
                 .bindings
                 .iter()
                 .find(|i| i.qual.contains(&QUALIFIER::LOOP));
         }
-        let size = bind.unwrap().size.unwrap();
+        let size = if bind.is_none() {1} else {bind.unwrap().size.unwrap()};
 
         for i in 0..(out_bindings.bindings.len()) {
             if !(out_bindings.bindings[i].qual.contains(&QUALIFIER::IN)) {
@@ -467,7 +437,6 @@ pub mod wgpu_compute_header {
         let mut empty_vec = Vec::new();
 
         // Todo use an out annotation to find this value
-        let result_buffer_num = 0;
         {
             for i in 0..(buffer_map.len()) {
                 let b = buffer_map.get(&(i as u32)).expect(&format!(
@@ -502,37 +471,7 @@ pub mod wgpu_compute_header {
         }
         program.queue.submit(&[encoder.finish()]);
 
-        let result_buffer = buffer_map.get(&result_buffer_num).unwrap();
-        // Note that we're not calling `.await` here.
-        let buffer_future = result_buffer
-            .data
-            .as_ref()
-            .unwrap()
-            .map_read(0, result_buffer.size.unwrap());
-
-        let mut result_vec = Vec::new();
-        for (k, v) in buffer_map
-            .into_iter()
-            .filter(|&(k, v)| v.qual.contains(&QUALIFIER::OUT))
-        {
-            result_vec.push(v);
-        }
-
-        // Poll the device in a blocking manner so that our future resolves.
-        // In an actual application, `device.poll(...)` should
-        // be called in an event loop or on another thread.
-        program.device.poll(wgpu::Maintain::Wait);
-
-        if let Ok(mapping) = buffer_future.await {
-            let x: Vec<u32> = mapping
-                .as_slice()
-                .chunks_exact(4)
-                .map(|b| u32::from_ne_bytes(b.try_into().unwrap()))
-                .collect();
-            x
-        } else {
-            panic!("failed to run compute on gpu!")
-        }
+        out_bindings.bindings
     }
 
     pub async fn read_vec(program: &PROGRAM, results: &Vec<BINDING>, name: &str) -> Vec<u32> {
@@ -554,11 +493,44 @@ pub mod wgpu_compute_header {
                 }
             }
         }
-        panic!("We didn't find the binding you were looking to read from")
+        panic!(
+            "We didn't find the binding you were looking to read from: {}",
+            name
+        )
     }
 
-    pub fn pipe(program: &PROGRAM, result_vec: Vec<BINDING>) -> Vec<BINDING> {
-        panic!("unimplemented")
+    pub fn pipe(
+        program: &PROGRAM,
+        mut in_bindings: ProgramBindings,
+        mut out_bindings: OutProgramBindings,
+        result_vec: Vec<BINDING>,
+    ) -> Vec<BINDING> {
+        for i in result_vec {
+            let binding = match in_bindings.bindings.iter().position(|x| x.name == i.name) {
+                Some(x) => &mut in_bindings.bindings[x],
+                None => {
+                    let x = out_bindings
+                        .bindings
+                        .iter()
+                        .position(|x| x.name == i.name)
+                        .expect("We couldn't find the binding");
+                    &mut out_bindings.bindings[x]
+                }
+            };
+
+            /*          todo Check the types somewhere
+            if !acceptable_types.contains(&binding.gtype) {
+                panic!(
+                    "The type of the value you provided is not what was expected, {:?}",
+                    &binding.gtype
+                );
+            } */
+
+            binding.data = Some(i.data.unwrap());
+            binding.size = Some(i.size.unwrap());
+        }
+
+        run(program, &in_bindings, out_bindings)
     }
 
     // TODO

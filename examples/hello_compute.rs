@@ -5,7 +5,7 @@ extern crate pipeline;
 pub use pipeline::wgpu_compute_header;
 
 pub use pipeline::wgpu_compute_header::{
-    bind_vec, compile, new_bind_scope, ready_to_run, run, SHADER,
+    bind_vec, compile, new_bind_scope, read_vec, ready_to_run, run, SHADER,
 };
 pub use static_assertions::const_assert;
 
@@ -22,36 +22,35 @@ async fn execute_gpu() {
     //      the size of any out buffers that need to be created
 
     const TRIVIAL: (SHADER, [&str; 32], [&str; 32]) = shader! {
-            [[buffer loop in out] uint[]] indices;
-            //[[buffer out] uint[]] result;
-            //[... uint] xindex;
-            {{
-    uint collatz_iterations(uint n) {
-        uint i = 0;
-        while(n != 1) {
-            if (mod(n, 2) == 0) {
-                n = n / 2;
+        [[buffer loop in out] uint[]] indices;
+        //[[buffer out] uint[]] result;
+        //[... uint] xindex;
+        {{
+            uint collatz_iterations(uint n) {
+                uint i = 0;
+                while(n > 1) {
+                    if (mod(n, 2) == 0) {
+                        n = n / 2;
+                    }
+                    else {
+                        n = (3 * n) + 1;
+                    }
+                    i++;
+                }
+                return i;
             }
-            else {
-                n = (3 * n) + 1;
-            }
-            i++;
-        }
-        return i;
-    }
 
-    void main() {
-        uint index = gl_GlobalInvocationID.x;
-        indices[index] = collatz_iterations(indices[index]);
-    }
-            }}
-        };
+            void main() {
+                uint index = gl_GlobalInvocationID.x;
+                indices[index] = collatz_iterations(indices[index]);
+            }
+        }}
+    };
 
     const S: SHADER = TRIVIAL.0;
     const STARTING_BIND_CONTEXT: [&str; 32] = TRIVIAL.1;
 
     let (program, mut bindings, mut out_bindings) = compile(&S).await;
-    let (_, _, mut out_bindings2) = compile(&S).await;
 
     let indices: Vec<u32> = vec![1, 2, 3, 4];
 
@@ -76,9 +75,9 @@ async fn execute_gpu() {
     );
 
     {
-        // Todo have some write or result function that captures/uses the result instead of returning it
         ready_to_run(BIND_CONTEXT_1);
-        println!("{:?}", run(&program, &mut bindings, out_bindings).await);
+        let result = run(&program, &mut bindings, out_bindings);
+        println!("{:?}", read_vec(&program, &result, "indices").await);
     }
 }
 

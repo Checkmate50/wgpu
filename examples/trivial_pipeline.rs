@@ -5,7 +5,7 @@ extern crate pipeline;
 pub use pipeline::wgpu_compute_header;
 
 pub use pipeline::wgpu_compute_header::{
-    bind_vec, can_pipe, compile, new_bind_scope, ready_to_run, run, SHADER,
+    bind_vec, can_pipe, compile, new_bind_scope, pipe, read_vec, ready_to_run, run, SHADER,
 };
 
 pub use static_assertions::const_assert;
@@ -35,12 +35,13 @@ async fn execute_gpu() {
     };
 
     const ADD_TWO: (SHADER, [&str; 32], [&str; 32]) = shader! {
-        [[buffer loop in out] uint[]] add_two_in;
+        [[buffer loop in] uint[]] add_two_in;
+        [[buffer out] uint[]] add_two_result;
         {{
             void main() {
                 // uint xindex = gl_GlobalInvocationID.x;
                 uint index = gl_GlobalInvocationID.x;
-                add_two_in[index] = add_two_in[index]+2;
+                add_two_result[index] = add_two_in[index]+2;
             }
         }}
     };
@@ -52,7 +53,7 @@ async fn execute_gpu() {
 
     const S2: SHADER = ADD_TWO.0;
     const NEXT_STARTING_CONTEXT: [&str; 32] = ADD_TWO.1;
-    let (program2, _, _) = compile(&S1).await;
+    let (program2, bindings2, out_bindings2) = compile(&S2).await;
 
     let indices: Vec<u32> = vec![1, 2, 3, 4];
 
@@ -65,13 +66,13 @@ async fn execute_gpu() {
         "add_one_in".to_string(),
     );
     {
-        // Todo have some write or result function that captures/uses the result instead of returning it
-        static_assertions::const_assert!(can_pipe(&ENDING_BIND_CONTEXT, &NEXT_STARTING_CONTEXT));
         ready_to_run(BIND_CONTEXT_1);
-        // returns some result struct
         let result = run(&program1, &mut bindings1, out_bindings1);
-        let x = read_vec(result "add_one_in")
-        let return_result = pipe(&program2, result);
+        println!("{:?}", read_vec(&program1, &result, "add_two_in").await);
+        static_assertions::const_assert!(can_pipe(&ENDING_BIND_CONTEXT, &NEXT_STARTING_CONTEXT));
+        let pipe_result = pipe(&program2, bindings2, out_bindings2, result);
+/*         println!("{:?}", read_vec(&program2, &pipe_result, "add_two_in").await); */
+        println!("{:?}", read_vec(&program2, &pipe_result, "add_two_result").await);
     }
 }
 
