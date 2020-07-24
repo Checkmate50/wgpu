@@ -3,9 +3,14 @@ extern crate pipeline;
 
 // use for the shader! macro
 pub use pipeline::wgpu_compute_header;
+pub use pipeline::shared;
 
 pub use pipeline::wgpu_compute_header::{
-    bind_vec, compile, new_bind_scope, read_vec, ready_to_run, run, SHADER,
+    bind_vec, compile, run, SHADER, read_uvec,
+};
+
+pub use pipeline::shared::{
+    new_bind_scope, ready_to_run,
 };
 
 pub use static_assertions::const_assert;
@@ -67,7 +72,7 @@ async fn execute_gpu() {
             // Todo have some write or result function that captures/uses the result instead of returning it
             ready_to_run(BIND_CONTEXT_2);
             let result1 = run(&program, &mut bindings, out_bindings);
-            println!("{:?}", read_vec(&program, &result1, "indices").await);
+            println!("{:?}", read_uvec(&program, &result1, "indices").await);
         }
     }
     const BIND_CONTEXT_3: [&str; 32] = update_bind_context!(STARTING_BIND_CONTEXT, "indices");
@@ -90,7 +95,7 @@ async fn execute_gpu() {
         {
             ready_to_run(BIND_CONTEXT_4);
             let result1 = run(&program, &mut bindings, out_bindings2);
-            println!("{:?}", read_vec(&program, &result1, "indices").await);
+            println!("{:?}", read_uvec(&program, &result1, "indices").await);
         }
     }
 }

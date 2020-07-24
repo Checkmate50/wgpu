@@ -1,35 +1,21 @@
 pub use self::wgpu_compute_header::{
-    array_type, bind_float, bind_vec, bind_vec2, can_pipe, compile, has_in_qual, has_out_qual,
-    new_bind_scope, pipe, read_uvec, read_fvec, ready_to_run, run, GLSLTYPE, PARAMETER, QUALIFIER, SHADER,
+    bind_float, bind_vec, bind_vec2, compile, has_in_qual, has_out_qual, pipe, read_fvec,
+    read_uvec, run, PARAMETER, SHADER,
 };
 
 pub mod wgpu_compute_header {
-    use wgpu::ShaderModule;
-
     use glsl_to_spirv::ShaderType;
-
-    use std::io::Read;
-
-    use std::fmt;
 
     use std::collections::HashMap;
 
-    use std::convert::TryInto;
-
-    use regex::Regex;
-
     use zerocopy::AsBytes as _;
 
-    // Remove spaces between tokens that should be one token
-    // Strip off the starting and ending { }
-    fn process_body(body: &str) -> String {
-        let plus = Regex::new(r"\+(\n| )*\+").unwrap();
-        let define = Regex::new(r"\#(\n| )*define").unwrap();
-        //println!("{:?}", body);
-        let in_progress = body.strip_prefix("{").unwrap().strip_suffix("}").unwrap();
-        let plus_corrected = plus.replace_all(in_progress, "++").into_owned();
-        define.replace_all(&plus_corrected, "#define").into_owned()
-    }
+    use std::convert::TryInto;
+
+    use crate::shared::{
+        compile_shader, process_body, OutProgramBindings, ProgramBindings, BINDING, GLSLTYPE,
+        QUALIFIER,
+    };
 
     fn stringify_shader(s: &SHADER, b: &ProgramBindings, b_out: &OutProgramBindings) -> String {
         let mut buffer = Vec::new();
@@ -65,42 +51,6 @@ pub mod wgpu_compute_header {
             buffer.join(""),
             process_body(s.body)
         )
-    }
-
-    // Read in a given file that should be a certain shader type and create a shader module out of it
-    fn compile_shader(contents: String, shader: ShaderType, device: &wgpu::Device) -> ShaderModule {
-        // Convert our shader(in GLSL) to SPIR-V format
-        // https://en.wikipedia.org/wiki/Standard_Portable_Intermediate_Representation
-        /*         print!("{}", contents);
-        print!("\n\n"); */
-        let mut vert_file = glsl_to_spirv::compile(&contents, shader)
-            .unwrap_or_else(|_| panic!("{}: {}", "You gave a bad shader source", contents));
-        let mut vs = Vec::new();
-        vert_file
-            .read_to_end(&mut vs)
-            .expect("Somehow reading the file got interrupted");
-        // Take the shader, ...,  and return
-        device.create_shader_module(&wgpu::read_spirv(std::io::Cursor::new(&vs[..])).unwrap())
-    }
-
-    #[derive(Debug)]
-    pub struct BINDING {
-        binding_number: u32,
-        name: String,
-        data: Option<wgpu::Buffer>,
-        size: Option<u64>,
-        gtype: GLSLTYPE,
-        qual: Vec<QUALIFIER>,
-    }
-
-    #[derive(Debug)]
-    pub struct ProgramBindings {
-        bindings: Vec<BINDING>,
-    }
-
-    #[derive(Debug)]
-    pub struct OutProgramBindings {
-        bindings: Vec<BINDING>,
     }
 
     fn create_bindings(
@@ -355,40 +305,6 @@ pub mod wgpu_compute_header {
         )
     }
 
-    const fn string_compare(string1: &str, string2: &str) -> bool {
-        let str1 = string1.as_bytes();
-        let str2 = string2.as_bytes();
-        if str1.len() != str2.len() {
-            return false;
-        }
-        let mut acc = 0;
-        while acc < str1.len() {
-            if str1[acc] != str2[acc] {
-                return false;
-            }
-            acc += 1;
-        }
-        return true;
-    }
-
-    pub const fn new_bind_scope(
-        bind_context: &'static [&'static str; 32],
-        bind_name: &'static str,
-    ) -> ([&'static str; 32], bool) {
-        let mut acc = 0;
-        let mut found_it = false;
-        let mut new_bind_context = [""; 32];
-        while acc < 32 {
-            if string_compare(bind_context[acc], bind_name) {
-                found_it = true;
-            } else {
-                new_bind_context[acc] = bind_context[acc];
-            }
-            acc += 1;
-        }
-        (new_bind_context, found_it)
-    }
-
     #[macro_export]
     macro_rules! update_bind_context {
         ($bind_context:tt, $bind_name:tt) => {{
@@ -396,41 +312,6 @@ pub mod wgpu_compute_header {
             const_assert!(BIND_CONTEXT.1);
             BIND_CONTEXT.0
         }};
-    }
-
-    pub const fn ready_to_run(bind_context: [&'static str; 32]) -> bool {
-        let mut acc = 0;
-        while acc < 32 {
-            if !string_compare(bind_context[acc], "") {
-                return false;
-            }
-            acc += 1;
-        }
-        true
-    }
-
-    const fn params_contain_string(list_of_names: &[&str; 32], name: &str) -> bool {
-        let mut acc = 0;
-        while acc < 32 {
-            if string_compare(list_of_names[acc], name) {
-                return true;
-            }
-            acc += 1;
-        }
-        false
-    }
-
-    pub const fn can_pipe(s_out: &[&str; 32], s_in: &[&str; 32]) -> bool {
-        let mut acc = 0;
-        while acc < 32 {
-            if !string_compare(s_out[acc], "") {
-                if !params_contain_string(s_in, s_out[acc]) {
-                    return false;
-                }
-            }
-            acc += 1;
-        }
-        true
     }
 
     pub fn compute(cpass: &mut wgpu::ComputePass, length: u32) {
@@ -621,117 +502,6 @@ pub mod wgpu_compute_header {
         run(program, &in_bindings, out_bindings)
     }
 
-    // TODO
-    // Develop the syntax for binding a variable
-    //     Scoping for bind operations?
-    //
-    // HOLD
-    // const shader for statically checking names?
-    // Use specification to try an create more static checking?
-    //
-    // Maybe work on result and getting outputs
-    //
-    // Syntax/annotations to get rid of magic variables in shader like gl_GlobalInvocationID.x?
-    //
-    // Find a realistic compute shader and implement it
-
-
-    // End to end boids examples
-
-    // Use github issues for project management
-
-    #[derive(Debug, Clone, PartialEq)]
-    #[allow(dead_code)]
-    pub enum GLSLTYPE {
-        Int,
-        Uint,
-        Float,
-        Vec2,
-        ArrayInt,
-        ArrayUint,
-        ArrayFloat,
-        ArrayVec2,
-    }
-
-    impl fmt::Display for GLSLTYPE {
-        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-            match self {
-                GLSLTYPE::Float => write!(f, "float"),
-                GLSLTYPE::Int => write!(f, "int"),
-                GLSLTYPE::Uint => write!(f, "uint"),
-                GLSLTYPE::Vec2 => write!(f, "vec2"),
-                GLSLTYPE::ArrayInt => write!(f, "int[]"),
-                GLSLTYPE::ArrayUint => write!(f, "uint[]"),
-                GLSLTYPE::ArrayFloat => write!(f, "float[]"),
-                GLSLTYPE::ArrayVec2 => write!(f, "vec2[]"),
-            }
-        }
-    }
-
-    #[macro_export]
-    macro_rules! typing {
-        (uint) => {
-            wgpu_compute_header::GLSLTYPE::Uint
-        };
-        (int) => {
-            wgpu_compute_header::GLSLTYPE::Int
-        };
-        (float) => {
-            wgpu_compute_header::GLSLTYPE::Float
-        };
-        (vec2) => {
-            wgpu_compute_header::GLSLTYPE::Vec2
-        };
-    }
-
-    pub const fn array_type(gtype: GLSLTYPE, depth: i64) -> GLSLTYPE {
-        if depth == 1 {
-            match gtype {
-                GLSLTYPE::Float => GLSLTYPE::ArrayFloat,
-                GLSLTYPE::Int => GLSLTYPE::ArrayInt,
-                GLSLTYPE::Uint => GLSLTYPE::ArrayUint,
-                GLSLTYPE::Vec2 => GLSLTYPE::ArrayVec2,
-                x =>
-                /* todo panic!("yikes") I want to panic but I can't as of the current nightly re;ease so we will just return itself*/
-                {
-                    x
-                }
-            }
-        } else {
-            gtype
-        }
-    }
-
-    #[derive(Debug, PartialEq, Clone)]
-    #[allow(dead_code)]
-    pub enum QUALIFIER {
-        BUFFER,
-        UNIFORM,
-        // opengl compute shaders don't have in and out variables so these are purely to try and interface at this library level
-        IN,
-        OUT,
-        LOOP,
-    }
-
-    #[macro_export]
-    macro_rules! qualifying {
-        (buffer) => {
-            wgpu_compute_header::QUALIFIER::BUFFER
-        };
-        (uniform) => {
-            wgpu_compute_header::QUALIFIER::UNIFORM
-        };
-        (in) => {
-            wgpu_compute_header::QUALIFIER::IN
-        };
-        (out) => {
-            wgpu_compute_header::QUALIFIER::OUT
-        };
-        (loop) => {
-            wgpu_compute_header::QUALIFIER::LOOP
-        };
-    }
-
     #[derive(Debug)]
     pub struct PARAMETER {
         pub qual: &'static [QUALIFIER],
@@ -743,22 +513,6 @@ pub mod wgpu_compute_header {
     pub struct SHADER {
         pub params: &'static [PARAMETER],
         pub body: &'static str,
-    }
-
-    #[macro_export]
-    macro_rules! munch_body {
-        () => {};
-        ($token:tt) => {stringify!($token)};
-        ($token:tt $($rest:tt)*) =>
-        {
-            concat!(stringify!($token), munch_body!($($rest)*))
-        };
-    }
-
-    #[macro_export]
-    macro_rules! count_brackets {
-        () => {0};
-        ($brack:tt $($rest:tt)*) => {1 + count_brackets!($($rest)*)};
     }
 
     pub const fn has_in_qual(p: &[QUALIFIER]) -> bool {
@@ -805,7 +559,7 @@ pub mod wgpu_compute_header {
         {
             const S : &[wgpu_compute_header::PARAMETER] = &[$(
                 wgpu_compute_header::PARAMETER{qual:&[$(qualifying!($qualifier)),*],
-                                                      gtype:wgpu_compute_header::array_type(typing!($type), count_brackets!($($brack)*)),
+                                                      gtype:shared::array_type(typing!($type), count_brackets!($($brack)*)),
                                                       name:stringify!($param)}),*];
 
 

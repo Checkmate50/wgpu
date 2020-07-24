@@ -3,10 +3,15 @@ extern crate pipeline;
 
 // use for the shader! macro
 pub use pipeline::wgpu_compute_header;
+pub use pipeline::shared;
 
 pub use pipeline::wgpu_compute_header::{
-    bind_vec, compile, new_bind_scope, read_uvec, ready_to_run, run, SHADER,
+    bind_vec, compile,  read_uvec,  run, SHADER,
 };
+pub use pipeline::shared::{
+new_bind_scope, ready_to_run,
+};
+
 pub use static_assertions::const_assert;
 
 async fn execute_gpu() {
@@ -77,7 +82,7 @@ async fn execute_gpu() {
     {
         ready_to_run(BIND_CONTEXT_1);
         let result = run(&program, &mut bindings, out_bindings);
-        println!("{:?}", read_vec(&program, &result, "indices").await);
+        println!("{:?}", read_uvec(&program, &result, "indices").await);
     }
 }
 

@@ -9,14 +9,18 @@ pipeline:
 	cargo +nightly run --example trivial_pipeline
 
 .PHONY: hello
-hello: hello
+hello:
 	#export RUST_BACKTRACE=1 && cargo +nightly run --example hello_compute
 	cargo +nightly run --example hello_compute
 
 .PHONY: boids
-boids: boids
+boids:
 	#export RUST_BACKTRACE=1 && cargo +nightly run --example boids_compute
 	cargo +nightly run --example boids_compute
+
+.PHONY: triangle
+triangle:
+	cargo +nightly run --example hello_triangle
 
 release:
 	cargo build --release

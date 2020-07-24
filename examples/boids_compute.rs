@@ -82,10 +82,15 @@ extern crate pipeline;
 
 // use for the shader! macro
 pub use pipeline::wgpu_compute_header;
+pub use pipeline::shared;
 
 pub use pipeline::wgpu_compute_header::{
-    bind_float, bind_vec, bind_vec2, compile, new_bind_scope, read_fvec, ready_to_run, run, SHADER,
+    bind_float, bind_vec, bind_vec2, compile,  read_fvec,  run, SHADER,
 };
+pub use pipeline::shared::{
+new_bind_scope,ready_to_run,
+};
+
 pub use static_assertions::const_assert;
 
 async fn execute_gpu() {
@@ -195,7 +200,7 @@ async fn execute_gpu() {
     let rule1Scale: f32 = 0.02;
     let rule2Scale: f32 = 0.05;
     let rule3Scale: f32 = 0.005;
-    while true {
+    loop {
         const S: SHADER = BOIDS.0;
         const STARTING_BIND_CONTEXT: [&str; 32] = BOIDS.1;
 

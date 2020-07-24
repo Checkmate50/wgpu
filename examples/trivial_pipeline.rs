@@ -3,9 +3,13 @@ extern crate pipeline;
 
 // use for the shader! macro
 pub use pipeline::wgpu_compute_header;
+pub use pipeline::shared;
 
 pub use pipeline::wgpu_compute_header::{
-    bind_vec, can_pipe, compile, new_bind_scope, pipe, read_vec, ready_to_run, run, SHADER,
+    bind_vec, compile,  pipe, read_uvec,  run, SHADER,
+};
+pub use pipeline::shared::{
+    can_pipe, new_bind_scope, ready_to_run,
 };
 
 pub use static_assertions::const_assert;
@@ -24,7 +28,7 @@ async fn execute_gpu() {
 
     const ADD_ONE: (SHADER, [&str; 32], [&str; 32]) = shader! {
         [[buffer loop in] uint[]] add_one_in;
-        // todo 
+        // todo
         // ->
         // [[varying in] uint] add_one_int;
         [[buffer out] uint[]] add_two_in;
@@ -72,13 +76,13 @@ async fn execute_gpu() {
     {
         ready_to_run(BIND_CONTEXT_1);
         let result = run(&program1, &mut bindings1, out_bindings1);
-        println!("{:?}", read_vec(&program1, &result, "add_two_in").await);
+        println!("{:?}", read_uvec(&program1, &result, "add_two_in").await);
 
         // todo all people to
         static_assertions::const_assert!(can_pipe(&ENDING_BIND_CONTEXT, &NEXT_STARTING_CONTEXT));
         let pipe_result = pipe(&program2, bindings2, out_bindings2, result);
         /*         println!("{:?}", read_vec(&program2, &pipe_result, "add_two_in").await); */
-        println!("{:?}", read_vec(&program2, &pipe_result, "add_two_result").await);
+        println!("{:?}", read_uvec(&program2, &pipe_result, "add_two_result").await);
     }
 }
 
