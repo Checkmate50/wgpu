@@ -1,95 +1,14 @@
-/* #version 450
-
-    // These should match the Rust constants defined in main.rs
-    #define NUM_PARTICLES 1500
-    #define PARTICLES_PER_GROUP 64
-
-    layout(local_size_x = PARTICLES_PER_GROUP) in;
-
-    struct Particle {
-        vec2 pos;
-        vec2 vel;
-    };
-    layout(std140, set = 0, binding = 0) uniform SimParams {
-        float deltaT;
-        float rule1Distance;
-        float rule2Distance;
-        float rule3Distance;
-        float rule1Scale;
-        float rule2Scale;
-        float rule3Scale;
-    } params;
-    layout(std140, set = 0, binding = 1) buffer SrcParticles {
-        Particle particles[NUM_PARTICLES];
-    } srcParticles;
-    layout(std140, set = 0, binding = 2) buffer DstParticles {
-        Particle particles[NUM_PARTICLES];
-    } dstParticles;
-
-    void main() {
-        // https://github.com/austinEng/Project6-Vulkan-Flocking/blob/master/data/shaders/computeparticles/particle.comp
-        uint index = gl_GlobalInvocationID.x;
-
-        if (index >= NUM_PARTICLES) { return; }
-        vec2 vPos = srcParticles.particles[index].pos;
-        vec2 vVel = srcParticles.particles[index].vel;
-        vec2 cMass = vec2(0.0, 0.0);
-        vec2 cVel = vec2(0.0, 0.0);
-        vec2 colVel = vec2(0.0, 0.0);
-        int cMassCount = 0;
-        int cVelCount = 0;
-        vec2 pos;
-        vec2 vel;
-        for (int i = 0; i < NUM_PARTICLES; ++i) {
-            if (i == index) { continue; }
-            pos = srcParticles.particles[i].pos.xy;
-            vel = srcParticles.particles[i].vel.xy;
-            if (distance(pos, vPos) < params.rule1Distance) {
-                cMass += pos;
-                cMassCount++;
-            }
-            if (distance(pos, vPos) < params.rule2Distance) {
-                colVel -= (pos - vPos);
-            }
-            if (distance(pos, vPos) < params.rule3Distance) {
-                cVel += vel;
-                cVelCount++;
-            }
-        }
-        if (cMassCount > 0) {
-            cMass = cMass / cMassCount - vPos;
-        }
-        if (cVelCount > 0) {
-            cVel = cVel / cVelCount;
-        }
-        vVel += cMass * params.rule1Scale + colVel * params.rule2Scale + cVel * params.rule3Scale;
-        // clamp velocity for a more pleasing simulation.
-        vVel = normalize(vVel) * clamp(length(vVel), 0.0, 0.1);
-        // kinematic update
-        vPos += vVel * params.deltaT;
-        // Wrap around boundary
-        if (vPos.x < -1.0) vPos.x = 1.0;
-        if (vPos.x > 1.0) vPos.x = -1.0;
-        if (vPos.y < -1.0) vPos.y = 1.0;
-        if (vPos.y > 1.0) vPos.y = -1.0;
-        dstParticles.particles[index].pos = vPos;
-        // Write back
-        dstParticles.particles[index].vel = vVel;
-} */
-
 #[macro_use]
 extern crate pipeline;
 
 // use for the shader! macro
-pub use pipeline::wgpu_compute_header;
 pub use pipeline::shared;
+pub use pipeline::wgpu_compute_header;
 
-pub use pipeline::wgpu_compute_header::{
-    bind_float, bind_vec, bind_vec2, compile,  read_fvec,  run, SHADER,
-};
 pub use pipeline::shared::{
-new_bind_scope,ready_to_run,
+    bind_float, bind_vec, bind_vec3, is_gl_builtin, new_bind_scope, ready_to_run,
 };
+pub use pipeline::wgpu_compute_header::{compile, read_fvec3, run, ComputeShader};
 
 pub use static_assertions::const_assert;
 
@@ -106,7 +25,7 @@ async fn execute_gpu() {
     //      the size of any out buffers that need to be created
 
     // TODO how to set a work group larger than 1?
-    const BOIDS: (SHADER, [&str; 32], [&str; 32]) = shader! {
+    const BOIDS: (ComputeShader, [&str; 32], [&str; 32]) = compute_shader! {
         [[uniform in] float] deltaT;
         [[uniform in] float] rule1Distance;
         [[uniform in] float] rule2Distance;
@@ -115,84 +34,84 @@ async fn execute_gpu() {
         [[uniform in] float] rule2Scale;
         [[uniform in] float] rule3Scale;
 
-        [[buffer loop in] vec2[]] srcParticlePos;
-        [[buffer loop in] vec2[]] srcParticleVel;
-        [[buffer out] vec2[]] dstParticlePos;
-        [[buffer out] vec2[]] dstParticleVel;
+        [[buffer loop in] vec3[]] srcParticlePos;
+        [[buffer loop in] vec3[]] srcParticleVel;
+        [[buffer out] vec3[]] dstParticlePos;
+        [[buffer out] vec3[]] dstParticleVel;
 
 
-    /* layout(std140, set = 0, binding = 1) buffer SrcParticles {
-        Particle particles[NUM_PARTICLES];
-    } srcParticles;
-    layout(std140, set = 0, binding = 2) buffer DstParticles {
-        Particle particles[NUM_PARTICLES];
-    } dstParticles; */
+            /* layout(std140, set = 0, binding = 1) buffer SrcParticles {
+                Particle particles[NUM_PARTICLES];
+            } srcParticles;
+            layout(std140, set = 0, binding = 2) buffer DstParticles {
+                Particle particles[NUM_PARTICLES];
+            } dstParticles; */
 
-            {{
-    // TODO This would be nice
-    /* struct Particle {
-        vec2 pos;
-        vec2 vel;
-    }; */
+        {{
+            // TODO This would be nice
+            /* struct Particle {
+                vec2 pos;
+                vec2 vel;
+            }; */
 
 
 
-    void main() {
-        // https://github.com/austinEng/Project6-Vulkan-Flocking/blob/master/data/shaders/computeparticles/particle.comp
-        uint index = gl_GlobalInvocationID.x;
+            void main() {
+                // https://github.com/austinEng/Project6-Vulkan-Flocking/blob/master/data/shaders/computeparticles/particle.comp
+                uint index = gl_GlobalInvocationID.x;
 
-        /*     if (index >= NUM_PARTICLES) { return; } */
-        vec2 vPos = srcParticlePos[index];
-        vec2 vVel = srcParticleVel[index];
-        vec2 cMass = vec2(0.0, 0.0);
-        vec2 cVel = vec2(0.0, 0.0);
-        vec2 colVel = vec2(0.0, 0.0);
-        int cMassCount = 0;
-        int cVelCount = 0;
-        vec2 pos;
-        vec2 vel;
-        // TODO The iteration of the number of particles was set by a #define value
-        for (int i = 0; i < 2; ++i) {
-            if (i == index) { continue; }
-            pos = srcParticlePos[i].xy;
-            vel = srcParticlePos[i].xy;
-            if (distance(pos, vPos) < rule1Distance) {
-                cMass += pos;
-                cMassCount++;
+                /*     if (index >= NUM_PARTICLES) { return; } */
+                vec2 vPos = srcParticlePos[index].xy;
+                vec2 vVel = srcParticleVel[index].xy;
+                vec2 cMass = vec2(0.0, 0.0);
+                vec2 cVel = vec2(0.0, 0.0);
+                vec2 colVel = vec2(0.0, 0.0);
+                int cMassCount = 0;
+                int cVelCount = 0;
+                vec2 pos;
+                vec2 vel;
+                // TODO The iteration of the number of particles was set by a #define value
+                for (int i = 0; i < 2; ++i) {
+                    if (i == index) { continue; }
+                    pos = srcParticlePos[i].xy;
+                    vel = srcParticlePos[i].xy;
+                    if (distance(pos, vPos) < rule1Distance) {
+                        cMass += pos;
+                        cMassCount++;
+                    }
+                    if (distance(pos, vPos) < rule2Distance) {
+                        colVel -= (pos - vPos);
+                    }
+                    if (distance(pos, vPos) < rule3Distance) {
+                        cVel += vel;
+                        cVelCount++;
+                    }
+                }
+                if (cMassCount > 0) {
+                    cMass = cMass / cMassCount - vPos;
+                }
+                if (cVelCount > 0) {
+                    cVel = cVel / cVelCount;
+                }
+                vVel += cMass * rule1Scale + colVel * rule2Scale + cVel * rule3Scale;
+                // clamp velocity for a more pleasing simulation.
+                vVel = normalize(vVel) * clamp(length(vVel), 0.0, 0.1);
+                // kinematic update
+                vPos += vVel * deltaT;
+                // Wrap around boundary
+                if (vPos.x < -1.0) vPos.x = 1.0;
+                if (vPos.x > 1.0) vPos.x = -1.0;
+                if (vPos.y < -1.0) vPos.y = 1.0;
+                if (vPos.y > 1.0) vPos.y = -1.0;
+                    // Write back
+                dstParticlePos[index] = vec3(vPos, 0.0);
+                dstParticleVel[index] = vec3(vVel, 0.0);
             }
-            if (distance(pos, vPos) < rule2Distance) {
-                colVel -= (pos - vPos);
-            }
-            if (distance(pos, vPos) < rule3Distance) {
-                cVel += vel;
-                cVelCount++;
-            }
-        }
-        if (cMassCount > 0) {
-            cMass = cMass / cMassCount - vPos;
-        }
-        if (cVelCount > 0) {
-            cVel = cVel / cVelCount;
-        }
-        vVel += cMass * rule1Scale + colVel * rule2Scale + cVel * rule3Scale;
-        // clamp velocity for a more pleasing simulation.
-        vVel = normalize(vVel) * clamp(length(vVel), 0.0, 0.1);
-        // kinematic update
-        vPos += vVel * deltaT;
-        // Wrap around boundary
-        if (vPos.x < -1.0) vPos.x = 1.0;
-        if (vPos.x > 1.0) vPos.x = -1.0;
-        if (vPos.y < -1.0) vPos.y = 1.0;
-        if (vPos.y > 1.0) vPos.y = -1.0;
-            // Write back
-        dstParticlePos[index] = vPos;
-        dstParticleVel[index] = vVel;
-    }
-            }}
-        };
+        }}
+    };
 
-    let mut srcParticlePos: Vec<f32> = vec![0.0, 0.0, 0.3, 0.2];
-    let mut srcParticleVel: Vec<f32> = vec![0.01, -0.02, -0.05, -0.03];
+    let mut srcParticlePos: Vec<Vec<f32>> = vec![vec![0.0, 0.0, 0.0], vec![0.3, 0.2, 0.0]];
+    let mut srcParticleVel: Vec<Vec<f32>> = vec![vec![0.01, -0.02, 0.0], vec![-0.05, -0.03, 0.0]];
     let deltaT: f32 = 0.04;
     let rule1Distance: f32 = 0.1;
     let rule2Distance: f32 = 0.25;
@@ -200,8 +119,10 @@ async fn execute_gpu() {
     let rule1Scale: f32 = 0.02;
     let rule2Scale: f32 = 0.05;
     let rule3Scale: f32 = 0.005;
+
+    /*     let texture : wgpu::Buffer = create_texture(".."); */
     loop {
-        const S: SHADER = BOIDS.0;
+        const S: ComputeShader = BOIDS.0;
         const STARTING_BIND_CONTEXT: [&str; 32] = BOIDS.1;
 
         let (program, mut bindings, mut out_bindings) = compile(&S).await;
@@ -270,7 +191,7 @@ async fn execute_gpu() {
         );
 
         const BIND_CONTEXT_8: [&str; 32] = update_bind_context!(BIND_CONTEXT_7, "srcParticlePos");
-        bind_vec2(
+        bind_vec3(
             &program,
             &mut bindings,
             &mut out_bindings,
@@ -279,7 +200,7 @@ async fn execute_gpu() {
         );
 
         const BIND_CONTEXT_9: [&str; 32] = update_bind_context!(BIND_CONTEXT_8, "srcParticleVel");
-        bind_vec2(
+        bind_vec3(
             &program,
             &mut bindings,
             &mut out_bindings,
@@ -290,13 +211,13 @@ async fn execute_gpu() {
         {
             ready_to_run(BIND_CONTEXT_9);
             let result = run(&program, &mut bindings, out_bindings);
-            let dstParticlePos = read_fvec(&program, &result, "dstParticlePos").await;
-            let dstParticleVel = read_fvec(&program, &result, "dstParticleVel").await;
+            let dstParticlePos = read_fvec3(&program, &result, "dstParticlePos").await;
+            let dstParticleVel = read_fvec3(&program, &result, "dstParticleVel").await;
             println!("Current values");
             println!("{:?}", dstParticlePos);
             println!("{:?}", dstParticleVel);
-            srcParticlePos = dstParticlePos;
-            srcParticleVel = dstParticleVel;
+            srcParticlePos = vec![dstParticlePos[0..3].to_vec(), dstParticlePos[3..6].to_vec()];
+            srcParticleVel = vec![dstParticleVel[0..3].to_vec(), dstParticleVel[3..6].to_vec()];
         }
     }
 }

@@ -23,27 +23,25 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     let size = window.inner_size();
 
     const VERTEXT: (GraphicsShader, [&str; 32], [&str; 32]) = graphics_shader! {
-        [[vertex in] vec3] a_position;
-        [[vertex in] float] in_brightness;
-        [[out] vec3] posColor;
-        [[out] float] brightness;
+        [[buffer in] vec3] position;
+        [[uniform in] mat4] model;
+        [[uniform in] mat4] view;
+        [[uniform in] mat4] projection;
+        [[uniform in out] vec3] ambient;
         [[out] vec4] gl_Position;
         {{
             void main() {
-                posColor = a_position;
-                brightness = in_brightness;
-                gl_Position = vec4(a_position, 1.0);
+                projection * view * model * vec4(position, 1.0);
             }
         }}
     };
 
     const FRAGMENT: (GraphicsShader, [&str; 32], [&str; 32]) = graphics_shader! {
-        [[in] vec3] posColor;
-        [[in] float] brightness;
+        [[uniform in] vec3] ambient;
         [[out] vec4] color;
         {{
             void main() {
-                color = vec4(posColor * brightness, 1.0);
+                color = vec4(ambient, 1);
             }
         }}
     };
@@ -64,7 +62,6 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         vec![-0.5, 0.5, 0.0],
         vec![0.5, -0.5, 0.0],
     ];
-    let brightness = vec![0.5, 0.5, 0.9];
 
     // For drawing to window
     let mut sc_desc = wgpu::SwapChainDescriptor {
@@ -89,35 +86,14 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
             Event::RedrawRequested(_) => {
                 let mut bindings = template_bindings.clone();
                 let mut out_bindings = template_out_bindings.clone();
-                const BIND_CONTEXT_1: [&str; 32] =
-                    update_bind_context!(STARTING_BIND_CONTEXT, "in_brightness");
-                bind_fvec(
+
+                ready_to_run(STARTING_BIND_CONTEXT);
+                wgpu_graphics_header::graphics_run(
                     &program,
-                    &mut bindings,
-                    &mut out_bindings,
-                    &brightness,
-                    "in_brightness".to_string(),
+                    &bindings,
+                    out_bindings,
+                    &mut swap_chain,
                 );
-                {
-                    const BIND_CONTEXT_2: [&str; 32] =
-                        update_bind_context!(BIND_CONTEXT_1, "a_position");
-                    bind_vec3(
-                        &program,
-                        &mut bindings,
-                        &mut out_bindings,
-                        &positions,
-                        "a_position".to_string(),
-                    );
-                    {
-                        ready_to_run(BIND_CONTEXT_2);
-                        wgpu_graphics_header::graphics_run(
-                            &program,
-                            &bindings,
-                            out_bindings,
-                            &mut swap_chain,
-                        );
-                    }
-                }
             }
             // When the window closes we are done. Change the status
             Event::WindowEvent {

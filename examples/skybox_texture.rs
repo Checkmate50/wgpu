@@ -15,35 +15,42 @@ pub use pipeline::wgpu_graphics_header::{
 };
 
 pub use pipeline::shared;
-pub use pipeline::shared::{
-    bind_fvec, bind_vec3, is_gl_builtin, new_bind_scope, ready_to_run, Bindings,
-};
+pub use pipeline::shared::{bind_fvec, bind_vec3, new_bind_scope, ready_to_run, Bindings};
 
 async fn run(event_loop: EventLoop<()>, window: Window) {
     let size = window.inner_size();
 
     const VERTEXT: (GraphicsShader, [&str; 32], [&str; 32]) = graphics_shader! {
-        [[vertex in] vec3] a_position;
-        [[vertex in] float] in_brightness;
-        [[out] vec3] posColor;
-        [[out] float] brightness;
+        [[uniform in] mat4] proj;
+        [[uniform in] mat4] view;
+        [[out] vec3] v_Uv;
         [[out] vec4] gl_Position;
+        [[] uvec3] gl_GlobalInvocationID;
         {{
             void main() {
-                posColor = a_position;
-                brightness = in_brightness;
-                gl_Position = vec4(a_position, 1.0);
+                vec4 pos = vec4(0.0);
+                switch(gl_VertexIndex) {
+                    case 0: pos = vec4(-1.0, -1.0, 0.0, 1.0); break;
+                    case 1: pos = vec4( 3.0, -1.0, 0.0, 1.0); break;
+                    case 2: pos = vec4(-1.0,  3.0, 0.0, 1.0); break;
+                }
+                mat3 invModelView = transpose(mat3(view));
+                vec3 unProjected = (inverse(proj) * pos).xyz;
+                v_Uv = invModelView * unProjected;
+
+                gl_Position = pos;
             }
         }}
     };
 
     const FRAGMENT: (GraphicsShader, [&str; 32], [&str; 32]) = graphics_shader! {
-        [[in] vec3] posColor;
-        [[in] float] brightness;
+        [[uniform in] textureCube] t_Cubemap
+        [[uniform in] sampler] s_Cubemap;
+        [[in] vec3] v_View;
         [[out] vec4] color;
         {{
             void main() {
-                color = vec4(posColor * brightness, 1.0);
+               color = texture(samplerCube(t_Cubemap, s_Cubemap), v_Uv);
             }
         }}
     };
@@ -59,12 +66,71 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     let (program, mut template_bindings, mut template_out_bindings) =
         wgpu_graphics_header::graphics_compile(&mut compile_buffer, &window, &S_v, &S_f).await;
 
-    let positions = vec![
-        vec![0.0, 0.7, 0.0],
-        vec![-0.5, 0.5, 0.0],
-        vec![0.5, -0.5, 0.0],
+    fn generate_uniforms(aspect_ratio: f32) -> (cgmath::Matrix4<f32>, cgmath::Matrix4<f32>) {
+        let mx_projection = cgmath::perspective(cgmath::Deg(45f32), aspect_ratio, 1.0, 10.0);
+        let mx_view = cgmath::Matrix4::look_at(
+            cgmath::Point3::new(1.5f32, -5.0, 3.0),
+            cgmath::Point3::new(0f32, 0.0, 0.0),
+            cgmath::Vector3::unit_z(),
+        );
+        let mx_correction = framework::OPENGL_TO_WGPU_MATRIX;
+        (mx_correction * mx_projection, mx_correction * mx_view)
+    }
+
+    let (uniform_proj, uniform_view) = generate_uniforms(size);
+
+    let sampler = program.device.create_sampler(&wgpu::SamplerDescriptor {
+        address_mode_u: wgpu::AddressMode::ClampToEdge,
+        address_mode_v: wgpu::AddressMode::ClampToEdge,
+        address_mode_w: wgpu::AddressMode::ClampToEdge,
+        mag_filter: wgpu::FilterMode::Nearest,
+        min_filter: wgpu::FilterMode::Linear,
+        mipmap_filter: wgpu::FilterMode::Nearest,
+        lod_min_clamp: -100.0,
+        lod_max_clamp: 100.0,
+        compare: wgpu::CompareFunction::Undefined,
+    });
+
+    let paths: [&'static [u8]; 6] = [
+        &include_bytes!("images/posx.png")[..],
+        &include_bytes!("images/negx.png")[..],
+        &include_bytes!("images/posy.png")[..],
+        &include_bytes!("images/negy.png")[..],
+        &include_bytes!("images/posz.png")[..],
+        &include_bytes!("images/negz.png")[..],
     ];
-    let brightness = vec![0.5, 0.5, 0.9];
+
+    let (mut image_width, mut image_height) = (0, 0);
+    let faces = paths
+        .iter()
+        .map(|png| {
+            let png = std::io::Cursor::new(png);
+            let decoder = png::Decoder::new(png);
+            let (info, mut reader) = decoder.read_info().expect("can read info");
+            image_width = info.width;
+            image_height = info.height;
+            let mut buf = vec![0; info.buffer_size()];
+            reader.next_frame(&mut buf).expect("can read png frame");
+            buf
+        })
+        .collect::<Vec<_>>();
+
+    let texture_extent = wgpu::Extent3d {
+        width: image_width,
+        height: image_height,
+        depth: 1,
+    };
+
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        size: texture_extent,
+        array_layer_count: 6,
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: SKYBOX_FORMAT,
+        usage: wgpu::TextureUsage::SAMPLED | wgpu::TextureUsage::COPY_DST,
+        label: None,
+    });
 
     // For drawing to window
     let mut sc_desc = wgpu::SwapChainDescriptor {

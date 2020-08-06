@@ -2,16 +2,12 @@
 extern crate pipeline;
 
 // use for the shader! macro
-pub use pipeline::wgpu_compute_header;
 pub use pipeline::shared;
+pub use pipeline::wgpu_compute_header;
 
-pub use pipeline::wgpu_compute_header::{
-    bind_vec, compile, run, SHADER, read_uvec,
-};
+pub use pipeline::wgpu_compute_header::{compile, read_uvec, run, ComputeShader};
 
-pub use pipeline::shared::{
-    new_bind_scope, ready_to_run,
-};
+pub use pipeline::shared::{bind_vec, is_gl_builtin, new_bind_scope, ready_to_run};
 
 pub use static_assertions::const_assert;
 
@@ -27,7 +23,7 @@ async fn execute_gpu() {
     // loop: one or more of these loop annotations are required per program. Atm, the values bound is assumed to be of equal length and this gives the number of iterations(gl_GlobalInvocationID.x)
     //      the size of any out buffers that need to be created
 
-    const TRIVIAL: (SHADER, [&str; 32], [&str; 32]) = shader! {
+    const TRIVIAL: (ComputeShader, [&str; 32], [&str; 32]) = compute_shader! {
         [[buffer loop in out] uint[]] indices;
         [[buffer in] uint[]] indices2;
         //[[buffer out] uint[]] result;
@@ -41,7 +37,7 @@ async fn execute_gpu() {
         }}
     };
 
-    const S: SHADER = TRIVIAL.0;
+    const S: ComputeShader = TRIVIAL.0;
     const STARTING_BIND_CONTEXT: [&str; 32] = TRIVIAL.1;
 
     let (program, mut bindings, mut out_bindings) = compile(&S).await;
@@ -69,7 +65,6 @@ async fn execute_gpu() {
             "indices2".to_string(),
         );
         {
-            // Todo have some write or result function that captures/uses the result instead of returning it
             ready_to_run(BIND_CONTEXT_2);
             let result1 = run(&program, &mut bindings, out_bindings);
             println!("{:?}", read_uvec(&program, &result1, "indices").await);

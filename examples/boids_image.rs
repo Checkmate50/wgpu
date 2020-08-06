@@ -23,27 +23,28 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     let size = window.inner_size();
 
     const VERTEXT: (GraphicsShader, [&str; 32], [&str; 32]) = graphics_shader! {
-        [[vertex in] vec3] a_position;
-        [[vertex in] float] in_brightness;
-        [[out] vec3] posColor;
-        [[out] float] brightness;
+        [[loop in] vec3] dstParticlePos;
+        [[loop in] vec3] dstParticleVel;
+        [[vertex in] vec3] trianglePos;
         [[out] vec4] gl_Position;
+
         {{
             void main() {
-                posColor = a_position;
-                brightness = in_brightness;
-                gl_Position = vec4(a_position, 1.0);
+                float angle = -atan(dstParticleVel.x, dstParticleVel.y);
+                vec3 pos = vec3(trianglePos.x * cos(angle) - trianglePos.y * sin(angle),
+                                trianglePos.x * sin(angle) + trianglePos.y * cos(angle), 0);
+                gl_Position = vec4(pos + dstParticlePos, 1);
             }
         }}
     };
 
     const FRAGMENT: (GraphicsShader, [&str; 32], [&str; 32]) = graphics_shader! {
-        [[in] vec3] posColor;
-        [[in] float] brightness;
+        // isn't checked for
         [[out] vec4] color;
+
         {{
             void main() {
-                color = vec4(posColor * brightness, 1.0);
+                color = vec4(1.0);
             }
         }}
     };
@@ -59,12 +60,13 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     let (program, mut template_bindings, mut template_out_bindings) =
         wgpu_graphics_header::graphics_compile(&mut compile_buffer, &window, &S_v, &S_f).await;
 
-    let positions = vec![
-        vec![0.0, 0.7, 0.0],
-        vec![-0.5, 0.5, 0.0],
-        vec![0.5, -0.5, 0.0],
+    let mut srcParticlePos = vec![vec![0.5, 0.0, 0.0], vec![0.3, 0.2, 0.0]];
+    let mut srcParticleVel = vec![vec![0.01, -0.02, 0.0], vec![-0.05, -0.03, 0.0]];
+    let triangle: Vec<Vec<f32>> = vec![
+        vec![-0.01, -0.02, 0.0],
+        vec![0.01, -0.02, 0.0],
+        vec![0.00, 0.02, 0.0],
     ];
-    let brightness = vec![0.5, 0.5, 0.9];
 
     // For drawing to window
     let mut sc_desc = wgpu::SwapChainDescriptor {
@@ -90,32 +92,43 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                 let mut bindings = template_bindings.clone();
                 let mut out_bindings = template_out_bindings.clone();
                 const BIND_CONTEXT_1: [&str; 32] =
-                    update_bind_context!(STARTING_BIND_CONTEXT, "in_brightness");
-                bind_fvec(
+                    update_bind_context!(STARTING_BIND_CONTEXT, "dstParticlePos");
+                bind_vec3(
                     &program,
                     &mut bindings,
                     &mut out_bindings,
-                    &brightness,
-                    "in_brightness".to_string(),
+                    &srcParticlePos,
+                    "dstParticlePos".to_string(),
                 );
                 {
                     const BIND_CONTEXT_2: [&str; 32] =
-                        update_bind_context!(BIND_CONTEXT_1, "a_position");
+                        update_bind_context!(BIND_CONTEXT_1, "dstParticleVel");
                     bind_vec3(
                         &program,
                         &mut bindings,
                         &mut out_bindings,
-                        &positions,
-                        "a_position".to_string(),
+                        &srcParticleVel,
+                        "dstParticleVel".to_string(),
                     );
                     {
-                        ready_to_run(BIND_CONTEXT_2);
-                        wgpu_graphics_header::graphics_run(
+                        const BIND_CONTEXT_2: [&str; 32] =
+                            update_bind_context!(BIND_CONTEXT_1, "trianglePos");
+                        bind_vec3(
                             &program,
-                            &bindings,
-                            out_bindings,
-                            &mut swap_chain,
+                            &mut bindings,
+                            &mut out_bindings,
+                            &triangle,
+                            "trianglePos".to_string(),
                         );
+                        {
+                            ready_to_run(BIND_CONTEXT_2);
+                            wgpu_graphics_header::graphics_run(
+                                &program,
+                                &bindings,
+                                out_bindings,
+                                &mut swap_chain,
+                            );
+                        }
                     }
                 }
             }

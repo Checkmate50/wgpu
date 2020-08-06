@@ -11,7 +11,7 @@ pipeline:
 .PHONY: hello
 hello:
 	#export RUST_BACKTRACE=1 && cargo +nightly run --example hello_compute
-	cargo +nightly run --example hello_compute
+	cargo +nightly run  --example hello_compute
 
 .PHONY: boids
 boids:
@@ -20,7 +20,27 @@ boids:
 
 .PHONY: triangle
 triangle:
-	cargo +nightly run --example hello_triangle
+	export RUST_BACKTRACE=1 && cargo +nightly run --example hello_triangle
+	#cargo +nightly run --example hello_triangle
+
+.PHONY: boids2
+boids2:
+	#export RUST_BACKTRACE=1 && cargo +nightly run --example boids_graphics
+	cargo +nightly run --example boids_graphics
+
+.PHONY: boids3
+boids3:
+	#export RUST_BACKTRACE=1 && cargo +nightly run --example boids_image
+	cargo +nightly run --example boids_image
+
+.PHONY: texture
+texture:
+	#export RUST_BACKTRACE=1 && cargo +nightly run --example skybox_texture
+	cargo +nightly run --example skybox_texture
+
+.PHONY: teacup
+teacup:
+	cargo +nightly run --example teacup
 
 release:
 	cargo build --release
@@ -32,7 +52,7 @@ clean:
 	cargo clean
 
 check:
-	cargo clippy
+	cargo +nightly clippy
 
 format:
-	cargo fmt
+	cargo +nightly fmt

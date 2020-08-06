@@ -1,6 +1,5 @@
 pub use self::wgpu_compute_header::{
-    bind_float, bind_vec, bind_vec2, compile, has_in_qual, has_out_qual, pipe, read_fvec,
-    read_uvec, run, PARAMETER, SHADER,
+    compile, pipe, read_fvec, read_fvec3, read_uvec, run, ComputeProgram, ComputeShader,
 };
 
 pub mod wgpu_compute_header {
@@ -8,16 +7,18 @@ pub mod wgpu_compute_header {
 
     use std::collections::HashMap;
 
-    use zerocopy::AsBytes as _;
-
     use std::convert::TryInto;
 
     use crate::shared::{
-        compile_shader, process_body, OutProgramBindings, ProgramBindings, BINDING, GLSLTYPE,
-        QUALIFIER,
+        check_gl_builtin_type, compile_shader, process_body, OutProgramBindings, Program,
+        ProgramBindings, BINDING, PARAMETER, QUALIFIER,
     };
 
-    fn stringify_shader(s: &SHADER, b: &ProgramBindings, b_out: &OutProgramBindings) -> String {
+    fn stringify_shader(
+        s: &ComputeShader,
+        b: &ProgramBindings,
+        b_out: &OutProgramBindings,
+    ) -> String {
         let mut buffer = Vec::new();
         for i in &b.bindings[..] {
             buffer.push(format!(
@@ -54,7 +55,7 @@ pub mod wgpu_compute_header {
     }
 
     fn create_bindings(
-        compute: &SHADER,
+        compute: &ComputeShader,
         device: &wgpu::Device,
     ) -> (wgpu::BindGroupLayout, ProgramBindings, OutProgramBindings) {
         let mut binding_struct = Vec::new();
@@ -62,27 +63,29 @@ pub mod wgpu_compute_header {
         let mut out_binding_struct = Vec::new();
         for i in &compute.params[..] {
             // Bindings that are kept between runs
-            if i.qual.contains(&QUALIFIER::IN) && !i.qual.contains(&QUALIFIER::OUT) {
-                binding_struct.push(BINDING {
-                    binding_number: binding_number,
-                    name: i.name.to_string(),
-                    data: None,
-                    size: None,
-                    gtype: i.gtype.clone(),
-                    qual: i.qual.to_vec(),
-                });
-                binding_number += 1;
-            // Bindings that are invalidated after a run
-            } else if i.qual.contains(&QUALIFIER::OUT) {
-                out_binding_struct.push(BINDING {
-                    binding_number: binding_number,
-                    name: i.name.to_string(),
-                    data: None,
-                    size: None,
-                    gtype: i.gtype.clone(),
-                    qual: i.qual.to_vec(),
-                });
-                binding_number += 1;
+            if !check_gl_builtin_type(i.name, &i.gtype) {
+                if i.qual.contains(&QUALIFIER::IN) && !i.qual.contains(&QUALIFIER::OUT) {
+                    binding_struct.push(BINDING {
+                        binding_number: binding_number,
+                        name: i.name.to_string(),
+                        data: None,
+                        length: None,
+                        gtype: i.gtype.clone(),
+                        qual: i.qual.to_vec(),
+                    });
+                    binding_number += 1;
+                // Bindings that are invalidated after a run
+                } else if i.qual.contains(&QUALIFIER::OUT) {
+                    out_binding_struct.push(BINDING {
+                        binding_number: binding_number,
+                        name: i.name.to_string(),
+                        data: None,
+                        length: None,
+                        gtype: i.gtype.clone(),
+                        qual: i.qual.to_vec(),
+                    });
+                    binding_number += 1;
+                }
             }
         }
 
@@ -137,15 +140,28 @@ pub mod wgpu_compute_header {
         );
     }
 
-    pub struct PROGRAM {
+    pub struct ComputeProgram {
         device: wgpu::Device,
         queue: wgpu::Queue,
         pipeline: wgpu::ComputePipeline,
         bind_group_layout: wgpu::BindGroupLayout,
     }
 
-    pub async fn compile(compute: &SHADER) -> (PROGRAM, ProgramBindings, OutProgramBindings) {
-        // the adapter is the handler to the physical graphics unit
+    impl Program for ComputeProgram {
+        fn get_device(&self) -> &wgpu::Device {
+            &self.device
+        }
+    }
+
+    impl Program for &ComputeProgram {
+        fn get_device(&self) -> &wgpu::Device {
+            &self.device
+        }
+    }
+
+    pub async fn compile(
+        compute: &ComputeShader,
+    ) -> (ComputeProgram, ProgramBindings, OutProgramBindings) {
         let adapter = wgpu::Adapter::request(
             &wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::Default,
@@ -165,7 +181,6 @@ pub mod wgpu_compute_header {
             })
             .await;
 
-        // Our compiled vertex shader
         let (bind_group_layout, program_bindings, out_program_bindings) =
             create_bindings(&compute, &device);
 
@@ -189,7 +204,7 @@ pub mod wgpu_compute_header {
         });
 
         return (
-            PROGRAM {
+            ComputeProgram {
                 device,
                 queue,
                 pipeline,
@@ -198,120 +213,6 @@ pub mod wgpu_compute_header {
             program_bindings,
             out_program_bindings,
         );
-    }
-
-    fn bind<'a>(
-        program: &PROGRAM,
-        bindings: &mut ProgramBindings,
-        out_bindings: &mut OutProgramBindings,
-        data: &'a [u8],
-        size: u64,
-        acceptable_types: Vec<GLSLTYPE>,
-        name: String,
-    ) {
-        let binding = match bindings.bindings.iter().position(|x| x.name == name) {
-            Some(x) => &mut bindings.bindings[x],
-            None => {
-                let x = out_bindings
-                    .bindings
-                    .iter()
-                    .position(|x| x.name == name)
-                    .expect("We couldn't find the binding");
-                &mut out_bindings.bindings[x]
-            }
-        };
-
-        if !acceptable_types.contains(&binding.gtype) {
-            panic!(
-                "The type of the value you provided is not what was expected, {:?}",
-                &binding.gtype
-            );
-        }
-
-        let buffer = program.device.create_buffer_with_data(
-            data,
-            if binding.qual.contains(&QUALIFIER::UNIFORM) {
-                wgpu::BufferUsage::UNIFORM | wgpu::BufferUsage::COPY_DST
-            } else {
-                wgpu::BufferUsage::MAP_READ
-                    | wgpu::BufferUsage::COPY_DST
-                    | wgpu::BufferUsage::STORAGE
-                    | wgpu::BufferUsage::COPY_SRC
-            },
-        );
-
-        binding.data = Some(buffer);
-        binding.size = Some(size);
-    }
-
-    pub fn bind_vec(
-        program: &PROGRAM,
-        bindings: &mut ProgramBindings,
-        out_bindings: &mut OutProgramBindings,
-        numbers: &Vec<u32>,
-        name: String,
-    ) {
-        bind(
-            program,
-            bindings,
-            out_bindings,
-            numbers.as_slice().as_bytes(),
-            (numbers.len() * std::mem::size_of::<u32>()) as u64,
-            vec![GLSLTYPE::ArrayInt, GLSLTYPE::ArrayUint],
-            name,
-        )
-    }
-
-    pub fn bind_vec2(
-        program: &PROGRAM,
-        bindings: &mut ProgramBindings,
-        out_bindings: &mut OutProgramBindings,
-        numbers: &Vec<f32>,
-        name: String,
-    ) {
-        if numbers.len() % 2 != 0 {
-            panic!("Your trying to bind to vec to but your not giving a vector that can be split into 2's")
-        }
-        bind(
-            program,
-            bindings,
-            out_bindings,
-            numbers.as_slice().as_bytes(),
-            (numbers.len() * std::mem::size_of::<u32>()) as u64,
-            if numbers.len() == 2 {
-                vec![GLSLTYPE::Vec2, GLSLTYPE::ArrayVec2]
-            } else {
-                vec![GLSLTYPE::ArrayVec2]
-            },
-            name,
-        )
-    }
-
-    pub fn bind_float(
-        program: &PROGRAM,
-        bindings: &mut ProgramBindings,
-        out_bindings: &mut OutProgramBindings,
-        numbers: &f32,
-        name: String,
-    ) {
-        bind(
-            program,
-            bindings,
-            out_bindings,
-            numbers.as_bytes(),
-            std::mem::size_of::<f32>() as u64,
-            vec![GLSLTYPE::Float],
-            name,
-        )
-    }
-
-    #[macro_export]
-    macro_rules! update_bind_context {
-        ($bind_context:tt, $bind_name:tt) => {{
-            const BIND_CONTEXT: ([&str; 32], bool) = new_bind_scope(&$bind_context, $bind_name);
-            const_assert!(BIND_CONTEXT.1);
-            BIND_CONTEXT.0
-        }};
     }
 
     pub fn compute(cpass: &mut wgpu::ComputePass, length: u32) {
@@ -335,7 +236,7 @@ pub mod wgpu_compute_header {
     }
 
     pub fn run(
-        program: &PROGRAM,
+        program: &ComputeProgram,
         bindings: &ProgramBindings,
         mut out_bindings: OutProgramBindings,
     ) -> Vec<BINDING> {
@@ -356,10 +257,10 @@ pub mod wgpu_compute_header {
                 .iter()
                 .find(|i| i.qual.contains(&QUALIFIER::LOOP));
         }
-        let size = if bind.is_none() {
+        let length = if bind.is_none() {
             1
         } else {
-            bind.unwrap().size.unwrap()
+            bind.unwrap().length.unwrap()
         };
 
         for i in 0..(out_bindings.bindings.len()) {
@@ -367,13 +268,14 @@ pub mod wgpu_compute_header {
                 out_bindings.bindings[i].data =
                     Some(program.device.create_buffer(&wgpu::BufferDescriptor {
                         label: None,
-                        size,
+                        size: (length * 3 * std::mem::size_of::<u32>() as u64) as u64,
                         usage: wgpu::BufferUsage::STORAGE
                             | wgpu::BufferUsage::MAP_READ
                             | wgpu::BufferUsage::COPY_DST
-                            | wgpu::BufferUsage::COPY_SRC,
+                            | wgpu::BufferUsage::COPY_SRC
+                            | wgpu::BufferUsage::VERTEX,
                     }));
-                out_bindings.bindings[i].size = Some(size);
+                out_bindings.bindings[i].length = Some(length);
             }
         }
 
@@ -394,7 +296,7 @@ pub mod wgpu_compute_header {
                             .as_ref()
                             .expect(&format!("The binding of {} was not set", &b.name)),
                         range: 0..b
-                            .size
+                            .length
                             .expect(&format!("The size of {} was not set", &b.name)),
                     },
                 });
@@ -411,18 +313,24 @@ pub mod wgpu_compute_header {
             let mut cpass = encoder.begin_compute_pass();
             cpass.set_pipeline(&program.pipeline);
             cpass.set_bind_group(0, &bind_group, &[]);
-            compute(&mut cpass, size as u32);
+            compute(&mut cpass, length as u32);
         }
         program.queue.submit(&[encoder.finish()]);
 
         out_bindings.bindings
     }
 
-    pub async fn read_uvec(program: &PROGRAM, results: &Vec<BINDING>, name: &str) -> Vec<u32> {
+    pub async fn read_uvec(
+        program: &ComputeProgram,
+        results: &Vec<BINDING>,
+        name: &str,
+    ) -> Vec<u32> {
         for i in results.iter() {
             if i.name == name {
                 let result_buffer = i.data.as_ref().unwrap();
-                let buffer_future = result_buffer.map_read(0, i.size.unwrap());
+                // todo modify by size
+                let size = i.length.unwrap() * std::mem::size_of::<u32>() as u64;
+                let buffer_future = result_buffer.map_read(0, size);
                 program.device.poll(wgpu::Maintain::Wait);
 
                 if let Ok(mapping) = buffer_future.await {
@@ -443,11 +351,46 @@ pub mod wgpu_compute_header {
         )
     }
 
-    pub async fn read_fvec(program: &PROGRAM, results: &Vec<BINDING>, name: &str) -> Vec<f32> {
+    pub async fn read_fvec(
+        program: &ComputeProgram,
+        results: &Vec<BINDING>,
+        name: &str,
+    ) -> Vec<f32> {
         for i in results.iter() {
             if i.name == name {
                 let result_buffer = i.data.as_ref().unwrap();
-                let buffer_future = result_buffer.map_read(0, i.size.unwrap());
+                let size = i.length.unwrap() * std::mem::size_of::<f32>() as u64;
+                let buffer_future = result_buffer.map_read(0, size);
+                program.device.poll(wgpu::Maintain::Wait);
+
+                if let Ok(mapping) = buffer_future.await {
+                    let x: Vec<f32> = mapping
+                        .as_slice()
+                        .chunks_exact(4)
+                        .map(|b| f32::from_ne_bytes(b.try_into().unwrap()))
+                        .collect();
+                    return x;
+                } else {
+                    panic!("failed to run compute on gpu!");
+                }
+            }
+        }
+        panic!(
+            "We didn't find the binding you were looking to read from: {}",
+            name
+        )
+    }
+
+    pub async fn read_fvec3(
+        program: &ComputeProgram,
+        results: &Vec<BINDING>,
+        name: &str,
+    ) -> Vec<f32> {
+        for i in results.iter() {
+            if i.name == name {
+                let result_buffer = i.data.as_ref().unwrap();
+                let size = i.length.unwrap() * 3 * std::mem::size_of::<f32>() as u64;
+                let buffer_future = result_buffer.map_read(0, size);
                 program.device.poll(wgpu::Maintain::Wait);
 
                 if let Ok(mapping) = buffer_future.await {
@@ -469,7 +412,7 @@ pub mod wgpu_compute_header {
     }
 
     pub fn pipe(
-        program: &PROGRAM,
+        program: &ComputeProgram,
         mut in_bindings: ProgramBindings,
         mut out_bindings: OutProgramBindings,
         result_vec: Vec<BINDING>,
@@ -496,91 +439,23 @@ pub mod wgpu_compute_header {
             } */
 
             binding.data = Some(i.data.unwrap());
-            binding.size = Some(i.size.unwrap());
+            binding.length = Some(i.length.unwrap());
         }
 
         run(program, &in_bindings, out_bindings)
     }
 
     #[derive(Debug)]
-    pub struct PARAMETER {
-        pub qual: &'static [QUALIFIER],
-        pub gtype: GLSLTYPE,
-        pub name: &'static str,
-    }
-
-    #[derive(Debug)]
-    pub struct SHADER {
+    pub struct ComputeShader {
         pub params: &'static [PARAMETER],
         pub body: &'static str,
     }
 
-    pub const fn has_in_qual(p: &[QUALIFIER]) -> bool {
-        let mut acc = 0;
-        while acc < p.len() {
-            match p[acc] {
-                QUALIFIER::IN => {
-                    return true;
-                }
-                _ => {
-                    acc += 1;
-                }
-            }
-        }
-        false
-    }
-
-    pub const fn has_out_qual(p: &[QUALIFIER]) -> bool {
-        let mut acc = 0;
-        while acc < p.len() {
-            match p[acc] {
-                QUALIFIER::OUT => {
-                    return true;
-                }
-                _ => {
-                    acc += 1;
-                }
-            }
-        }
-        false
-    }
-
-    // To help view macros
-    // https://lukaslueg.github.io/macro_railroad_wasm_demo/
-    // One of many rust guides for macros
-    // https://danielkeep.github.io/tlborm/book/mbe-macro-rules.html
-    // Learn macros by example
-    // https://doc.rust-lang.org/stable/rust-by-example/macros.html
     #[macro_export]
-    macro_rules! shader {
-    ( $([[$($qualifier:tt)*] $type:ident $($brack:tt)*] $param:ident;)*
-      {$($tt:tt)*}) =>
-      {
-        {
-            const S : &[wgpu_compute_header::PARAMETER] = &[$(
-                wgpu_compute_header::PARAMETER{qual:&[$(qualifying!($qualifier)),*],
-                                                      gtype:shared::array_type(typing!($type), count_brackets!($($brack)*)),
-                                                      name:stringify!($param)}),*];
-
-
-            const B: &'static str = munch_body!($($tt)*);
-
-            let mut INBINDCONTEXT  = [""; 32];
-            let mut OUTBINDCONTEXT = [""; 32];
-            let mut acc = 0;
-            while acc < 32 {
-                if acc < S.len() {
-                    if wgpu_compute_header::has_in_qual(S[acc].qual){
-                        INBINDCONTEXT[acc] = S[acc].name;
-                    }
-                    if wgpu_compute_header::has_out_qual(S[acc].qual){
-                        OUTBINDCONTEXT[acc] = S[acc].name;
-                    }
-                }
-                acc += 1;
-            }
-            (wgpu_compute_header::SHADER{params:S, body:B}, INBINDCONTEXT, OUTBINDCONTEXT)
-        }
-    };
-}
+    macro_rules! compute_shader {
+        ($($body:tt)*) => {{
+            const S : (&[shared::PARAMETER], &'static str, [&str; 32], [&str; 32]) = shader!($($body)*);
+            (wgpu_compute_header::ComputeShader{params:S.0, body:S.1}, S.2, S.3)
+        }};
+    }
 }
