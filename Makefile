@@ -28,11 +28,6 @@ boids2:
 	#export RUST_BACKTRACE=1 && cargo +nightly run --example boids_graphics
 	cargo +nightly run --example boids_graphics
 
-.PHONY: boids3
-boids3:
-	#export RUST_BACKTRACE=1 && cargo +nightly run --example boids_image
-	cargo +nightly run --example boids_image
-
 .PHONY: texture
 texture:
 	#export RUST_BACKTRACE=1 && cargo +nightly run --example skybox_texture
@@ -41,6 +36,15 @@ texture:
 .PHONY: teacup
 teacup:
 	cargo +nightly run --example teacup
+
+.PHONY: sphere
+sphere:
+	cargo +nightly run --example sphere
+
+.PHONY: cube
+cube:
+	#export RUST_BACKTRACE=1 && cargo +nightly run --example cube
+	cargo +nightly run --example cube
 
 release:
 	cargo build --release

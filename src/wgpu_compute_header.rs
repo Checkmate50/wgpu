@@ -1,5 +1,6 @@
 pub use self::wgpu_compute_header::{
-    compile, pipe, read_fvec, read_fvec3, read_uvec, run, ComputeProgram, ComputeShader,
+    compile, pipe, read_fvec, read_fvec3, read_uvec, run, ComputeBindings, ComputeProgram,
+    ComputeShader, OutComputeBindings,
 };
 
 pub mod wgpu_compute_header {
@@ -10,14 +11,77 @@ pub mod wgpu_compute_header {
     use std::convert::TryInto;
 
     use crate::shared::{
-        check_gl_builtin_type, compile_shader, process_body, OutProgramBindings, Program,
-        ProgramBindings, BINDING, PARAMETER, QUALIFIER,
+        check_gl_builtin_type, compile_shader, new_bindings, process_body, Bindings,
+        DefaultBinding, OutProgramBindings, Program, ProgramBindings, PARAMETER, QUALIFIER,
     };
+
+    #[derive(Debug)]
+    pub struct ComputeBindings {
+        pub bindings: Vec<DefaultBinding>,
+    }
+
+    #[derive(Debug)]
+    pub struct OutComputeBindings {
+        pub bindings: Vec<DefaultBinding>,
+    }
+
+    impl Bindings for ComputeBindings {
+        fn clone(&self) -> ComputeBindings {
+            ComputeBindings {
+                bindings: new_bindings(&self.bindings),
+            }
+        }
+    }
+
+    impl ProgramBindings for ComputeBindings {
+        fn getBindings(&mut self) -> &mut Vec<DefaultBinding> {
+            &mut self.bindings
+        }
+        fn indexBinding(&mut self, index: usize) -> &mut DefaultBinding {
+            &mut self.bindings[index]
+        }
+    }
+
+    impl Bindings for OutComputeBindings {
+        fn clone(&self) -> OutComputeBindings {
+            OutComputeBindings {
+                bindings: new_bindings(&self.bindings),
+            }
+        }
+    }
+
+    impl OutProgramBindings for OutComputeBindings {
+        fn getBindings(&mut self) -> &mut Vec<DefaultBinding> {
+            &mut self.bindings
+        }
+        fn indexBinding(&mut self, index: usize) -> &mut DefaultBinding {
+            &mut self.bindings[index]
+        }
+    }
+
+    pub struct ComputeProgram {
+        device: wgpu::Device,
+        queue: wgpu::Queue,
+        pipeline: wgpu::ComputePipeline,
+        bind_group_layout: wgpu::BindGroupLayout,
+    }
+
+    impl Program for ComputeProgram {
+        fn get_device(&self) -> &wgpu::Device {
+            &self.device
+        }
+    }
+
+    impl Program for &ComputeProgram {
+        fn get_device(&self) -> &wgpu::Device {
+            &self.device
+        }
+    }
 
     fn stringify_shader(
         s: &ComputeShader,
-        b: &ProgramBindings,
-        b_out: &OutProgramBindings,
+        b: &ComputeBindings,
+        b_out: &OutComputeBindings,
     ) -> String {
         let mut buffer = Vec::new();
         for i in &b.bindings[..] {
@@ -57,15 +121,15 @@ pub mod wgpu_compute_header {
     fn create_bindings(
         compute: &ComputeShader,
         device: &wgpu::Device,
-    ) -> (wgpu::BindGroupLayout, ProgramBindings, OutProgramBindings) {
-        let mut binding_struct = Vec::new();
+    ) -> (wgpu::BindGroupLayout, ComputeBindings, OutComputeBindings) {
+        let mut binding_struct: Vec<DefaultBinding> = Vec::new();
         let mut binding_number = 0;
-        let mut out_binding_struct = Vec::new();
+        let mut out_binding_struct: Vec<DefaultBinding> = Vec::new();
         for i in &compute.params[..] {
             // Bindings that are kept between runs
             if !check_gl_builtin_type(i.name, &i.gtype) {
                 if i.qual.contains(&QUALIFIER::IN) && !i.qual.contains(&QUALIFIER::OUT) {
-                    binding_struct.push(BINDING {
+                    binding_struct.push(DefaultBinding {
                         binding_number: binding_number,
                         name: i.name.to_string(),
                         data: None,
@@ -76,7 +140,7 @@ pub mod wgpu_compute_header {
                     binding_number += 1;
                 // Bindings that are invalidated after a run
                 } else if i.qual.contains(&QUALIFIER::OUT) {
-                    out_binding_struct.push(BINDING {
+                    out_binding_struct.push(DefaultBinding {
                         binding_number: binding_number,
                         name: i.name.to_string(),
                         data: None,
@@ -131,37 +195,18 @@ pub mod wgpu_compute_header {
 
         return (
             bind_group_layout,
-            ProgramBindings {
+            ComputeBindings {
                 bindings: binding_struct,
             },
-            OutProgramBindings {
+            OutComputeBindings {
                 bindings: out_binding_struct,
             },
         );
     }
 
-    pub struct ComputeProgram {
-        device: wgpu::Device,
-        queue: wgpu::Queue,
-        pipeline: wgpu::ComputePipeline,
-        bind_group_layout: wgpu::BindGroupLayout,
-    }
-
-    impl Program for ComputeProgram {
-        fn get_device(&self) -> &wgpu::Device {
-            &self.device
-        }
-    }
-
-    impl Program for &ComputeProgram {
-        fn get_device(&self) -> &wgpu::Device {
-            &self.device
-        }
-    }
-
     pub async fn compile(
         compute: &ComputeShader,
-    ) -> (ComputeProgram, ProgramBindings, OutProgramBindings) {
+    ) -> (ComputeProgram, ComputeBindings, OutComputeBindings) {
         let adapter = wgpu::Adapter::request(
             &wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::Default,
@@ -220,9 +265,9 @@ pub mod wgpu_compute_header {
     }
 
     fn buffer_map_setup<'a>(
-        bindings: &'a ProgramBindings,
-        out_bindings: &'a OutProgramBindings,
-    ) -> HashMap<u32, &'a BINDING> {
+        bindings: &'a ComputeBindings,
+        out_bindings: &'a OutComputeBindings,
+    ) -> HashMap<u32, &'a DefaultBinding> {
         let mut buffer_map = HashMap::new();
 
         for i in bindings.bindings.iter() {
@@ -237,9 +282,9 @@ pub mod wgpu_compute_header {
 
     pub fn run(
         program: &ComputeProgram,
-        bindings: &ProgramBindings,
-        mut out_bindings: OutProgramBindings,
-    ) -> Vec<BINDING> {
+        bindings: &ComputeBindings,
+        mut out_bindings: OutComputeBindings,
+    ) -> Vec<DefaultBinding> {
         let mut encoder = program
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
@@ -322,7 +367,7 @@ pub mod wgpu_compute_header {
 
     pub async fn read_uvec(
         program: &ComputeProgram,
-        results: &Vec<BINDING>,
+        results: &Vec<DefaultBinding>,
         name: &str,
     ) -> Vec<u32> {
         for i in results.iter() {
@@ -353,7 +398,7 @@ pub mod wgpu_compute_header {
 
     pub async fn read_fvec(
         program: &ComputeProgram,
-        results: &Vec<BINDING>,
+        results: &Vec<DefaultBinding>,
         name: &str,
     ) -> Vec<f32> {
         for i in results.iter() {
@@ -383,7 +428,7 @@ pub mod wgpu_compute_header {
 
     pub async fn read_fvec3(
         program: &ComputeProgram,
-        results: &Vec<BINDING>,
+        results: &Vec<DefaultBinding>,
         name: &str,
     ) -> Vec<f32> {
         for i in results.iter() {
@@ -413,10 +458,10 @@ pub mod wgpu_compute_header {
 
     pub fn pipe(
         program: &ComputeProgram,
-        mut in_bindings: ProgramBindings,
-        mut out_bindings: OutProgramBindings,
-        result_vec: Vec<BINDING>,
-    ) -> Vec<BINDING> {
+        mut in_bindings: ComputeBindings,
+        mut out_bindings: OutComputeBindings,
+        result_vec: Vec<DefaultBinding>,
+    ) -> Vec<DefaultBinding> {
         for i in result_vec {
             let binding = match in_bindings.bindings.iter().position(|x| x.name == i.name) {
                 Some(x) => &mut in_bindings.bindings[x],

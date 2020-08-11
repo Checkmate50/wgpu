@@ -110,8 +110,8 @@ async fn execute_gpu() {
         }}
     };
 
-    let mut srcParticlePos: Vec<Vec<f32>> = vec![vec![0.0, 0.0, 0.0], vec![0.3, 0.2, 0.0]];
-    let mut srcParticleVel: Vec<Vec<f32>> = vec![vec![0.01, -0.02, 0.0], vec![-0.05, -0.03, 0.0]];
+    let mut srcParticlePos: Vec<[f32; 3]> = vec![[0.0, 0.0, 0.0], [0.3, 0.2, 0.0]];
+    let mut srcParticleVel: Vec<[f32; 3]> = vec![[0.01, -0.02, 0.0], [-0.05, -0.03, 0.0]];
     let deltaT: f32 = 0.04;
     let rule1Distance: f32 = 0.1;
     let rule2Distance: f32 = 0.25;
@@ -216,8 +216,17 @@ async fn execute_gpu() {
             println!("Current values");
             println!("{:?}", dstParticlePos);
             println!("{:?}", dstParticleVel);
-            srcParticlePos = vec![dstParticlePos[0..3].to_vec(), dstParticlePos[3..6].to_vec()];
-            srcParticleVel = vec![dstParticleVel[0..3].to_vec(), dstParticleVel[3..6].to_vec()];
+            let mut dstParticlePos1: [f32; 3] = Default::default();
+            let mut dstParticlePos2: [f32; 3] = Default::default();
+            let mut dstParticleVel1: [f32; 3] = Default::default();
+            let mut dstParticleVel2: [f32; 3] = Default::default();
+
+            dstParticlePos1.copy_from_slice(&dstParticlePos[0..3]);
+            dstParticlePos2.copy_from_slice(&dstParticlePos[3..6]);
+            dstParticleVel1.copy_from_slice(&dstParticleVel[0..3]);
+            dstParticleVel2.copy_from_slice(&dstParticleVel[3..6]);
+            srcParticlePos = vec![dstParticlePos1, dstParticlePos2];
+            srcParticleVel = vec![dstParticleVel1, dstParticleVel2];
         }
     }
 }

@@ -1,23 +1,27 @@
 pub use self::wgpu_graphics_header::{
-    compile_buffer, graphics_compile, graphics_pipe, graphics_run, valid_fragment_shader,
-    valid_vertex_shader, GraphicsProgram, GraphicsShader,
+    bind_vertex, compile_buffer, graphics_compile, graphics_pipe, graphics_run,
+    valid_fragment_shader, valid_vertex_shader, GraphicsBindings, GraphicsProgram, GraphicsShader,
+    OutGraphicsBindings,
 };
 
 pub mod wgpu_graphics_header {
     use glsl_to_spirv::ShaderType;
+    use zerocopy::AsBytes as _;
 
     use std::collections::HashMap;
 
     use winit::window::Window;
 
     use crate::shared::{
-        check_gl_builtin_type, compile_shader, has_out_qual, process_body, string_compare,
-        OutProgramBindings, Program, ProgramBindings, BINDING, GLSLTYPE, PARAMETER, QUALIFIER,
+        bind_vec3, check_gl_builtin_type, compile_shader, has_out_qual, new_bindings, process_body,
+        string_compare, Bindings, DefaultBinding, OutProgramBindings, Program, ProgramBindings,
+        GLSLTYPE, PARAMETER, QUALIFIER,
     };
 
     pub struct GraphicsProgram {
         pub surface: wgpu::Surface,
         pub device: wgpu::Device,
+        bind_group_layout: wgpu::BindGroupLayout,
         queue: wgpu::Queue,
         pipeline: wgpu::RenderPipeline,
         // bind_group_layout: wgpu::BindGroupLayout,
@@ -29,20 +33,67 @@ pub mod wgpu_graphics_header {
         }
     }
 
-    impl Program for &GraphicsProgram {
-        fn get_device(&self) -> &wgpu::Device {
-            &self.device
+    #[derive(Debug)]
+    pub struct GraphicsBindings {
+        pub bindings: Vec<DefaultBinding>,
+        pub indicies: Option<wgpu::Buffer>,
+        pub index_len: Option<u32>,
+    }
+
+    impl ProgramBindings for GraphicsBindings {
+        fn getBindings(&mut self) -> &mut Vec<DefaultBinding> {
+            &mut self.bindings
+        }
+        fn indexBinding(&mut self, index: usize) -> &mut DefaultBinding {
+            &mut self.bindings[index]
+        }
+    }
+
+    #[derive(Debug)]
+    pub struct OutGraphicsBindings {
+        pub bindings: Vec<DefaultBinding>,
+    }
+
+    impl OutProgramBindings for OutGraphicsBindings {
+        fn getBindings(&mut self) -> &mut Vec<DefaultBinding> {
+            &mut self.bindings
+        }
+        fn indexBinding(&mut self, index: usize) -> &mut DefaultBinding {
+            &mut self.bindings[index]
+        }
+    }
+
+    impl Bindings for GraphicsBindings {
+        fn clone(&self) -> GraphicsBindings {
+            GraphicsBindings {
+                bindings: new_bindings(&self.bindings),
+                indicies: None,
+                index_len: None,
+            }
+        }
+    }
+
+    impl Bindings for OutGraphicsBindings {
+        fn clone(&self) -> OutGraphicsBindings {
+            OutGraphicsBindings {
+                bindings: new_bindings(&self.bindings),
+            }
         }
     }
 
     fn stringify_shader(
         s: &GraphicsShader,
-        b: &ProgramBindings,
-        b_out: &OutProgramBindings,
+        b: &GraphicsBindings,
+        b_out: &OutGraphicsBindings,
     ) -> String {
         let mut buffer = Vec::new();
         for i in &b.bindings[..] {
-            if i.name != "gl_Position" {
+            if i.qual.contains(&QUALIFIER::UNIFORM) {
+                buffer.push(format!(
+                    "layout(location={}) uniform UNIFORM{} {{\n\t {} {};\n}};\n",
+                    i.binding_number, i.binding_number, i.gtype, i.name
+                ));
+            } else if i.name != "gl_Position" {
                 buffer.push(format!(
                     "layout(location={}) {} {} {};\n",
                     i.binding_number,
@@ -95,15 +146,16 @@ pub mod wgpu_graphics_header {
         vertex: &GraphicsShader,
         fragment: &GraphicsShader,
     ) -> (
-        ProgramBindings,
-        OutProgramBindings,
-        ProgramBindings,
-        OutProgramBindings,
+        GraphicsBindings,
+        OutGraphicsBindings,
+        GraphicsBindings,
+        OutGraphicsBindings,
     ) {
         let mut vertex_binding_struct = Vec::new();
         let mut vertex_out_binding_struct = Vec::new();
         let mut fragment_binding_struct = Vec::new();
         let mut fragment_out_binding_struct = Vec::new();
+        let mut vertex_stage_binding_number = 0;
         let mut vertex_binding_number = 0;
         let mut vertex_to_fragment_binding_number = 0;
         let mut vertex_to_fragment_map = HashMap::new();
@@ -111,8 +163,8 @@ pub mod wgpu_graphics_header {
         for i in &vertex.params[..] {
             if !check_gl_builtin_type(i.name, &i.gtype) {
                 // Bindings that are kept between runs
-                if i.qual.contains(&QUALIFIER::IN) && !i.qual.contains(&QUALIFIER::OUT) {
-                    vertex_binding_struct.push(BINDING {
+                if i.qual.contains(&QUALIFIER::VERTEX) {
+                    vertex_binding_struct.push(DefaultBinding {
                         binding_number: vertex_binding_number,
                         name: i.name.to_string(),
                         data: None,
@@ -122,8 +174,20 @@ pub mod wgpu_graphics_header {
                     });
                     vertex_binding_number += 1;
                 // Bindings that are invalidated after a run
+                } else if i.qual.contains(&QUALIFIER::IN) && !i.qual.contains(&QUALIFIER::OUT) {
+                    println!("{} {}", i.name, vertex_stage_binding_number);
+                    vertex_binding_struct.push(DefaultBinding {
+                        binding_number: vertex_stage_binding_number,
+                        name: i.name.to_string(),
+                        data: None,
+                        length: None,
+                        gtype: i.gtype.clone(),
+                        qual: i.qual.to_vec(),
+                    });
+                    vertex_stage_binding_number += 1;
+                // Bindings that are invalidated after a run
                 } else if !i.qual.contains(&QUALIFIER::IN) && i.qual.contains(&QUALIFIER::OUT) {
-                    vertex_out_binding_struct.push(BINDING {
+                    vertex_out_binding_struct.push(DefaultBinding {
                         binding_number: vertex_to_fragment_binding_number,
                         name: i.name.to_string(),
                         data: None,
@@ -134,6 +198,7 @@ pub mod wgpu_graphics_header {
                     vertex_to_fragment_map.insert(i.name, vertex_to_fragment_binding_number);
                     vertex_to_fragment_binding_number += 1;
                 } else {
+                    println!("{:?}", i);
                     panic!("TODO We currently don't support both in and out qualifiers for vertex/fragment shaders")
                 }
             }
@@ -143,7 +208,7 @@ pub mod wgpu_graphics_header {
             if !check_gl_builtin_type(i.name, &i.gtype) {
                 // Bindings that are kept between runs
                 if i.qual.contains(&QUALIFIER::IN) && !i.qual.contains(&QUALIFIER::OUT) {
-                    fragment_binding_struct.push(BINDING {
+                    fragment_binding_struct.push(DefaultBinding {
                         binding_number: vertex_to_fragment_map.get(i.name).unwrap().clone(),
                         name: i.name.to_string(),
                         data: None,
@@ -153,7 +218,7 @@ pub mod wgpu_graphics_header {
                     });
                 // Bindings that are invalidated after a run
                 } else if !i.qual.contains(&QUALIFIER::IN) && i.qual.contains(&QUALIFIER::OUT) {
-                    fragment_out_binding_struct.push(BINDING {
+                    fragment_out_binding_struct.push(DefaultBinding {
                         binding_number: fragment_out_binding_number,
                         name: i.name.to_string(),
                         data: None,
@@ -169,16 +234,20 @@ pub mod wgpu_graphics_header {
         }
 
         return (
-            ProgramBindings {
+            GraphicsBindings {
                 bindings: vertex_binding_struct,
+                indicies: None,
+                index_len: None,
             },
-            OutProgramBindings {
+            OutGraphicsBindings {
                 bindings: vertex_out_binding_struct,
             },
-            ProgramBindings {
+            GraphicsBindings {
                 bindings: fragment_binding_struct,
+                indicies: None,
+                index_len: None,
             },
-            OutProgramBindings {
+            OutGraphicsBindings {
                 bindings: fragment_out_binding_struct,
             },
         );
@@ -189,7 +258,7 @@ pub mod wgpu_graphics_header {
         window: &Window,
         vertex: &GraphicsShader,
         fragment: &GraphicsShader,
-    ) -> (GraphicsProgram, ProgramBindings, OutProgramBindings) {
+    ) -> (GraphicsProgram, GraphicsBindings, OutGraphicsBindings) {
         // the adapter is the handler to the physical graphics unit
 
         // todo vertex shader -> string + main entry point + descriptors...
@@ -223,16 +292,18 @@ pub mod wgpu_graphics_header {
             create_bindings(&vertex, &fragment);
 
         for i in &program_bindings1.bindings[..] {
-            vec_buffer[i.binding_number as usize] = wgpu::VertexAttributeDescriptor {
-                offset: 0,
-                // This is our connection to shader.vert
-                shader_location: i.binding_number,
-                format: if i.gtype == GLSLTYPE::Vec3 {
-                    wgpu::VertexFormat::Float3
-                } else {
-                    wgpu::VertexFormat::Float
-                },
-            };
+            if i.qual.contains(&QUALIFIER::VERTEX) {
+                vec_buffer[i.binding_number as usize] = wgpu::VertexAttributeDescriptor {
+                    offset: 0,
+                    // This is our connection to shader.vert
+                    shader_location: i.binding_number,
+                    format: if i.gtype == GLSLTYPE::Vec3 {
+                        wgpu::VertexFormat::Float3
+                    } else {
+                        wgpu::VertexFormat::Float
+                    },
+                };
+            }
         }
 
         let mut vertex_binding_desc = Vec::new();
@@ -250,6 +321,21 @@ pub mod wgpu_graphics_header {
                                                                                      readonly: false,
                                                                                  }
                                                                              } */
+                });
+                are_bind_enties = true;
+            } else if i.qual.contains(&QUALIFIER::BUFFER) {
+                bind_entry.push(wgpu::BindGroupLayoutEntry {
+                    binding: i.binding_number,
+                    visibility: wgpu::ShaderStage::VERTEX | wgpu::ShaderStage::FRAGMENT,
+                    ty: wgpu::BindingType::StorageBuffer {
+                        dynamic: false,
+                        readonly: false,
+                    }, /* else {
+                           wgpu::BindingType::StorageBuffer {
+                               dynamic: false,
+                               readonly: false,
+                           }
+                       } */
                 });
                 are_bind_enties = true;
             } else {
@@ -287,12 +373,12 @@ pub mod wgpu_graphics_header {
             }
         }
 
+        let x = stringify_shader(vertex, &program_bindings1, &out_program_bindings1);
+
+        println!("{}", x);
+
         // Our compiled vertex shader
-        let vs_module = compile_shader(
-            stringify_shader(vertex, &program_bindings1, &out_program_bindings1),
-            ShaderType::Vertex,
-            &device,
-        );
+        let vs_module = compile_shader(x, ShaderType::Vertex, &device);
 
         // Our compiled fragment shader
         let fs_module = compile_shader(
@@ -301,23 +387,18 @@ pub mod wgpu_graphics_header {
             &device,
         );
 
-        let bind_group_layout =
-            &[
-                &device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                    // The layout of for each binding specify a number to connect with the bind_group, a visibility to specify for which stage it's for and a type
-                    bindings: if are_bind_enties { &bind_entry } else { &[] },
-                    label: None,
-                }),
-            ];
+        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            // The layout of for each binding specify a number to connect with the bind_group, a visibility to specify for which stage it's for and a type
+            bindings: if are_bind_enties { &bind_entry } else { &[] },
+            label: None,
+        });
+
+        let bind_group_layout_ref = [&bind_group_layout];
 
         // Bind no values to none of the bindings.
         // Use for something like textures
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            bind_group_layouts: if are_bind_enties {
-                bind_group_layout
-            } else {
-                &[]
-            },
+            bind_group_layouts: &bind_group_layout_ref,
         });
 
         // The part where we actually bring it all together
@@ -346,7 +427,7 @@ pub mod wgpu_graphics_header {
                 // Specify that we don't want to toss any of our primitives(triangles) based on which way they face. Useful for getting rid of shapes that aren't shown to the viewer
                 // Alternatives include Front and Back culling
                 // We are currently back-facing so CullMode::Front does nothing and Back gets rid of the triangle
-                cull_mode: wgpu::CullMode::None,
+                cull_mode: wgpu::CullMode::Back,
                 depth_bias: 0,
                 depth_bias_slope_scale: 0.0,
                 depth_bias_clamp: 0.0,
@@ -380,6 +461,7 @@ pub mod wgpu_graphics_header {
         (
             GraphicsProgram {
                 pipeline: render_pipeline,
+                bind_group_layout,
                 device,
                 queue,
                 surface,
@@ -387,6 +469,23 @@ pub mod wgpu_graphics_header {
             program_bindings1,
             out_program_bindings1,
         )
+    }
+
+    pub fn bind_vertex(
+        program: &dyn Program,
+        bindings: &mut GraphicsBindings,
+        out_bindings: &mut OutGraphicsBindings,
+        vecs: &Vec<[f32; 3]>,
+        indicies: &Vec<u16>,
+        name: String,
+    ) {
+        bind_vec3(program, bindings, out_bindings, vecs, name);
+        bindings.indicies = Some(
+            program
+                .get_device()
+                .create_buffer_with_data(indicies.as_slice().as_bytes(), wgpu::BufferUsage::INDEX),
+        );
+        bindings.index_len = Some(indicies.len() as u32);
     }
 
     /* pub fn bind_texture(
@@ -454,11 +553,39 @@ pub mod wgpu_graphics_header {
         rpass.draw(vertices, instances);
     }
 
+    pub fn draw_indexed(
+        rpass: &mut wgpu::RenderPass,
+        indexes: core::ops::Range<u32>,
+        instances: core::ops::Range<u32>,
+    ) {
+        rpass.draw_indexed(indexes, 0, instances);
+    }
+
+    fn buffer_map_setup<'a>(
+        bindings: &'a GraphicsBindings,
+        out_bindings: &'a OutGraphicsBindings,
+    ) -> HashMap<u32, &'a DefaultBinding> {
+        let mut buffer_map = HashMap::new();
+
+        for i in bindings.bindings.iter() {
+            if !i.qual.contains(&QUALIFIER::VERTEX) {
+                buffer_map.insert(i.binding_number, i);
+            }
+        }
+
+        for i in out_bindings.bindings.iter() {
+            if i.qual.contains(&QUALIFIER::IN) && i.name != "gl_Position" {
+                buffer_map.insert(i.binding_number, i);
+            }
+        }
+        return buffer_map;
+    }
+
     // todo create a proper program struct that holds the render pass and the draw function
     pub fn graphics_run(
         program: &GraphicsProgram,
-        bindings: &ProgramBindings,
-        out_bindings: OutProgramBindings,
+        bindings: &GraphicsBindings,
+        out_bindings: OutGraphicsBindings,
         swap_chain: &mut wgpu::SwapChain,
     ) {
         let frame = swap_chain
@@ -491,6 +618,37 @@ pub mod wgpu_graphics_header {
             bind.unwrap().length.unwrap() as u32
         };
 
+        let buffer_map = buffer_map_setup(bindings, &out_bindings);
+
+        let mut empty_vec = Vec::new();
+
+        for i in 0..(buffer_map.len()) {
+            let b = buffer_map.get(&(i as u32)).expect(&format!(
+                "I assumed all bindings would be buffers but I guess that has been invalidated"
+            ));
+
+            empty_vec.push(wgpu::Binding {
+                binding: b.binding_number,
+                resource: wgpu::BindingResource::Buffer {
+                    buffer: &b
+                        .data
+                        .as_ref()
+                        .expect(&format!("The binding of {} was not set", &b.name)),
+                    range: 0..b
+                        .length
+                        .expect(&format!("The size of {} was not set", &b.name)),
+                },
+            });
+        }
+
+        let bgd = &wgpu::BindGroupDescriptor {
+            layout: &program.bind_group_layout,
+            bindings: empty_vec.as_slice(),
+            label: None,
+        };
+
+        let bind_group = program.device.create_bind_group(bgd);
+
         {
             let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 // color_attachments is literally where we draw the colors to
@@ -511,25 +669,18 @@ pub mod wgpu_graphics_header {
             // Otherwise we crash out
             rpass.set_pipeline(&program.pipeline);
 
+            rpass.set_bind_group(0, &bind_group, &[]);
+
+            if bindings.indicies.is_some() {
+                rpass.set_index_buffer(&bindings.indicies.as_ref().unwrap(), 0, 0);
+            }
+
             for i in 0..(bindings.bindings.len()) {
                 let b = bindings.bindings.get(i as usize).expect(&format!(
                     "I assumed all bindings would be buffers but I guess that has been invalidated"
                 ));
-                rpass.set_vertex_buffer(
-                    b.binding_number,
-                    &b.data
-                        .as_ref()
-                        .expect(&format!("The binding of {} was not set", &b.name)),
-                    0,
-                    0,
-                );
-            }
 
-            for i in 0..(out_bindings.bindings.len()) {
-                let b = out_bindings.bindings.get(i as usize).expect(&format!(
-                    "I assumed all bindings would be buffers but I guess that has been invalidated"
-                ));
-                if b.qual.contains(&QUALIFIER::IN) {
+                if b.qual.contains(&QUALIFIER::VERTEX) {
                     rpass.set_vertex_buffer(
                         b.binding_number,
                         &b.data
@@ -541,7 +692,29 @@ pub mod wgpu_graphics_header {
                 }
             }
 
-            draw(&mut rpass, 0..verts, 0..instances);
+            for i in 0..(out_bindings.bindings.len()) {
+                let b = out_bindings.bindings.get(i as usize).expect(&format!(
+                    "I assumed all bindings would be buffers but I guess that has been invalidated"
+                ));
+                if b.qual.contains(&QUALIFIER::VERTEX) {
+                    if b.qual.contains(&QUALIFIER::IN) {
+                        rpass.set_vertex_buffer(
+                            b.binding_number,
+                            &b.data
+                                .as_ref()
+                                .expect(&format!("The binding of {} was not set", &b.name)),
+                            0,
+                            0,
+                        );
+                    }
+                }
+            }
+
+            if bindings.indicies.is_some() {
+                draw_indexed(&mut rpass, 0..bindings.index_len.unwrap(), 0..instances)
+            } else {
+                draw(&mut rpass, 0..verts, 0..instances);
+            }
         }
 
         // Do the rendering by saying that we are done and sending it off to the gpu
@@ -550,12 +723,11 @@ pub mod wgpu_graphics_header {
 
     pub fn graphics_pipe(
         program: &GraphicsProgram,
-        mut in_bindings: ProgramBindings,
-        mut out_bindings: OutProgramBindings,
+        mut in_bindings: GraphicsBindings,
+        mut out_bindings: OutGraphicsBindings,
         swap_chain: &mut wgpu::SwapChain,
-        result_vec: Vec<BINDING>,
+        result_vec: Vec<DefaultBinding>,
     ) {
-        println!("starting");
         for i in result_vec {
             let binding = match in_bindings.bindings.iter().position(|x| x.name == i.name) {
                 Some(x) => &mut in_bindings.bindings[x],

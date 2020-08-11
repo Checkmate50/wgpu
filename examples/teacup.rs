@@ -7,11 +7,15 @@ use winit::{
     window::Window,
 };
 
+use obj::{load_obj, Obj};
+use std::fs::File;
+use std::io::BufReader;
+
 pub use static_assertions::const_assert;
 
 pub use pipeline::wgpu_graphics_header;
 pub use pipeline::wgpu_graphics_header::{
-    compile_buffer, valid_fragment_shader, valid_vertex_shader, GraphicsShader,
+    compile_buffer, valid_fragment_shader, valid_vertex_shader, GraphicsShader, bind_vertex
 };
 
 pub use pipeline::shared;
@@ -23,25 +27,20 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     let size = window.inner_size();
 
     const VERTEXT: (GraphicsShader, [&str; 32], [&str; 32]) = graphics_shader! {
-        [[buffer in] vec3] position;
-        [[uniform in] mat4] model;
-        [[uniform in] mat4] view;
-        [[uniform in] mat4] projection;
-        [[uniform in out] vec3] ambient;
+        [[vertex in] vec3] a_position;
         [[out] vec4] gl_Position;
         {{
             void main() {
-                projection * view * model * vec4(position, 1.0);
+                gl_Position = vec4(0.2 *a_position, 1.0);
             }
         }}
     };
 
     const FRAGMENT: (GraphicsShader, [&str; 32], [&str; 32]) = graphics_shader! {
-        [[uniform in] vec3] ambient;
         [[out] vec4] color;
         {{
             void main() {
-                color = vec4(ambient, 1);
+                color = vec4(1.0);
             }
         }}
     };
@@ -57,11 +56,13 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     let (program, mut template_bindings, mut template_out_bindings) =
         wgpu_graphics_header::graphics_compile(&mut compile_buffer, &window, &S_v, &S_f).await;
 
-    let positions = vec![
-        vec![0.0, 0.7, 0.0],
-        vec![-0.5, 0.5, 0.0],
-        vec![0.5, -0.5, 0.0],
-    ];
+    let input = BufReader::new(File::open("examples/models/caiman.obj").unwrap());
+    let mut dome: Obj = load_obj(input).unwrap();
+    let mut positions = Vec::new();
+    let mut indices = dome.indices;
+    for i in &dome.vertices {
+        positions.push(i.position);
+    }
 
     // For drawing to window
     let mut sc_desc = wgpu::SwapChainDescriptor {
@@ -86,14 +87,25 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
             Event::RedrawRequested(_) => {
                 let mut bindings = template_bindings.clone();
                 let mut out_bindings = template_out_bindings.clone();
-
-                ready_to_run(STARTING_BIND_CONTEXT);
-                wgpu_graphics_header::graphics_run(
+                const BIND_CONTEXT_1: [&str; 32] =
+                    update_bind_context!(STARTING_BIND_CONTEXT, "a_position");
+                bind_vertex(
                     &program,
-                    &bindings,
-                    out_bindings,
-                    &mut swap_chain,
+                    &mut bindings,
+                    &mut out_bindings,
+                    &positions,
+                    &indices,
+                    "a_position".to_string(),
                 );
+                {
+                    ready_to_run(BIND_CONTEXT_1);
+                    wgpu_graphics_header::graphics_run(
+                        &program,
+                        &bindings,
+                        out_bindings,
+                        &mut swap_chain,
+                    );
+                }
             }
             // When the window closes we are done. Change the status
             Event::WindowEvent {

@@ -1,8 +1,9 @@
 pub use self::shared::{
     array_type, bind_float, bind_fvec, bind_fvec2, bind_vec, bind_vec2, bind_vec3, can_pipe,
     check_gl_builtin_type, compile_shader, has_in_qual, has_out_qual, is_gl_builtin,
-    new_bind_scope, process_body, ready_to_run, string_compare, Bindings, OutProgramBindings,
-    Program, ProgramBindings, BINDING, GLSLTYPE, PARAMETER, QUALIFIER,
+    new_bind_scope, new_bindings, process_body, ready_to_run, string_compare, Bindings,
+    DefaultBinding, OutProgramBindings, Program, ProgramBindings, GLSLTYPE, PARAMETER,
+    QUALIFIER, bind_mat4
 };
 
 pub mod shared {
@@ -120,40 +121,35 @@ pub mod shared {
         true
     }
 
+    #[derive(Debug)]
+    pub struct DefaultBinding {
+        pub binding_number: u32,
+        pub name: String,
+        pub data: Option<wgpu::Buffer>,
+        pub length: Option<u64>,
+        pub gtype: GLSLTYPE,
+        pub qual: Vec<QUALIFIER>,
+    }
+
+    pub trait ProgramBindings {
+        fn getBindings(&mut self) -> &mut Vec<DefaultBinding>;
+        fn indexBinding(&mut self, index: usize) -> &mut DefaultBinding;
+    }
+
+    pub trait OutProgramBindings {
+        fn getBindings(&mut self) -> &mut Vec<DefaultBinding>;
+        fn indexBinding(&mut self, index: usize) -> &mut DefaultBinding;
+    }
+
     pub trait Bindings {
         fn clone(&self) -> Self;
     }
 
-    #[derive(Debug)]
-    pub struct ProgramBindings {
-        pub bindings: Vec<BINDING>,
-    }
-
-    impl Bindings for ProgramBindings {
-        fn clone(&self) -> ProgramBindings {
-            ProgramBindings {
-                bindings: new_bindings(&self.bindings),
-            }
-        }
-    }
-
-    #[derive(Debug)]
-    pub struct OutProgramBindings {
-        pub bindings: Vec<BINDING>,
-    }
-    impl Bindings for OutProgramBindings {
-        fn clone(&self) -> OutProgramBindings {
-            OutProgramBindings {
-                bindings: new_bindings(&self.bindings),
-            }
-        }
-    }
-
-    fn new_bindings(bindings: &Vec<BINDING>) -> Vec<BINDING> {
+    pub fn new_bindings(bindings: &Vec<DefaultBinding>) -> Vec<DefaultBinding> {
         let mut new = Vec::new();
 
         for i in bindings.iter() {
-            new.push(BINDING {
+            new.push(DefaultBinding {
                 name: i.name.to_string(),
                 binding_number: i.binding_number,
                 qual: i.qual.clone(),
@@ -169,34 +165,28 @@ pub mod shared {
         fn get_device(&self) -> &wgpu::Device;
     }
 
-    #[derive(Debug)]
-    pub struct BINDING {
-        pub binding_number: u32,
-        pub name: String,
-        pub data: Option<wgpu::Buffer>,
-        pub length: Option<u64>,
-        pub gtype: GLSLTYPE,
-        pub qual: Vec<QUALIFIER>,
-    }
-
     fn bind<'a>(
         program: &dyn Program,
-        bindings: &mut ProgramBindings,
-        out_bindings: &mut OutProgramBindings,
+        bindings: &mut dyn ProgramBindings,
+        out_bindings: &mut dyn OutProgramBindings,
         data: &'a [u8],
         length: u64,
         acceptable_types: Vec<GLSLTYPE>,
         name: String,
     ) {
-        let binding = match bindings.bindings.iter().position(|x| x.name == name) {
-            Some(x) => &mut bindings.bindings[x],
+        let mut binding = match bindings
+            .getBindings()
+            .iter()
+            .position(|x| x.name == name)
+        {
+            Some(x) => bindings.indexBinding(x),
             None => {
                 let x = out_bindings
-                    .bindings
+                    .getBindings()
                     .iter()
                     .position(|x| x.name == name)
                     .expect("We couldn't find the binding");
-                &mut out_bindings.bindings[x]
+                out_bindings.indexBinding(x)
             }
         };
 
@@ -230,8 +220,8 @@ pub mod shared {
 
     pub fn bind_vec(
         program: &dyn Program,
-        bindings: &mut ProgramBindings,
-        out_bindings: &mut OutProgramBindings,
+        bindings: &mut dyn ProgramBindings,
+        out_bindings: &mut dyn OutProgramBindings,
         numbers: &Vec<u32>,
         name: String,
     ) {
@@ -248,8 +238,8 @@ pub mod shared {
 
     pub fn bind_fvec(
         program: &dyn Program,
-        bindings: &mut ProgramBindings,
-        out_bindings: &mut OutProgramBindings,
+        bindings: &mut dyn ProgramBindings,
+        out_bindings: &mut dyn OutProgramBindings,
         numbers: &Vec<f32>,
         name: String,
     ) {
@@ -266,8 +256,8 @@ pub mod shared {
 
     pub fn bind_vec2(
         program: &dyn Program,
-        bindings: &mut ProgramBindings,
-        out_bindings: &mut OutProgramBindings,
+        bindings: &mut dyn ProgramBindings,
+        out_bindings: &mut dyn OutProgramBindings,
         vecs: &Vec<Vec<f32>>,
         name: String,
     ) {
@@ -293,8 +283,8 @@ pub mod shared {
 
     pub fn bind_fvec2(
         program: &dyn Program,
-        bindings: &mut ProgramBindings,
-        out_bindings: &mut OutProgramBindings,
+        bindings: &mut dyn ProgramBindings,
+        out_bindings: &mut dyn OutProgramBindings,
         numbers: &Vec<f32>,
         name: String,
     ) {
@@ -319,15 +309,17 @@ pub mod shared {
 
     pub fn bind_vec3(
         program: &dyn Program,
-        bindings: &mut ProgramBindings,
-        out_bindings: &mut OutProgramBindings,
-        vecs: &Vec<Vec<f32>>,
+        bindings: &mut dyn ProgramBindings,
+        out_bindings: &mut dyn OutProgramBindings,
+        vecs: &Vec<[f32; 3]>,
         name: String,
     ) {
-        let numbers: Vec<f32> = vecs.clone().into_iter().flatten().collect();
-        if numbers.len() % 3 != 0 {
-            panic!("Your trying to bind to vec to but your not giving a vector that can be split into 3's")
-        }
+        let numbers: Vec<f32> = vecs
+            .clone()
+            .into_iter()
+            .map(|x| x.to_vec())
+            .flatten()
+            .collect();
         bind(
             program,
             bindings,
@@ -341,17 +333,18 @@ pub mod shared {
 
     pub fn bind_mat4(
         program: &dyn Program,
-        bindings: &mut ProgramBindings,
-        out_bindings: &mut OutProgramBindings,
+        bindings: &mut dyn ProgramBindings,
+        out_bindings: &mut dyn OutProgramBindings,
         mat: cgmath::Matrix4<f32>,
         name: String,
     ) {
+        let mat_slice : &[f32; 16] = mat.as_ref();
         bind(
             program,
             bindings,
             out_bindings,
-            &cgmath::conv::array4x4(mat).as_bytes(),
-            1 as u64,
+            bytemuck::cast_slice(mat_slice.as_bytes()),
+            64 as u64,
             vec![GLSLTYPE::Mat4],
             name,
         )
@@ -359,8 +352,8 @@ pub mod shared {
 
     pub fn bind_float(
         program: &dyn Program,
-        bindings: &mut ProgramBindings,
-        out_bindings: &mut OutProgramBindings,
+        bindings: &mut dyn ProgramBindings,
+        out_bindings: &mut dyn OutProgramBindings,
         numbers: &f32,
         name: String,
     ) {

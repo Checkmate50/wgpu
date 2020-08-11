@@ -11,6 +11,7 @@ features = ["const_loop", "const_panic", "const_fn", "const_if_match"]
 [dependencies]
 regex = "1"
 static_assertions = "0.1"
+obj-rs = "0.6.1"
 wgpu = "0.5.0"
 winit = "0.22"
 cgmath = "0.17"
