@@ -26,14 +26,17 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     const VERTEXT: (GraphicsShader, [&str; 32], [&str; 32]) = graphics_shader! {
         [[vertex in] vec3] a_position;
         [[vertex in] vec3] vertexColor;
-        [[uniform in] mat4] u_Transform;
-        [[] int] gl_VertexID;
+        [[uniform in] mat4] u_view;
+        [[uniform in] mat4] u_proj;
+
+
         [[out] vec3] fragmentColor;
         [[out] vec4] gl_Position;
         {{
             void main() {
                 fragmentColor = vertexColor;
-                gl_Position = u_Transform * vec4(0.3 * a_position, 1.0);
+                gl_Position = u_proj * u_view * vec4(0.3 * a_position, 1.0);
+                /* gl_Position = u_proj * u_view * vec4(0.3 * a_position, 1.0); */
             }
         }}
     };
@@ -139,18 +142,26 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         [0.982, 0.099, 0.879],
     ];
 
-    fn generate_matrix(aspect_ratio: f32) -> cgmath::Matrix4<f32> {
-        let mx_projection = cgmath::perspective(cgmath::Deg(45f32), aspect_ratio, 1.0, 10.0);
+    let light_direction = vec![[20.0, 0.0, 20.0]];
+
+    let light_ambient = vec![[0.1, 0.0, 0.0]];
+
+    fn generate_view(aspect_ratio: f32) -> cgmath::Matrix4<f32> {
         let mx_view = cgmath::Matrix4::look_at(
             cgmath::Point3::new(1.5f32, -5.0, 3.0),
             cgmath::Point3::new(0f32, 0.0, 0.0),
             cgmath::Vector3::unit_z(),
         );
+        mx_view
+    }
+
+    fn generate_projection(aspect_ratio: f32) -> cgmath::Matrix4<f32> {
+        let mx_projection = cgmath::perspective(cgmath::Deg(45f32), aspect_ratio, 1.0, 10.0);
         let mx_correction = cgmath::Matrix4::new(
             1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.5, 0.0, 0.0, 0.0, 0.5, 1.0,
         );
 
-        mx_correction * mx_projection * mx_view
+        mx_correction * mx_projection
     }
 
     // For drawing to window
@@ -165,7 +176,9 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         present_mode: wgpu::PresentMode::Mailbox,
     };
 
-    let view_mat = generate_matrix(sc_desc.width as f32 / sc_desc.height as f32);
+    let view_mat = generate_view(sc_desc.width as f32 / sc_desc.height as f32);
+
+    let proj_mat = generate_projection(sc_desc.width as f32 / sc_desc.height as f32);
 
     // A "chain" of buffers that we render on to the display
     let mut swap_chain = program.device.create_swap_chain(&program.surface, &sc_desc);
@@ -190,13 +203,13 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                 );
                 {
                     const BIND_CONTEXT_2: [&str; 32] =
-                        update_bind_context!(BIND_CONTEXT_1, "u_Transform");
+                        update_bind_context!(BIND_CONTEXT_1, "u_view");
                     bind_mat4(
                         &program,
                         &mut bindings,
                         &mut out_bindings,
                         view_mat,
-                        "u_Transform".to_string(),
+                        "u_view".to_string(),
                     );
                     {
                         const BIND_CONTEXT_3: [&str; 32] =
@@ -208,14 +221,53 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                             &color_data,
                             "vertexColor".to_string(),
                         );
+
                         {
-                            ready_to_run(BIND_CONTEXT_3);
-                            wgpu_graphics_header::graphics_run(
+                            const BIND_CONTEXT_4: [&str; 32] =
+                                update_bind_context!(BIND_CONTEXT_3, "u_proj");
+                            bind_mat4(
                                 &program,
-                                &bindings,
-                                out_bindings,
-                                &mut swap_chain,
+                                &mut bindings,
+                                &mut out_bindings,
+                                proj_mat,
+                                "u_proj".to_string(),
                             );
+                            {
+                                /*                             const BIND_CONTEXT_5: [&str; 32] =
+                                    update_bind_context!(BIND_CONTEXT_4, "vertexAmbient");
+                                bind_vec3(
+                                    &program,
+                                    &mut bindings,
+                                    &mut out_bindings,
+                                    &light_ambient,
+                                    "vertexAmbient".to_string(),
+                                ); */
+                                {
+                                    /*                                     const BIND_CONTEXT_6: [&str; 32] = update_bind_context!(
+                                        BIND_CONTEXT_5,
+                                        "vertexLightDirection"
+                                    );
+                                    bind_vec3(
+                                        &program,
+                                        &mut bindings,
+                                        &mut out_bindings,
+                                        &light_direction,
+                                        "vertexLightDirection".to_string(),
+                                    ); */
+                                    {
+                                        ready_to_run(BIND_CONTEXT_4);
+                                        wgpu_graphics_header::graphics_run(
+                                            &program,
+                                            program.device.create_command_encoder(
+                                                &wgpu::CommandEncoderDescriptor { label: None },
+                                            ),
+                                            &bindings,
+                                            out_bindings,
+                                            &mut swap_chain,
+                                        );
+                                    }
+                                }
+                            }
                         }
                     }
                 }

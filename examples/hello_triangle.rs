@@ -11,7 +11,8 @@ pub use static_assertions::const_assert;
 
 pub use pipeline::wgpu_graphics_header;
 pub use pipeline::wgpu_graphics_header::{
-    compile_buffer, valid_fragment_shader, valid_vertex_shader, GraphicsShader, GraphicsBindings, OutGraphicsBindings
+    compile_buffer, valid_fragment_shader, valid_vertex_shader, GraphicsBindings, GraphicsShader,
+    OutGraphicsBindings,
 };
 
 pub use pipeline::shared;
@@ -59,11 +60,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     let (program, mut template_bindings, mut template_out_bindings) =
         wgpu_graphics_header::graphics_compile(&mut compile_buffer, &window, &S_v, &S_f).await;
 
-    let positions = vec![
-        [0.0, 0.7, 0.0],
-        [-0.5, 0.5, 0.0],
-        [0.5, -0.5, 0.0],
-    ];
+    let positions = vec![[0.0, 0.7, 0.0], [-0.5, 0.5, 0.0], [0.5, -0.5, 0.0]];
     let brightness = vec![0.5, 0.5, 0.9];
 
     // For drawing to window
@@ -87,8 +84,8 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
             // Everything that can be processed has been so we can now redraw the image on our window
             Event::MainEventsCleared => window.request_redraw(),
             Event::RedrawRequested(_) => {
-                let mut bindings : GraphicsBindings = template_bindings.clone();
-                let mut out_bindings : OutGraphicsBindings = template_out_bindings.clone();
+                let mut bindings: GraphicsBindings = template_bindings.clone();
+                let mut out_bindings: OutGraphicsBindings = template_out_bindings.clone();
                 const BIND_CONTEXT_1: [&str; 32] =
                     update_bind_context!(STARTING_BIND_CONTEXT, "in_brightness");
                 bind_fvec(
@@ -112,6 +109,9 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                         ready_to_run(BIND_CONTEXT_2);
                         wgpu_graphics_header::graphics_run(
                             &program,
+                            program.device.create_command_encoder(
+                                &wgpu::CommandEncoderDescriptor { label: None },
+                            ),
                             &bindings,
                             out_bindings,
                             &mut swap_chain,

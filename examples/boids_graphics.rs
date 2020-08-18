@@ -19,10 +19,12 @@ pub use pipeline::shared::{
     bind_float, bind_fvec2, bind_vec, bind_vec3, can_pipe, is_gl_builtin, new_bind_scope,
     ready_to_run, Bindings, OutProgramBindings, Program, ProgramBindings,
 };
-pub use pipeline::wgpu_compute_header::{compile, read_fvec3, run, ComputeProgram, ComputeBindings, OutComputeBindings, ComputeShader};
+pub use pipeline::wgpu_compute_header::{
+    compile, read_fvec3, run, ComputeBindings, ComputeProgram, ComputeShader, OutComputeBindings,
+};
 pub use pipeline::wgpu_graphics_header::{
     compile_buffer, graphics_compile, graphics_pipe, graphics_run, valid_fragment_shader,
-    valid_vertex_shader, GraphicsProgram, GraphicsShader, GraphicsBindings, OutGraphicsBindings
+    valid_vertex_shader, GraphicsBindings, GraphicsProgram, GraphicsShader, OutGraphicsBindings,
 };
 
 pub use static_assertions::const_assert;
@@ -175,11 +177,7 @@ fn execute_gpu(event_loop: EventLoop<()>, window: Window) {
 
     let mut srcParticlePos = RefCell::new(vec![[0.5, 0.2, 0.0], [0.2, 0.1, 0.0]]);
     let mut srcParticleVel = RefCell::new(vec![[-0.1, -0.1, 0.0], [0.15, -0.12, 0.0]]);
-    let triangle: Vec<[f32; 3]> = vec![
-        [-0.01, -0.02, 0.0],
-        [0.01, -0.02, 0.0],
-        [0.00, 0.02, 0.0],
-    ];
+    let triangle: Vec<[f32; 3]> = vec![[-0.01, -0.02, 0.0], [0.01, -0.02, 0.0], [0.00, 0.02, 0.0]];
 
     async fn draw(
         frame: &mut wgpu::SwapChain,
@@ -192,11 +190,8 @@ fn execute_gpu(event_loop: EventLoop<()>, window: Window) {
         srcParticlePos: &RefCell<Vec<[f32; 3]>>,
         srcParticleVel: &RefCell<Vec<[f32; 3]>>,
     ) -> () {
-        let triangle: Vec<[f32; 3]> = vec![
-            [-0.01, -0.02, 0.0],
-            [0.01, -0.02, 0.0],
-            [0.00, 0.02, 0.0],
-        ];
+        let triangle: Vec<[f32; 3]> =
+            vec![[-0.01, -0.02, 0.0], [0.01, -0.02, 0.0], [0.00, 0.02, 0.0]];
         let deltaT: f32 = 0.04;
         let rule1Distance: f32 = 0.3;
         let rule2Distance: f32 = 0.15;
@@ -205,8 +200,8 @@ fn execute_gpu(event_loop: EventLoop<()>, window: Window) {
         let rule2Scale: f32 = 0.1;
         let rule3Scale: f32 = 0.05;
 
-        let mut bindings : ComputeBindings = template_bindings.clone();
-        let mut out_bindings : OutComputeBindings = template_out_bindings.clone();
+        let mut bindings: ComputeBindings = template_bindings.clone();
+        let mut out_bindings: OutComputeBindings = template_out_bindings.clone();
         let mut graphics_bindings = template_graphics_bindings.clone();
         let mut graphics_out_bindings = template_graphics_out_bindings.clone();
 
@@ -313,6 +308,9 @@ fn execute_gpu(event_loop: EventLoop<()>, window: Window) {
         static_assertions::const_assert!(can_pipe(&BIND_CONTEXT_10, &NEXT_STARTING_CONTEXT));
         graphics_pipe(
             &graphics_program,
+            graphics_program
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None }),
             graphics_bindings,
             graphics_out_bindings,
             frame,

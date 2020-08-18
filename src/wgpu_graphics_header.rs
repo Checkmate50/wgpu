@@ -1,7 +1,7 @@
 pub use self::wgpu_graphics_header::{
-    bind_vertex, compile_buffer, graphics_compile, graphics_pipe, graphics_run,
-    valid_fragment_shader, valid_vertex_shader, GraphicsBindings, GraphicsProgram, GraphicsShader,
-    OutGraphicsBindings,
+    bind_sampler, bind_texture, bind_vertex, compile_buffer, graphics_compile, graphics_pipe,
+    graphics_run, valid_fragment_shader, valid_vertex_shader, GraphicsBindings, GraphicsProgram,
+    GraphicsShader, OutGraphicsBindings,
 };
 
 pub mod wgpu_graphics_header {
@@ -13,9 +13,9 @@ pub mod wgpu_graphics_header {
     use winit::window::Window;
 
     use crate::shared::{
-        bind_vec3, check_gl_builtin_type, compile_shader, has_out_qual, new_bindings, process_body,
-        string_compare, Bindings, DefaultBinding, OutProgramBindings, Program, ProgramBindings,
-        GLSLTYPE, PARAMETER, QUALIFIER,
+        bind_vec3, check_gl_builtin_type, compile_shader, glsl_size, has_out_qual, new_bindings,
+        process_body, string_compare, Bindings, DefaultBinding, OutProgramBindings, Program,
+        ProgramBindings, GLSLTYPE, PARAMETER, QUALIFIER,
     };
 
     pub struct GraphicsProgram {
@@ -24,7 +24,6 @@ pub mod wgpu_graphics_header {
         bind_group_layout: wgpu::BindGroupLayout,
         queue: wgpu::Queue,
         pipeline: wgpu::RenderPipeline,
-        // bind_group_layout: wgpu::BindGroupLayout,
     }
 
     impl Program for GraphicsProgram {
@@ -34,10 +33,30 @@ pub mod wgpu_graphics_header {
     }
 
     #[derive(Debug)]
+    pub struct TextureBinding {
+        pub binding_number: u32,
+        pub name: String,
+        pub data: Option<wgpu::TextureView>,
+        pub gtype: GLSLTYPE,
+        pub qual: Vec<QUALIFIER>,
+    }
+
+    #[derive(Debug)]
+    pub struct SamplerBinding {
+        pub binding_number: u32,
+        pub name: String,
+        pub data: Option<wgpu::Sampler>,
+        pub gtype: GLSLTYPE,
+        pub qual: Vec<QUALIFIER>,
+    }
+
+    #[derive(Debug)]
     pub struct GraphicsBindings {
         pub bindings: Vec<DefaultBinding>,
         pub indicies: Option<wgpu::Buffer>,
         pub index_len: Option<u32>,
+        pub textures: Vec<TextureBinding>,
+        pub samplers: Vec<SamplerBinding>,
     }
 
     impl ProgramBindings for GraphicsBindings {
@@ -69,6 +88,8 @@ pub mod wgpu_graphics_header {
                 bindings: new_bindings(&self.bindings),
                 indicies: None,
                 index_len: None,
+                textures: new_textures(&self.textures),
+                samplers: new_samplers(&self.samplers),
             }
         }
     }
@@ -81,6 +102,36 @@ pub mod wgpu_graphics_header {
         }
     }
 
+    fn new_textures(bindings: &Vec<TextureBinding>) -> Vec<TextureBinding> {
+        let mut new = Vec::new();
+
+        for i in bindings.iter() {
+            new.push(TextureBinding {
+                name: i.name.to_string(),
+                binding_number: i.binding_number,
+                qual: i.qual.clone(),
+                gtype: i.gtype.clone(),
+                data: None,
+            })
+        }
+        new
+    }
+
+    fn new_samplers(bindings: &Vec<SamplerBinding>) -> Vec<SamplerBinding> {
+        let mut new = Vec::new();
+
+        for i in bindings.iter() {
+            new.push(SamplerBinding {
+                name: i.name.to_string(),
+                binding_number: i.binding_number,
+                qual: i.qual.clone(),
+                gtype: i.gtype.clone(),
+                data: None,
+            })
+        }
+        new
+    }
+
     fn stringify_shader(
         s: &GraphicsShader,
         b: &GraphicsBindings,
@@ -90,7 +141,7 @@ pub mod wgpu_graphics_header {
         for i in &b.bindings[..] {
             if i.qual.contains(&QUALIFIER::UNIFORM) {
                 buffer.push(format!(
-                    "layout(location={}) uniform UNIFORM{} {{\n\t {} {};\n}};\n",
+                    "layout(binding = {}) uniform UNIFORM{} {{\n\t {} {};\n}};\n",
                     i.binding_number, i.binding_number, i.gtype, i.name
                 ));
             } else if i.name != "gl_Position" {
@@ -113,8 +164,20 @@ pub mod wgpu_graphics_header {
                 ));
             }
         }
+        for i in &b.textures[..] {
+            buffer.push(format!(
+                "layout(binding = {}) uniform {} {};\n",
+                i.binding_number, i.gtype, i.name
+            ));
+        }
+        for i in &b.samplers[..] {
+            buffer.push(format!(
+                "layout(binding = {}) uniform {} {};\n",
+                i.binding_number, i.gtype, i.name
+            ));
+        }
         for i in &b_out.bindings[..] {
-            if i.name != "gl_Position" {
+            if i.name != "gl_Position" && !i.qual.contains(&QUALIFIER::UNIFORM) {
                 buffer.push(format!(
                     "layout(location={}) {} {} {};\n",
                     i.binding_number,
@@ -159,6 +222,8 @@ pub mod wgpu_graphics_header {
         let mut vertex_binding_number = 0;
         let mut vertex_to_fragment_binding_number = 0;
         let mut vertex_to_fragment_map = HashMap::new();
+        let mut uniform_binding_number = 0;
+        let mut uniform_map = HashMap::new();
         let mut fragment_out_binding_number = 0;
         for i in &vertex.params[..] {
             if !check_gl_builtin_type(i.name, &i.gtype) {
@@ -174,8 +239,18 @@ pub mod wgpu_graphics_header {
                     });
                     vertex_binding_number += 1;
                 // Bindings that are invalidated after a run
+                } else if i.qual.contains(&QUALIFIER::UNIFORM) {
+                    vertex_binding_struct.push(DefaultBinding {
+                        binding_number: uniform_binding_number,
+                        name: i.name.to_string(),
+                        data: None,
+                        length: None,
+                        gtype: i.gtype.clone(),
+                        qual: i.qual.to_vec(),
+                    });
+                    uniform_map.insert(i.name, uniform_binding_number);
+                    uniform_binding_number += 1;
                 } else if i.qual.contains(&QUALIFIER::IN) && !i.qual.contains(&QUALIFIER::OUT) {
-                    println!("{} {}", i.name, vertex_stage_binding_number);
                     vertex_binding_struct.push(DefaultBinding {
                         binding_number: vertex_stage_binding_number,
                         name: i.name.to_string(),
@@ -204,10 +279,42 @@ pub mod wgpu_graphics_header {
             }
         }
 
+        let mut textures_struct = Vec::new();
+        let mut samplers_struct = Vec::new();
+
         for i in &fragment.params[..] {
             if !check_gl_builtin_type(i.name, &i.gtype) {
                 // Bindings that are kept between runs
-                if i.qual.contains(&QUALIFIER::IN) && !i.qual.contains(&QUALIFIER::OUT) {
+                if i.qual.contains(&QUALIFIER::UNIFORM) {
+                    if i.gtype == GLSLTYPE::Sampler {
+                        samplers_struct.push(SamplerBinding {
+                            binding_number: uniform_binding_number,
+                            name: i.name.to_string(),
+                            data: None,
+                            gtype: i.gtype.clone(),
+                            qual: i.qual.to_vec(),
+                        });
+                        uniform_binding_number += 1;
+                    } else if i.gtype == GLSLTYPE::Texture2D || i.gtype == GLSLTYPE::TextureCube {
+                        textures_struct.push(TextureBinding {
+                            binding_number: uniform_binding_number,
+                            name: i.name.to_string(),
+                            data: None,
+                            gtype: i.gtype.clone(),
+                            qual: i.qual.to_vec(),
+                        });
+                        uniform_binding_number += 1;
+                    } else {
+                        fragment_binding_struct.push(DefaultBinding {
+                            binding_number: uniform_map.get(i.name).unwrap().clone(),
+                            name: i.name.to_string(),
+                            data: None,
+                            length: None,
+                            gtype: i.gtype.clone(),
+                            qual: i.qual.to_vec(),
+                        });
+                    }
+                } else if i.qual.contains(&QUALIFIER::IN) && !i.qual.contains(&QUALIFIER::OUT) {
                     fragment_binding_struct.push(DefaultBinding {
                         binding_number: vertex_to_fragment_map.get(i.name).unwrap().clone(),
                         name: i.name.to_string(),
@@ -238,6 +345,8 @@ pub mod wgpu_graphics_header {
                 bindings: vertex_binding_struct,
                 indicies: None,
                 index_len: None,
+                textures: Vec::new(),
+                samplers: Vec::new(),
             },
             OutGraphicsBindings {
                 bindings: vertex_out_binding_struct,
@@ -246,6 +355,8 @@ pub mod wgpu_graphics_header {
                 bindings: fragment_binding_struct,
                 indicies: None,
                 index_len: None,
+                textures: textures_struct,
+                samplers: samplers_struct,
             },
             OutGraphicsBindings {
                 bindings: fragment_out_binding_struct,
@@ -260,8 +371,6 @@ pub mod wgpu_graphics_header {
         fragment: &GraphicsShader,
     ) -> (GraphicsProgram, GraphicsBindings, OutGraphicsBindings) {
         // the adapter is the handler to the physical graphics unit
-
-        // todo vertex shader -> string + main entry point + descriptors...
 
         // Create a surface to draw images on
         let surface = wgpu::Surface::create(window);
@@ -288,8 +397,12 @@ pub mod wgpu_graphics_header {
             })
             .await;
 
-        let (program_bindings1, out_program_bindings1, program_bindings2, out_program_bindings2) =
-            create_bindings(&vertex, &fragment);
+        let (
+            mut program_bindings1,
+            out_program_bindings1,
+            program_bindings2,
+            out_program_bindings2,
+        ) = create_bindings(&vertex, &fragment);
 
         for i in &program_bindings1.bindings[..] {
             if i.qual.contains(&QUALIFIER::VERTEX) {
@@ -315,12 +428,7 @@ pub mod wgpu_graphics_header {
                 bind_entry.push(wgpu::BindGroupLayoutEntry {
                     binding: i.binding_number,
                     visibility: wgpu::ShaderStage::VERTEX | wgpu::ShaderStage::FRAGMENT,
-                    ty: wgpu::BindingType::UniformBuffer { dynamic: false }, /* else {
-                                                                                 wgpu::BindingType::StorageBuffer {
-                                                                                     dynamic: false,
-                                                                                     readonly: false,
-                                                                                 }
-                                                                             } */
+                    ty: wgpu::BindingType::UniformBuffer { dynamic: false },
                 });
                 are_bind_enties = true;
             } else if i.qual.contains(&QUALIFIER::BUFFER) {
@@ -330,21 +438,12 @@ pub mod wgpu_graphics_header {
                     ty: wgpu::BindingType::StorageBuffer {
                         dynamic: false,
                         readonly: false,
-                    }, /* else {
-                           wgpu::BindingType::StorageBuffer {
-                               dynamic: false,
-                               readonly: false,
-                           }
-                       } */
+                    },
                 });
                 are_bind_enties = true;
             } else {
                 vertex_binding_desc.push(wgpu::VertexBufferDescriptor {
-                    stride: (if i.gtype == GLSLTYPE::Vec3 {
-                        std::mem::size_of::<[f32; 3]>()
-                    } else {
-                        std::mem::size_of::<f32>()
-                    }) as wgpu::BufferAddress,
+                    stride: (glsl_size(&i.gtype)) as wgpu::BufferAddress,
                     step_mode: if i.qual.contains(&QUALIFIER::VERTEX) {
                         wgpu::InputStepMode::Vertex
                     } else {
@@ -362,30 +461,51 @@ pub mod wgpu_graphics_header {
                 bind_entry.push(wgpu::BindGroupLayoutEntry {
                     binding: i.binding_number,
                     visibility: wgpu::ShaderStage::VERTEX | wgpu::ShaderStage::FRAGMENT,
-                    ty: wgpu::BindingType::UniformBuffer { dynamic: false }, /* else {
-                                                                                 wgpu::BindingType::StorageBuffer {
-                                                                                     dynamic: false,
-                                                                                     readonly: false,
-                                                                                 }
-                                                                             } */
+                    ty: wgpu::BindingType::UniformBuffer { dynamic: false },
                 });
                 are_bind_enties = true;
             }
         }
 
+        debug!(program_bindings2);
+
+        for i in &program_bindings2.samplers[..] {
+            bind_entry.push(wgpu::BindGroupLayoutEntry {
+                binding: i.binding_number,
+                visibility: wgpu::ShaderStage::VERTEX | wgpu::ShaderStage::FRAGMENT,
+                ty: wgpu::BindingType::Sampler { comparison: false },
+            });
+            are_bind_enties = true;
+        }
+        for i in &program_bindings2.textures[..] {
+            bind_entry.push(wgpu::BindGroupLayoutEntry {
+                binding: i.binding_number,
+                visibility: wgpu::ShaderStage::VERTEX | wgpu::ShaderStage::FRAGMENT,
+                ty: wgpu::BindingType::SampledTexture {
+                    multisampled: false,
+                    component_type: wgpu::TextureComponentType::Float,
+                    dimension: wgpu::TextureViewDimension::D2,
+                },
+            });
+            are_bind_enties = true;
+        }
+
+        debug!(bind_entry);
+        debug!(vertex_binding_desc);
+
         let x = stringify_shader(vertex, &program_bindings1, &out_program_bindings1);
 
-        println!("{}", x);
+        debug_print!(x);
 
         // Our compiled vertex shader
         let vs_module = compile_shader(x, ShaderType::Vertex, &device);
 
+        let y = stringify_shader(fragment, &program_bindings2, &out_program_bindings2);
+
+        debug_print!(y);
+
         // Our compiled fragment shader
-        let fs_module = compile_shader(
-            stringify_shader(fragment, &program_bindings2, &out_program_bindings2),
-            ShaderType::Fragment,
-            &device,
-        );
+        let fs_module = compile_shader(y, ShaderType::Fragment, &device);
 
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             // The layout of for each binding specify a number to connect with the bind_group, a visibility to specify for which stage it's for and a type
@@ -458,6 +578,10 @@ pub mod wgpu_graphics_header {
             // Create a mask using the alpha values for each pixel and combine it with the sample mask to limit what samples are used
             alpha_to_coverage_enabled: false,
         });
+
+        // TODO This is ugly, We should be able to bind across different stages and such
+        program_bindings1.samplers = program_bindings2.samplers;
+        program_bindings1.textures = program_bindings2.textures;
         (
             GraphicsProgram {
                 pipeline: render_pipeline,
@@ -488,62 +612,49 @@ pub mod wgpu_graphics_header {
         bindings.index_len = Some(indicies.len() as u32);
     }
 
-    /* pub fn bind_texture(
+    pub fn bind_sampler(
         program: &dyn Program,
-        bindings: &mut ProgramBindings,
-        out_bindings: &mut OutProgramBindings,
-        numbers: &Vec<u32>,
+        bindings: &mut GraphicsBindings,
+        out_bindings: &mut OutGraphicsBindings,
+        sample: wgpu::Sampler,
         name: String,
     ) {
-        let binding = match bindings.bindings.iter().position(|x| x.name == name) {
-            Some(x) => &mut bindings.bindings[x],
+        let mut binding = match bindings.samplers.iter().position(|x| x.name == name) {
+            Some(x) => &mut bindings.samplers[x],
             None => {
-                let x = out_bindings
-                    .bindings
+                panic!("I haven't considered that you would output a sampler yet")
+                /* let x = out_bindings
+                    .getBindings()
                     .iter()
                     .position(|x| x.name == name)
                     .expect("We couldn't find the binding");
-                &mut out_bindings.bindings[x]
+                out_bindings.samplers[x] */
             }
         };
+        binding.data = Some(sample);
+    }
 
-        if ![GLSLTYPE::TextureCube].contains(&binding.gtype) {
-            println!("{:?}", &binding.name);
-            println!("{:?}", GLSLTYPE::TextureCube);
-            panic!(
-                "The type of the value you provided is not what was expected, {:?}",
-                &binding.gtype
-            );
-        }
-
-        let texture_view = texture.create_view(&wgpu::TextureViewDescriptor {
-            format: SKYBOX_FORMAT,
-            dimension: wgpu::TextureViewDimension::Cube,
-            aspect: wgpu::TextureAspect::default(),
-            base_mip_level: 0,
-            level_count: 1,
-            base_array_layer: 0,
-            array_layer_count: 6,
-        });
-
-        let buffer = program.get_device().create_buffer_with_data(
-            data,
-            if binding.qual.contains(&QUALIFIER::VERTEX) {
-                wgpu::BufferUsage::VERTEX | wgpu::BufferUsage::COPY_DST
-            } else if binding.qual.contains(&QUALIFIER::UNIFORM) {
-                wgpu::BufferUsage::UNIFORM | wgpu::BufferUsage::COPY_DST
-            } else {
-                wgpu::BufferUsage::MAP_READ
-                    | wgpu::BufferUsage::COPY_DST
-                    | wgpu::BufferUsage::STORAGE
-                    | wgpu::BufferUsage::COPY_SRC
-                    | wgpu::BufferUsage::VERTEX
-            },
-        );
-
-        binding.data = Some(buffer);
-        binding.length = Some(length);
-    } */
+    pub fn bind_texture(
+        program: &dyn Program,
+        bindings: &mut GraphicsBindings,
+        out_bindings: &mut OutGraphicsBindings,
+        texture: wgpu::TextureView,
+        name: String,
+    ) {
+        let mut binding = match bindings.textures.iter().position(|x| x.name == name) {
+            Some(x) => &mut bindings.textures[x],
+            None => {
+                panic!("I haven't considered that you would output a texture yet")
+                /* let x = out_bindings
+                    .getBindings()
+                    .iter()
+                    .position(|x| x.name == name)
+                    .expect("We couldn't find the binding");
+                out_bindings.samplers[x] */
+            }
+        };
+        binding.data = Some(texture);
+    }
 
     pub fn draw(
         rpass: &mut wgpu::RenderPass,
@@ -578,12 +689,14 @@ pub mod wgpu_graphics_header {
                 buffer_map.insert(i.binding_number, i);
             }
         }
+
         return buffer_map;
     }
 
     // todo create a proper program struct that holds the render pass and the draw function
     pub fn graphics_run(
         program: &GraphicsProgram,
+        mut encoder: wgpu::CommandEncoder,
         bindings: &GraphicsBindings,
         out_bindings: OutGraphicsBindings,
         swap_chain: &mut wgpu::SwapChain,
@@ -592,9 +705,9 @@ pub mod wgpu_graphics_header {
             .get_next_texture()
             .expect("Timeout when acquiring next swap chain texture");
 
-        let mut encoder = program
+        /* let mut encoder = program
             .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None }); */
 
         let bind = bindings
             .bindings
@@ -638,6 +751,27 @@ pub mod wgpu_graphics_header {
                         .length
                         .expect(&format!("The size of {} was not set", &b.name)),
                 },
+            });
+        }
+        for i in bindings.samplers.iter() {
+            empty_vec.push(wgpu::Binding {
+                binding: i.binding_number,
+                resource: wgpu::BindingResource::Sampler(
+                    &i.data
+                        .as_ref()
+                        .expect(&format!("The sampler for {} was not set", &i.name)),
+                ),
+            });
+        }
+
+        for i in bindings.textures.iter() {
+            empty_vec.push(wgpu::Binding {
+                binding: i.binding_number,
+                resource: wgpu::BindingResource::TextureView(
+                    &i.data
+                        .as_ref()
+                        .expect(&format!("The sampler for {} was not set", &i.name)),
+                ),
             });
         }
 
@@ -723,6 +857,7 @@ pub mod wgpu_graphics_header {
 
     pub fn graphics_pipe(
         program: &GraphicsProgram,
+        mut encoder: wgpu::CommandEncoder,
         mut in_bindings: GraphicsBindings,
         mut out_bindings: OutGraphicsBindings,
         swap_chain: &mut wgpu::SwapChain,
@@ -753,7 +888,7 @@ pub mod wgpu_graphics_header {
             binding.length = Some(i.length.unwrap());
         }
 
-        graphics_run(program, &in_bindings, out_bindings, swap_chain);
+        graphics_run(program, encoder, &in_bindings, out_bindings, swap_chain);
     }
 
     #[derive(Debug)]

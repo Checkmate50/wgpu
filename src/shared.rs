@@ -1,9 +1,9 @@
 pub use self::shared::{
-    array_type, bind_float, bind_fvec, bind_fvec2, bind_vec, bind_vec2, bind_vec3, can_pipe,
-    check_gl_builtin_type, compile_shader, has_in_qual, has_out_qual, is_gl_builtin,
-    new_bind_scope, new_bindings, process_body, ready_to_run, string_compare, Bindings,
-    DefaultBinding, OutProgramBindings, Program, ProgramBindings, GLSLTYPE, PARAMETER,
-    QUALIFIER, bind_mat4
+    array_type, bind_float, bind_fvec, bind_fvec2, bind_mat4, bind_vec, bind_vec2, bind_vec3,
+    can_pipe, check_gl_builtin_type, compile_shader, glsl_size, has_in_qual, has_out_qual,
+    is_gl_builtin, new_bind_scope, new_bindings, process_body, ready_to_run, string_compare,
+    Bindings, DefaultBinding, OutProgramBindings, Program, ProgramBindings, GLSLTYPE, PARAMETER,
+    QUALIFIER,
 };
 
 pub mod shared {
@@ -33,7 +33,9 @@ pub mod shared {
         // https://en.wikipedia.org/wiki/Standard_Portable_Intermediate_Representation
         /*         print!("{}", contents);
         print!("\n\n"); */
-        let mut vert_file = glsl_to_spirv::compile(&contents, shader)
+        let x = glsl_to_spirv::compile(&contents, shader);
+        debug!(x);
+        let mut vert_file = x
             .unwrap_or_else(|_| panic!("{}: {}", "You gave a bad shader source", contents));
         let mut vs = Vec::new();
         vert_file
@@ -174,11 +176,7 @@ pub mod shared {
         acceptable_types: Vec<GLSLTYPE>,
         name: String,
     ) {
-        let mut binding = match bindings
-            .getBindings()
-            .iter()
-            .position(|x| x.name == name)
-        {
+        let mut binding = match bindings.getBindings().iter().position(|x| x.name == name) {
             Some(x) => bindings.indexBinding(x),
             None => {
                 let x = out_bindings
@@ -258,13 +256,15 @@ pub mod shared {
         program: &dyn Program,
         bindings: &mut dyn ProgramBindings,
         out_bindings: &mut dyn OutProgramBindings,
-        vecs: &Vec<Vec<f32>>,
+        vecs: &Vec<[f32; 2]>,
         name: String,
     ) {
-        let numbers: Vec<f32> = vecs.clone().into_iter().flatten().collect();
-        if numbers.len() % 2 != 0 {
-            panic!("Your trying to bind to vec to but your not giving a vector that can be split into 2's")
-        }
+        let numbers: Vec<f32> = vecs
+            .clone()
+            .into_iter()
+            .map(|x| x.to_vec())
+            .flatten()
+            .collect();
         bind(
             program,
             bindings,
@@ -338,7 +338,7 @@ pub mod shared {
         mat: cgmath::Matrix4<f32>,
         name: String,
     ) {
-        let mat_slice : &[f32; 16] = mat.as_ref();
+        let mat_slice: &[f32; 16] = mat.as_ref();
         bind(
             program,
             bindings,
@@ -390,6 +390,7 @@ pub mod shared {
         ArrayVec4,
         Sampler,
         TextureCube,
+        Texture2D,
     }
 
     impl fmt::Display for GLSLTYPE {
@@ -412,7 +413,31 @@ pub mod shared {
                 GLSLTYPE::ArrayVec4 => write!(f, "vec4[]"),
                 GLSLTYPE::Sampler => write!(f, "sampler"),
                 GLSLTYPE::TextureCube => write!(f, "textureCube"),
+                GLSLTYPE::Texture2D => write!(f, "texture2D"),
             }
+        }
+    }
+
+    pub fn glsl_size(x: &GLSLTYPE) -> usize {
+        match x {
+            GLSLTYPE::Bool => std::mem::size_of::<bool>(),
+            GLSLTYPE::Float => std::mem::size_of::<f32>(),
+            GLSLTYPE::Int => std::mem::size_of::<i32>(),
+            GLSLTYPE::Uint => std::mem::size_of::<u32>(),
+            GLSLTYPE::Vec2 => std::mem::size_of::<[f32; 2]>(),
+            GLSLTYPE::Uvec3 => std::mem::size_of::<[u32; 3]>(),
+            GLSLTYPE::Vec3 => std::mem::size_of::<[f32; 3]>(),
+            GLSLTYPE::Vec4 => std::mem::size_of::<[f32; 4]>(),
+            GLSLTYPE::Mat4 => 64,
+            GLSLTYPE::ArrayInt => panic!("TODO: I haven't checked the size of this yet"),
+            GLSLTYPE::ArrayUint => panic!("TODO: I haven't checked the size of this yet"),
+            GLSLTYPE::ArrayFloat => panic!("TODO: I haven't checked the size of this yet"),
+            GLSLTYPE::ArrayVec2 => panic!("TODO: I haven't checked the size of this yet"),
+            GLSLTYPE::ArrayVec3 => panic!("TODO: I haven't checked the size of this yet"),
+            GLSLTYPE::ArrayVec4 => panic!("TODO: I haven't checked the size of this yet"),
+            GLSLTYPE::Sampler => panic!("TODO: I haven't checked the size of this yet"),
+            GLSLTYPE::TextureCube => panic!("TODO: I haven't checked the size of this yet"),
+            GLSLTYPE::Texture2D => panic!("TODO: I haven't checked the size of this yet"),
         }
     }
 
@@ -450,6 +475,9 @@ pub mod shared {
         };
         (textureCube) => {
             shared::GLSLTYPE::TextureCube
+        };
+        (texture2D) => {
+            shared::GLSLTYPE::Texture2D
         };
     }
 

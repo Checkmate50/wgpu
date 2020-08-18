@@ -43,8 +43,13 @@ sphere:
 
 .PHONY: cube
 cube:
-	#export RUST_BACKTRACE=1 && cargo +nightly run --example cube
 	cargo +nightly run --example cube
+	#cargo +nightly run --example cube --release
+
+.PHONY: cube2
+cube2:
+	cargo +nightly run --example cube_texture
+	#cargo +nightly run --example cube --release
 
 release:
 	cargo build --release

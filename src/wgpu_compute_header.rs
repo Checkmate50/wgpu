@@ -60,7 +60,7 @@ pub mod wgpu_compute_header {
     }
 
     pub struct ComputeProgram {
-        device: wgpu::Device,
+        pub device: wgpu::Device,
         queue: wgpu::Queue,
         pipeline: wgpu::ComputePipeline,
         bind_group_layout: wgpu::BindGroupLayout,
