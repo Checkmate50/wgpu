@@ -17,5 +17,10 @@ winit = "0.22"
 cgmath = "0.17"
 glsl-to-spirv = "0.1"
 futures = "0.3"
+png = "0.15"
 bytemuck = "1.2.0"
 zerocopy = "0.3.0"
+
+[[example]]
+name = "flat_color"
+path = "examples/gator_examples/flat_color.rs"

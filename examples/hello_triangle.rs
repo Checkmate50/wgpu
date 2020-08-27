@@ -11,8 +11,8 @@ pub use static_assertions::const_assert;
 
 pub use pipeline::wgpu_graphics_header;
 pub use pipeline::wgpu_graphics_header::{
-    compile_buffer, valid_fragment_shader, valid_vertex_shader, GraphicsBindings, GraphicsShader,
-    OutGraphicsBindings,
+    compile_buffer, default_bind_group, setup_render_pass, valid_fragment_shader,
+    valid_vertex_shader, GraphicsBindings, GraphicsShader, OutGraphicsBindings,
 };
 
 pub use pipeline::shared;
@@ -84,6 +84,15 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
             // Everything that can be processed has been so we can now redraw the image on our window
             Event::MainEventsCleared => window.request_redraw(),
             Event::RedrawRequested(_) => {
+                let mut init_encoder = program
+                    .device
+                    .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+                let mut frame = swap_chain
+                    .get_next_texture()
+                    .expect("Timeout when acquiring next swap chain texture");
+                let mut rpass = setup_render_pass(&program, &mut init_encoder, &frame);
+                let mut bind_group = default_bind_group(&program);
+
                 let mut bindings: GraphicsBindings = template_bindings.clone();
                 let mut out_bindings: OutGraphicsBindings = template_out_bindings.clone();
                 const BIND_CONTEXT_1: [&str; 32] =
@@ -109,15 +118,14 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                         ready_to_run(BIND_CONTEXT_2);
                         wgpu_graphics_header::graphics_run(
                             &program,
-                            program.device.create_command_encoder(
-                                &wgpu::CommandEncoderDescriptor { label: None },
-                            ),
+                            rpass,
+                            &mut bind_group,
                             &bindings,
-                            out_bindings,
-                            &mut swap_chain,
+                            &out_bindings,
                         );
                     }
                 }
+                program.queue.submit(&[init_encoder.finish()]);
             }
             // When the window closes we are done. Change the status
             Event::WindowEvent {

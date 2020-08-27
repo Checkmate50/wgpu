@@ -23,8 +23,9 @@ pub use pipeline::wgpu_compute_header::{
     compile, read_fvec3, run, ComputeBindings, ComputeProgram, ComputeShader, OutComputeBindings,
 };
 pub use pipeline::wgpu_graphics_header::{
-    compile_buffer, graphics_compile, graphics_pipe, graphics_run, valid_fragment_shader,
-    valid_vertex_shader, GraphicsBindings, GraphicsProgram, GraphicsShader, OutGraphicsBindings,
+    compile_buffer, default_bind_group, graphics_compile, graphics_pipe, graphics_run,
+    setup_render_pass, valid_fragment_shader, valid_vertex_shader, GraphicsBindings,
+    GraphicsProgram, GraphicsShader, OutGraphicsBindings,
 };
 
 pub use static_assertions::const_assert;
@@ -180,7 +181,7 @@ fn execute_gpu(event_loop: EventLoop<()>, window: Window) {
     let triangle: Vec<[f32; 3]> = vec![[-0.01, -0.02, 0.0], [0.01, -0.02, 0.0], [0.00, 0.02, 0.0]];
 
     async fn draw(
-        frame: &mut wgpu::SwapChain,
+        swap_chain: &mut wgpu::SwapChain,
         program: &ComputeProgram,
         graphics_program: &GraphicsProgram,
         template_bindings: &ComputeBindings,
@@ -199,6 +200,15 @@ fn execute_gpu(event_loop: EventLoop<()>, window: Window) {
         let rule1Scale: f32 = 0.3;
         let rule2Scale: f32 = 0.1;
         let rule3Scale: f32 = 0.05;
+
+        let mut frame = swap_chain
+            .get_next_texture()
+            .expect("Timeout when acquiring next swap chain texture");
+        let mut init_encoder = graphics_program
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        let mut rpass = setup_render_pass(&graphics_program, &mut init_encoder, &frame);
+        let mut bind_group = default_bind_group(&graphics_program);
 
         let mut bindings: ComputeBindings = template_bindings.clone();
         let mut out_bindings: OutComputeBindings = template_out_bindings.clone();
@@ -308,14 +318,13 @@ fn execute_gpu(event_loop: EventLoop<()>, window: Window) {
         static_assertions::const_assert!(can_pipe(&BIND_CONTEXT_10, &NEXT_STARTING_CONTEXT));
         graphics_pipe(
             &graphics_program,
-            graphics_program
-                .device
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None }),
+            rpass,
+            &mut bind_group,
             graphics_bindings,
-            graphics_out_bindings,
-            frame,
+            &mut graphics_out_bindings,
             result,
         );
+        graphics_program.queue.submit(&[init_encoder.finish()]);
 
         let mut dstParticlePos1: [f32; 3] = Default::default();
         let mut dstParticlePos2: [f32; 3] = Default::default();

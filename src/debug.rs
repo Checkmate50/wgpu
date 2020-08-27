@@ -13,12 +13,15 @@ macro_rules! debug {
 #[cfg(debug_assertions)]
 macro_rules! debug_print {
     ($x:expr) => {{
-        dbg!();println!("{}", $x)
+        dbg!();
+        println!("{}", $x)
     }};
 }
 
 #[macro_export]
 #[cfg(not(debug_assertions))]
 macro_rules! debug {
-    ($x:expr) => { std::convert::identity(&$x) };
+    ($x:expr) => {
+        std::convert::identity(&$x)
+    };
 }

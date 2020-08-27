@@ -11,8 +11,9 @@ pub use static_assertions::const_assert;
 
 pub use pipeline::wgpu_graphics_header;
 pub use pipeline::wgpu_graphics_header::{
-    bind_sampler, bind_texture, bind_vertex, compile_buffer, valid_fragment_shader,
-    valid_vertex_shader, GraphicsBindings, GraphicsShader, OutGraphicsBindings,
+    bind_sampler, bind_texture, compile_buffer, default_bind_group, graphics_starting_context,
+    setup_render_pass, valid_fragment_shader, valid_vertex_shader, GraphicsBindings,
+    GraphicsShader, OutGraphicsBindings,
 };
 
 pub use pipeline::shared;
@@ -20,6 +21,8 @@ pub use pipeline::shared::{
     bind_fvec, bind_mat4, bind_vec2, bind_vec3, is_gl_builtin, new_bind_scope, ready_to_run,
     Bindings,
 };
+
+pub use pipeline::helper::{create_texels, load_cube};
 
 async fn run(event_loop: EventLoop<()>, window: Window) {
     let size = window.inner_size();
@@ -55,8 +58,10 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     };
 
     const S_v: GraphicsShader = VERTEXT.0;
-    const STARTING_BIND_CONTEXT: [&str; 32] = VERTEXT.1;
+    const VERTEXT_STARTING_BIND_CONTEXT: [&str; 32] = VERTEXT.1;
     const S_f: GraphicsShader = FRAGMENT.0;
+    const STARTING_BIND_CONTEXT: [&str; 32] =
+        graphics_starting_context(VERTEXT_STARTING_BIND_CONTEXT, S_f);
 
     let mut compile_buffer: [wgpu::VertexAttributeDescriptor; 32] = compile_buffer();
 
@@ -65,46 +70,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     let (program, mut template_bindings, mut template_out_bindings) =
         wgpu_graphics_header::graphics_compile(&mut compile_buffer, &window, &S_v, &S_f).await;
 
-    let positions = vec![
-        [-1.0, -1.0, 1.0],
-        [1.0, -1.0, 1.0],
-        [1.0, 1.0, 1.0],
-        [-1.0, 1.0, 1.0],
-        // bottom (0, 0, -1)
-        [-1.0, 1.0, -1.0],
-        [1.0, 1.0, -1.0],
-        [1.0, -1.0, -1.0],
-        [-1.0, -1.0, -1.0],
-        // right (1, 0, 0)
-        [1.0, -1.0, -1.0],
-        [1.0, 1.0, -1.0],
-        [1.0, 1.0, 1.0],
-        [1.0, -1.0, 1.0],
-        // left (-1, 0, 0)
-        [-1.0, -1.0, 1.0],
-        [-1.0, 1.0, 1.0],
-        [-1.0, 1.0, -1.0],
-        [-1.0, -1.0, -1.0],
-        // front (0, 1, 0)
-        [1.0, 1.0, -1.0],
-        [-1.0, 1.0, -1.0],
-        [-1.0, 1.0, 1.0],
-        [1.0, 1.0, 1.0],
-        // back (0, -1, 0)
-        [1.0, -1.0, 1.0],
-        [-1.0, -1.0, 1.0],
-        [-1.0, -1.0, -1.0],
-        [1.0, -1.0, -1.0],
-    ];
-
-    let index_data: Vec<u16> = vec![
-        0, 1, 2, 2, 3, 0, // top
-        4, 5, 6, 6, 7, 4, // bottom
-        8, 9, 10, 10, 11, 8, // right
-        12, 13, 14, 14, 15, 12, // left
-        16, 17, 18, 18, 19, 16, // front
-        20, 21, 22, 22, 23, 20, // back
-    ];
+    let (positions, _, index_data) = load_cube();
 
     let texture_coordinates: Vec<[f32; 2]> = vec![
         [0.0, 0.0],
@@ -147,29 +113,6 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         mx_correction * mx_projection * mx_view
     }
 
-    fn create_texels(size: usize) -> Vec<u8> {
-        use std::iter;
-
-        (0..size * size)
-            .flat_map(|id| {
-                // get high five for recognizing this ;)
-                let cx = 3.0 * (id % size) as f32 / (size - 1) as f32 - 2.0;
-                let cy = 2.0 * (id / size) as f32 / (size - 1) as f32 - 1.0;
-                let (mut x, mut y, mut count) = (cx, cy, 0);
-                while count < 0xFF && x * x + y * y < 4.0 {
-                    let old_x = x;
-                    x = x * x - y * y + cx;
-                    y = 2.0 * old_x * y + cy;
-                    count += 1;
-                }
-                iter::once(0xFF - (count * 5) as u8)
-                    .chain(iter::once(0xFF - (count * 15) as u8))
-                    .chain(iter::once(0xFF - (count * 50) as u8))
-                    .chain(iter::once(1))
-            })
-            .collect()
-    }
-
     // For drawing to window
     let mut sc_desc = wgpu::SwapChainDescriptor {
         usage: wgpu::TextureUsage::OUTPUT_ATTACHMENT,
@@ -179,7 +122,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         height: size.height,
         // Only update during the "vertical blanking interval"
         // As opposed to Immediate where it is possible to see visual tearing(where multiple frames are visible at once)
-        present_mode: wgpu::PresentMode::Mailbox,
+        present_mode: wgpu::PresentMode::Immediate,
     };
 
     let trans_mat = generate_transform(sc_desc.width as f32 / sc_desc.height as f32);
@@ -193,8 +136,34 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
             // Everything that can be processed has been so we can now redraw the image on our window
             Event::MainEventsCleared => window.request_redraw(),
             Event::RedrawRequested(_) => {
-                let mut bindings: GraphicsBindings = template_bindings.clone();
-                let mut out_bindings: OutGraphicsBindings = template_out_bindings.clone();
+                let mut init_encoder = program
+                    .device
+                    .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+
+                let mut frame = swap_chain
+                    .get_next_texture()
+                    .expect("Timeout when acquiring next swap chain texture");
+
+                let multisampled_texture_extent = wgpu::Extent3d {
+                    width: sc_desc.width,
+                    height: sc_desc.height,
+                    depth: 1,
+                };
+                let multisampled_frame_descriptor = &wgpu::TextureDescriptor {
+                    size: multisampled_texture_extent,
+                    array_layer_count: 1,
+                    mip_level_count: 1,
+                    sample_count: 4,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: sc_desc.format,
+                    usage: wgpu::TextureUsage::OUTPUT_ATTACHMENT,
+                    label: None,
+                };
+
+                let mut multi_sampled_view = program
+                    .device
+                    .create_texture(multisampled_frame_descriptor)
+                    .create_default_view();
 
                 let sampler = program.device.create_sampler(&wgpu::SamplerDescriptor {
                     address_mode_u: wgpu::AddressMode::ClampToEdge,
@@ -208,9 +177,6 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                     compare: wgpu::CompareFunction::Undefined,
                 });
 
-                let mut init_encoder = program
-                    .device
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
                 let tex_size = 256u32;
                 let texels = create_texels(tex_size as usize);
                 let texture_extent = wgpu::Extent3d {
@@ -248,14 +214,19 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                     texture_extent,
                 );
 
+                let mut rpass = setup_render_pass(&program, &mut init_encoder, &frame);
+                let mut bind_group = default_bind_group(&program);
+
+                let mut bindings: GraphicsBindings = template_bindings.clone();
+                let mut out_bindings: OutGraphicsBindings = template_out_bindings.clone();
+
                 const BIND_CONTEXT_1: [&str; 32] =
                     update_bind_context!(STARTING_BIND_CONTEXT, "a_Pos");
-                bind_vertex(
+                bind_vec3(
                     &program,
                     &mut bindings,
                     &mut out_bindings,
                     &positions,
-                    &index_data,
                     "a_Pos".to_string(),
                 );
                 {
@@ -279,8 +250,8 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                             "a_TexCoord".to_string(),
                         );
                         {
-                            /* const BIND_CONTEXT_4: [&str; 32] =
-                            update_bind_context!(BIND_CONTEXT_3, "t_Color"); */
+                            const BIND_CONTEXT_4: [&str; 32] =
+                                update_bind_context!(BIND_CONTEXT_3, "t_Color");
                             bind_texture(
                                 &program,
                                 &mut bindings,
@@ -289,8 +260,8 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                 "t_Color".to_string(),
                             );
                             {
-                                /* const BIND_CONTEXT_5: [&str; 32] =
-                                update_bind_context!(BIND_CONTEXT_4, "s_Color"); */
+                                const BIND_CONTEXT_5: [&str; 32] =
+                                    update_bind_context!(BIND_CONTEXT_4, "s_Color");
                                 bind_sampler(
                                     &program,
                                     &mut bindings,
@@ -299,19 +270,21 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                     "s_Color".to_string(),
                                 );
                                 {
-                                    /* ready_to_run(BIND_CONTEXT_5); */
-                                    wgpu_graphics_header::graphics_run(
+                                    static_assertions::const_assert!(ready_to_run(BIND_CONTEXT_5));
+                                    wgpu_graphics_header::graphics_run_indicies(
                                         &program,
-                                        init_encoder,
-                                        &bindings,
-                                        out_bindings,
-                                        &mut swap_chain,
+                                        rpass,
+                                        &mut bind_group,
+                                        &mut bindings,
+                                        &out_bindings,
+                                        &index_data,
                                     );
                                 }
                             }
                         }
                     }
                 }
+                program.queue.submit(&[init_encoder.finish()]);
             }
             // When the window closes we are done. Change the status
             Event::WindowEvent {

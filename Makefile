@@ -33,13 +33,9 @@ texture:
 	#export RUST_BACKTRACE=1 && cargo +nightly run --example skybox_texture
 	cargo +nightly run --example skybox_texture
 
-.PHONY: teacup
-teacup:
-	cargo +nightly run --example teacup
-
-.PHONY: sphere
-sphere:
-	cargo +nightly run --example sphere
+.PHONY: teapot
+teapot:
+	cargo +nightly run --example teapot
 
 .PHONY: cube
 cube:
@@ -48,8 +44,30 @@ cube:
 
 .PHONY: cube2
 cube2:
-	cargo +nightly run --example cube_texture
-	#cargo +nightly run --example cube --release
+	export RUST_BACKTRACE=1 && cargo +nightly run --example cube_texture
+	#cargo +nightly run --example cube_texture --release
+
+.PHONY: cube3
+cube3:
+	cargo +nightly run --example cube_shadow
+	#cargo +nightly run --example cube_shadow --release
+
+.PHONY: cube4
+cube4:
+	cargo +nightly run --example multicube
+	#cargo +nightly run --example cube_shadow --release
+
+.PHONY: flat_color
+flat_color:
+	cargo +nightly run --example flat_color
+
+.PHONY: shadow
+shadow:
+	cargo +nightly run --example shadow
+
+.PHONY: sink
+sink:
+	cargo +nightly run --example sink
 
 release:
 	cargo build --release

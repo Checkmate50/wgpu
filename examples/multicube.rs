@@ -20,7 +20,10 @@ pub use pipeline::shared::{
     bind_fvec, bind_mat4, bind_vec3, is_gl_builtin, new_bind_scope, ready_to_run, Bindings,
 };
 
-pub use pipeline::helper::load_cube;
+pub use pipeline::helper::{
+    generate_identity_matrix, generate_projection_matrix, generate_view_matrix, load_cube,
+    translate,
+};
 
 async fn run(event_loop: EventLoop<()>, window: Window) {
     let size = window.inner_size();
@@ -30,6 +33,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         [[vertex in] vec3] vertexColor;
         [[uniform in] mat4] u_view;
         [[uniform in] mat4] u_proj;
+        [[uniform in] mat4] u_model;
 
 
         [[out] vec3] fragmentColor;
@@ -37,7 +41,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         {{
             void main() {
                 fragmentColor = vertexColor;
-                gl_Position = u_proj * u_view * vec4(0.3 * a_position, 1.0);
+                gl_Position = u_proj * u_view * u_model * vec4(0.5 * a_position, 1.0);
             }
         }}
     };
@@ -104,28 +108,6 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         [0.982, 0.099, 0.879],
     ];
 
-    let light_direction = vec![[20.0, 0.0, 20.0]];
-
-    let light_ambient = vec![[0.1, 0.0, 0.0]];
-
-    fn generate_view(aspect_ratio: f32) -> cgmath::Matrix4<f32> {
-        let mx_view = cgmath::Matrix4::look_at(
-            cgmath::Point3::new(1.5f32, -5.0, 3.0),
-            cgmath::Point3::new(0f32, 0.0, 0.0),
-            cgmath::Vector3::unit_z(),
-        );
-        mx_view
-    }
-
-    fn generate_projection(aspect_ratio: f32) -> cgmath::Matrix4<f32> {
-        let mx_projection = cgmath::perspective(cgmath::Deg(45f32), aspect_ratio, 1.0, 10.0);
-        let mx_correction = cgmath::Matrix4::new(
-            1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.5, 0.0, 0.0, 0.0, 0.5, 1.0,
-        );
-
-        mx_correction * mx_projection
-    }
-
     // For drawing to window
     let mut sc_desc = wgpu::SwapChainDescriptor {
         usage: wgpu::TextureUsage::OUTPUT_ATTACHMENT,
@@ -138,9 +120,13 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         present_mode: wgpu::PresentMode::Mailbox,
     };
 
-    let view_mat = generate_view(sc_desc.width as f32 / sc_desc.height as f32);
+    let view_mat = generate_view_matrix();
 
-    let proj_mat = generate_projection(sc_desc.width as f32 / sc_desc.height as f32);
+    let proj_mat = generate_projection_matrix(sc_desc.width as f32 / sc_desc.height as f32);
+
+    let model_mat = generate_identity_matrix();
+
+    let model_mat2 = translate(model_mat, 2.0, 0.0, 0.0);
 
     // A "chain" of buffers that we render on to the display
     let mut swap_chain = program.device.create_swap_chain(&program.surface, &sc_desc);
@@ -158,82 +144,145 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                 let mut frame = swap_chain
                     .get_next_texture()
                     .expect("Timeout when acquiring next swap chain texture");
-
-                let mut rpass = setup_render_pass(&program, &mut init_encoder, &frame);
-                let mut bind_group = default_bind_group(&program);
-
-                let mut bindings: GraphicsBindings = template_bindings.clone();
-                let mut out_bindings: OutGraphicsBindings = template_out_bindings.clone();
-                const BIND_CONTEXT_1: [&str; 32] =
-                    update_bind_context!(STARTING_BIND_CONTEXT, "a_position");
-                bind_vec3(
-                    &program,
-                    &mut bindings,
-                    &mut out_bindings,
-                    &positions,
-                    "a_position".to_string(),
-                );
                 {
-                    const BIND_CONTEXT_2: [&str; 32] =
-                        update_bind_context!(BIND_CONTEXT_1, "u_view");
-                    bind_mat4(
+                    let mut bindings: GraphicsBindings = template_bindings.clone();
+                    let mut out_bindings: OutGraphicsBindings = template_out_bindings.clone();
+                    let mut bind_group = default_bind_group(&program);
+                    let mut bindings2: GraphicsBindings = template_bindings.clone();
+                    let mut out_bindings2: OutGraphicsBindings = template_out_bindings.clone();
+                    let mut bind_group2 = default_bind_group(&program);
+
+                    let mut rpass = setup_render_pass(&program, &mut init_encoder, &frame);
+
+                    const BIND_CONTEXT_1: [&str; 32] =
+                        update_bind_context!(STARTING_BIND_CONTEXT, "a_position");
+                    bind_vec3(
                         &program,
                         &mut bindings,
                         &mut out_bindings,
-                        view_mat,
-                        "u_view".to_string(),
+                        &positions,
+                        "a_position".to_string(),
                     );
                     {
-                        const BIND_CONTEXT_3: [&str; 32] =
-                            update_bind_context!(BIND_CONTEXT_2, "vertexColor");
-                        bind_vec3(
+                        const BIND_CONTEXT_2: [&str; 32] =
+                            update_bind_context!(BIND_CONTEXT_1, "u_view");
+                        bind_mat4(
                             &program,
                             &mut bindings,
                             &mut out_bindings,
-                            &color_data,
-                            "vertexColor".to_string(),
+                            view_mat,
+                            "u_view".to_string(),
                         );
-
                         {
-                            const BIND_CONTEXT_4: [&str; 32] =
-                                update_bind_context!(BIND_CONTEXT_3, "u_proj");
-                            bind_mat4(
+                            const BIND_CONTEXT_3: [&str; 32] =
+                                update_bind_context!(BIND_CONTEXT_2, "vertexColor");
+                            bind_vec3(
                                 &program,
                                 &mut bindings,
                                 &mut out_bindings,
-                                proj_mat,
-                                "u_proj".to_string(),
+                                &color_data,
+                                "vertexColor".to_string(),
                             );
+
                             {
-                                /*                             const BIND_CONTEXT_5: [&str; 32] =
-                                    update_bind_context!(BIND_CONTEXT_4, "vertexAmbient");
-                                bind_vec3(
+                                const BIND_CONTEXT_4: [&str; 32] =
+                                    update_bind_context!(BIND_CONTEXT_3, "u_proj");
+                                bind_mat4(
                                     &program,
                                     &mut bindings,
                                     &mut out_bindings,
-                                    &light_ambient,
-                                    "vertexAmbient".to_string(),
-                                ); */
+                                    proj_mat,
+                                    "u_proj".to_string(),
+                                );
                                 {
-                                    /*                                     const BIND_CONTEXT_6: [&str; 32] = update_bind_context!(
-                                        BIND_CONTEXT_5,
-                                        "vertexLightDirection"
-                                    );
-                                    bind_vec3(
+                                    const BIND_CONTEXT_5: [&str; 32] =
+                                        update_bind_context!(BIND_CONTEXT_4, "u_model");
+                                    bind_mat4(
                                         &program,
                                         &mut bindings,
                                         &mut out_bindings,
-                                        &light_direction,
-                                        "vertexLightDirection".to_string(),
-                                    ); */
+                                        model_mat,
+                                        "u_model".to_string(),
+                                    );
+
                                     {
-                                        ready_to_run(BIND_CONTEXT_4);
-                                        wgpu_graphics_header::graphics_run_indicies(
+                                        static_assertions::const_assert!(ready_to_run(
+                                            BIND_CONTEXT_5
+                                        ));
+                                        rpass = wgpu_graphics_header::graphics_run_indicies(
                                             &program,
                                             rpass,
                                             &mut bind_group,
                                             &mut bindings,
-                                            &mut out_bindings,
+                                            &out_bindings,
+                                            &index_data,
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    const BIND_CONTEXT_1_1: [&str; 32] =
+                        update_bind_context!(STARTING_BIND_CONTEXT, "a_position");
+                    bind_vec3(
+                        &program,
+                        &mut bindings2,
+                        &mut out_bindings2,
+                        &positions,
+                        "a_position".to_string(),
+                    );
+                    {
+                        const BIND_CONTEXT_2_1: [&str; 32] =
+                            update_bind_context!(BIND_CONTEXT_1_1, "u_view");
+                        bind_mat4(
+                            &program,
+                            &mut bindings2,
+                            &mut out_bindings2,
+                            view_mat,
+                            "u_view".to_string(),
+                        );
+                        {
+                            const BIND_CONTEXT_3_1: [&str; 32] =
+                                update_bind_context!(BIND_CONTEXT_2_1, "vertexColor");
+                            bind_vec3(
+                                &program,
+                                &mut bindings2,
+                                &mut out_bindings2,
+                                &color_data,
+                                "vertexColor".to_string(),
+                            );
+
+                            {
+                                const BIND_CONTEXT_4_1: [&str; 32] =
+                                    update_bind_context!(BIND_CONTEXT_3_1, "u_proj");
+                                bind_mat4(
+                                    &program,
+                                    &mut bindings2,
+                                    &mut out_bindings2,
+                                    proj_mat,
+                                    "u_proj".to_string(),
+                                );
+                                {
+                                    const BIND_CONTEXT_5_1: [&str; 32] =
+                                        update_bind_context!(BIND_CONTEXT_4_1, "u_model");
+                                    bind_mat4(
+                                        &program,
+                                        &mut bindings2,
+                                        &mut out_bindings2,
+                                        model_mat2,
+                                        "u_model".to_string(),
+                                    );
+
+                                    {
+                                        static_assertions::const_assert!(ready_to_run(
+                                            BIND_CONTEXT_5_1
+                                        ));
+                                        wgpu_graphics_header::graphics_run_indicies(
+                                            &program,
+                                            rpass,
+                                            &mut bind_group2,
+                                            &mut bindings2,
+                                            &out_bindings2,
                                             &index_data,
                                         );
                                     }
@@ -261,7 +310,6 @@ fn main() {
     let window = winit::window::WindowBuilder::new()
         .build(&event_loop)
         .unwrap();
-    /* let window = winit::window::Window::new(&event_loop).unwrap(); */
 
     // Why do we need to be async? Because of event_loop?
     futures::executor::block_on(run(event_loop, window));

@@ -1,9 +1,9 @@
 pub use self::shared::{
     array_type, bind_float, bind_fvec, bind_fvec2, bind_mat4, bind_vec, bind_vec2, bind_vec3,
     can_pipe, check_gl_builtin_type, compile_shader, glsl_size, has_in_qual, has_out_qual,
-    is_gl_builtin, new_bind_scope, new_bindings, process_body, ready_to_run, string_compare,
-    Bindings, DefaultBinding, OutProgramBindings, Program, ProgramBindings, GLSLTYPE, PARAMETER,
-    QUALIFIER,
+    has_uniform_qual, is_gl_builtin, new_bind_scope, new_bindings, process_body, ready_to_run,
+    string_compare, Bindings, DefaultBinding, OutProgramBindings, Program, ProgramBindings,
+    GLSLTYPE, PARAMETER, QUALIFIER,
 };
 
 pub mod shared {
@@ -35,8 +35,8 @@ pub mod shared {
         print!("\n\n"); */
         let x = glsl_to_spirv::compile(&contents, shader);
         debug!(x);
-        let mut vert_file = x
-            .unwrap_or_else(|_| panic!("{}: {}", "You gave a bad shader source", contents));
+        let mut vert_file =
+            x.unwrap_or_else(|_| panic!("{}: {}", "You gave a bad shader source", contents));
         let mut vs = Vec::new();
         vert_file
             .read_to_end(&mut vs)
@@ -610,6 +610,21 @@ pub mod shared {
         while acc < p.len() {
             match p[acc] {
                 QUALIFIER::OUT => {
+                    return true;
+                }
+                _ => {
+                    acc += 1;
+                }
+            }
+        }
+        false
+    }
+
+    pub const fn has_uniform_qual(p: &[QUALIFIER]) -> bool {
+        let mut acc = 0;
+        while acc < p.len() {
+            match p[acc] {
+                QUALIFIER::UNIFORM => {
                     return true;
                 }
                 _ => {
