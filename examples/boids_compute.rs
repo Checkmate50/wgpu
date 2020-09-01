@@ -6,7 +6,7 @@ pub use pipeline::shared;
 pub use pipeline::wgpu_compute_header;
 
 pub use pipeline::shared::{
-    bind_float, bind_vec, bind_vec3, is_gl_builtin, new_bind_scope, ready_to_run,
+    bind_float, bind_vec, bind_vec3, is_gl_builtin, update_bind_context, ready_to_run,
 };
 pub use pipeline::wgpu_compute_header::{compile, read_fvec3, run, ComputeShader};
 
@@ -127,7 +127,7 @@ async fn execute_gpu() {
 
         let (program, mut bindings, mut out_bindings) = compile(&S).await;
 
-        const BIND_CONTEXT_1: [&str; 32] = update_bind_context!(STARTING_BIND_CONTEXT, "deltaT");
+        const BIND_CONTEXT_1: [&str; 32] = update_bind_context(&STARTING_BIND_CONTEXT, "deltaT");
         bind_float(
             &program,
             &mut bindings,
@@ -136,7 +136,7 @@ async fn execute_gpu() {
             "deltaT".to_string(),
         );
 
-        const BIND_CONTEXT_2: [&str; 32] = update_bind_context!(BIND_CONTEXT_1, "rule1Distance");
+        const BIND_CONTEXT_2: [&str; 32] = update_bind_context(&BIND_CONTEXT_1, "rule1Distance");
         bind_float(
             &program,
             &mut bindings,
@@ -145,7 +145,7 @@ async fn execute_gpu() {
             "rule1Distance".to_string(),
         );
 
-        const BIND_CONTEXT_3: [&str; 32] = update_bind_context!(BIND_CONTEXT_2, "rule2Distance");
+        const BIND_CONTEXT_3: [&str; 32] = update_bind_context(&BIND_CONTEXT_2, "rule2Distance");
         bind_float(
             &program,
             &mut bindings,
@@ -154,7 +154,7 @@ async fn execute_gpu() {
             "rule2Distance".to_string(),
         );
 
-        const BIND_CONTEXT_4: [&str; 32] = update_bind_context!(BIND_CONTEXT_3, "rule3Distance");
+        const BIND_CONTEXT_4: [&str; 32] = update_bind_context(&BIND_CONTEXT_3, "rule3Distance");
         bind_float(
             &program,
             &mut bindings,
@@ -163,7 +163,7 @@ async fn execute_gpu() {
             "rule3Distance".to_string(),
         );
 
-        const BIND_CONTEXT_5: [&str; 32] = update_bind_context!(BIND_CONTEXT_4, "rule1Scale");
+        const BIND_CONTEXT_5: [&str; 32] = update_bind_context(&BIND_CONTEXT_4, "rule1Scale");
         bind_float(
             &program,
             &mut bindings,
@@ -172,7 +172,7 @@ async fn execute_gpu() {
             "rule1Scale".to_string(),
         );
 
-        const BIND_CONTEXT_6: [&str; 32] = update_bind_context!(BIND_CONTEXT_5, "rule2Scale");
+        const BIND_CONTEXT_6: [&str; 32] = update_bind_context(&BIND_CONTEXT_5, "rule2Scale");
         bind_float(
             &program,
             &mut bindings,
@@ -181,7 +181,7 @@ async fn execute_gpu() {
             "rule2Scale".to_string(),
         );
 
-        const BIND_CONTEXT_7: [&str; 32] = update_bind_context!(BIND_CONTEXT_6, "rule3Scale");
+        const BIND_CONTEXT_7: [&str; 32] = update_bind_context(&BIND_CONTEXT_6, "rule3Scale");
         bind_float(
             &program,
             &mut bindings,
@@ -190,7 +190,7 @@ async fn execute_gpu() {
             "rule3Scale".to_string(),
         );
 
-        const BIND_CONTEXT_8: [&str; 32] = update_bind_context!(BIND_CONTEXT_7, "srcParticlePos");
+        const BIND_CONTEXT_8: [&str; 32] = update_bind_context(&BIND_CONTEXT_7, "srcParticlePos");
         bind_vec3(
             &program,
             &mut bindings,
@@ -199,7 +199,7 @@ async fn execute_gpu() {
             "srcParticlePos".to_string(),
         );
 
-        const BIND_CONTEXT_9: [&str; 32] = update_bind_context!(BIND_CONTEXT_8, "srcParticleVel");
+        const BIND_CONTEXT_9: [&str; 32] = update_bind_context(&BIND_CONTEXT_8, "srcParticleVel");
         bind_vec3(
             &program,
             &mut bindings,

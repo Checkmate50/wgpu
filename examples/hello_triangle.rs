@@ -12,12 +12,12 @@ pub use static_assertions::const_assert;
 pub use pipeline::wgpu_graphics_header;
 pub use pipeline::wgpu_graphics_header::{
     compile_buffer, default_bind_group, setup_render_pass, valid_fragment_shader,
-    valid_vertex_shader, GraphicsBindings, GraphicsShader, OutGraphicsBindings,
+    valid_vertex_shader, GraphicsBindings, GraphicsShader, OutGraphicsBindings, generate_swap_chain
 };
 
 pub use pipeline::shared;
 pub use pipeline::shared::{
-    bind_fvec, bind_vec3, is_gl_builtin, new_bind_scope, ready_to_run, Bindings,
+    bind_fvec, bind_vec3, is_gl_builtin, ready_to_run, Bindings, update_bind_context
 };
 
 async fn run(event_loop: EventLoop<()>, window: Window) {
@@ -49,34 +49,19 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         }}
     };
 
-    const S_v: GraphicsShader = VERTEXT.0;
+    const S_V: GraphicsShader = VERTEXT.0;
     const STARTING_BIND_CONTEXT: [&str; 32] = VERTEXT.1;
-    const S_f: GraphicsShader = FRAGMENT.0;
+    const S_F: GraphicsShader = FRAGMENT.0;
 
-    let mut compile_buffer: [wgpu::VertexAttributeDescriptor; 32] = compile_buffer();
-
-    static_assertions::const_assert!(valid_vertex_shader(&S_v));
-    static_assertions::const_assert!(valid_fragment_shader(&S_f));
-    let (program, mut template_bindings, mut template_out_bindings) =
-        wgpu_graphics_header::graphics_compile(&mut compile_buffer, &window, &S_v, &S_f).await;
+    let (program, template_bindings, template_out_bindings, _) =
+        compile_valid_graphics_program!(window, S_V, S_F);
 
     let positions = vec![[0.0, 0.7, 0.0], [-0.5, 0.5, 0.0], [0.5, -0.5, 0.0]];
     let brightness = vec![0.5, 0.5, 0.9];
 
-    // For drawing to window
-    let mut sc_desc = wgpu::SwapChainDescriptor {
-        usage: wgpu::TextureUsage::OUTPUT_ATTACHMENT,
-        format: wgpu::TextureFormat::Bgra8UnormSrgb,
-        // Window dimensions
-        width: size.width,
-        height: size.height,
-        // Only update during the "vertical blanking interval"
-        // As opposed to Immediate where it is possible to see visual tearing(where multiple frames are visible at once)
-        present_mode: wgpu::PresentMode::Mailbox,
-    };
 
     // A "chain" of buffers that we render on to the display
-    let mut swap_chain = program.device.create_swap_chain(&program.surface, &sc_desc);
+    let mut swap_chain = generate_swap_chain(&program, &window);
 
     event_loop.run(move |event, _, control_flow: &mut ControlFlow| {
         *control_flow = ControlFlow::Poll;
@@ -96,7 +81,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                 let mut bindings: GraphicsBindings = template_bindings.clone();
                 let mut out_bindings: OutGraphicsBindings = template_out_bindings.clone();
                 const BIND_CONTEXT_1: [&str; 32] =
-                    update_bind_context!(STARTING_BIND_CONTEXT, "in_brightness");
+                    update_bind_context(&STARTING_BIND_CONTEXT, "in_brightness");
                 bind_fvec(
                     &program,
                     &mut bindings,
@@ -106,7 +91,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                 );
                 {
                     const BIND_CONTEXT_2: [&str; 32] =
-                        update_bind_context!(BIND_CONTEXT_1, "a_position");
+                        update_bind_context(&BIND_CONTEXT_1, "a_position");
                     bind_vec3(
                         &program,
                         &mut bindings,

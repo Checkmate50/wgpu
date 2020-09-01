@@ -12,19 +12,20 @@ pub use static_assertions::const_assert;
 
 pub use pipeline::wgpu_graphics_header;
 pub use pipeline::wgpu_graphics_header::{
-    bind_sampler, bind_texture, compile_buffer, default_bind_group, setup_render_pass,
-    valid_fragment_shader, valid_vertex_shader, GraphicsBindings, GraphicsShader,
-    OutGraphicsBindings, graphics_starting_context
+    bind_sampler, bind_texture, compile_buffer, default_bind_group, generate_swap_chain,
+    graphics_starting_context, setup_render_pass, valid_fragment_shader, valid_vertex_shader,
+    GraphicsBindings, GraphicsShader, OutGraphicsBindings,
 };
 
 pub use pipeline::shared;
 pub use pipeline::shared::{
-    bind_fvec, bind_mat4, bind_vec3, is_gl_builtin, new_bind_scope, ready_to_run, Bindings, bind_vec2
+    bind_fvec, bind_mat4, bind_vec2, bind_vec3, is_gl_builtin, ready_to_run, update_bind_context,
+    Bindings,
 };
 
 pub use pipeline::helper::{
-    generate_identity_matrix, generate_projection_matrix, generate_view_matrix, load_model,
-    rotation_x, rotation_y, rotation_z, translate, create_texels, load_cube
+    create_texels, generate_identity_matrix, generate_projection_matrix, generate_view_matrix,
+    load_cube, load_model, rotation_x, rotation_y, rotation_z, translate,
 };
 
 async fn run(event_loop: EventLoop<()>, window: Window) {
@@ -70,12 +71,8 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     const STARTING_BIND_CONTEXT: [&str; 32] = VERTEXT.1;
     const S_F: GraphicsShader = FRAGMENT.0;
 
-    let mut compile_buffer: [wgpu::VertexAttributeDescriptor; 32] = compile_buffer();
-
-    static_assertions::const_assert!(valid_vertex_shader(&S_V));
-    static_assertions::const_assert!(valid_fragment_shader(&S_F));
-    let (program, template_bindings, template_out_bindings) =
-        wgpu_graphics_header::graphics_compile(&mut compile_buffer, &window, &S_V, &S_F).await;
+    let (program, template_bindings, template_out_bindings, _) =
+        compile_valid_graphics_program!(window, S_V, S_F);
 
     const VERTEXT_CUBE: (GraphicsShader, [&str; 32], [&str; 32]) = graphics_shader! {
         [[vertex in] vec3] a_Pos;
@@ -106,19 +103,14 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         }}
     };
 
-    const S_v_CUBE: GraphicsShader = VERTEXT_CUBE.0;
+    const S_V_CUBE: GraphicsShader = VERTEXT_CUBE.0;
     const VERTEXT_STARTING_BIND_CONTEXT_CUBE: [&str; 32] = VERTEXT_CUBE.1;
-    const S_f_CUBE: GraphicsShader = FRAGMENT_CUBE.0;
+    const S_F_CUBE: GraphicsShader = FRAGMENT_CUBE.0;
     const STARTING_BIND_CONTEXT_CUBE: [&str; 32] =
-        graphics_starting_context(VERTEXT_STARTING_BIND_CONTEXT_CUBE, S_f_CUBE);
+        graphics_starting_context(VERTEXT_STARTING_BIND_CONTEXT_CUBE, S_F_CUBE);
 
-
-    //let mut compile_buffer2: [wgpu::VertexAttributeDescriptor; 32] = compile_buffer();
-
-    static_assertions::const_assert!(valid_vertex_shader(&S_v_CUBE));
-    static_assertions::const_assert!(valid_fragment_shader(&S_f_CUBE));
-    let (program_CUBE, mut template_bindings_CUBE, mut template_out_bindings_CUBE) =
-        wgpu_graphics_header::graphics_compile(&mut compile_buffer, &window, &S_v_CUBE, &S_f_CUBE).await;
+    let (program_CUBE, template_bindings_CUBE, template_out_bindings_CUBE, _) =
+        compile_valid_graphics_program!(window, S_V_CUBE, S_F_CUBE);
 
     let (positions, normals, indices) = load_model("src/models/teapot.obj");
 
@@ -157,21 +149,9 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 
     let light_ambient = vec![[0.1, 0.0, 0.0]];
 
-    // For drawing to window
-    let sc_desc = wgpu::SwapChainDescriptor {
-        usage: wgpu::TextureUsage::OUTPUT_ATTACHMENT,
-        format: wgpu::TextureFormat::Bgra8UnormSrgb,
-        // Window dimensions
-        width: size.width,
-        height: size.height,
-        // Only update during the "vertical blanking interval"
-        // As opposed to Immediate where it is possible to see visual tearing(where multiple frames are visible at once)
-        present_mode: wgpu::PresentMode::Mailbox,
-    };
-
     let view_mat = generate_view_matrix();
 
-    let proj_mat = generate_projection_matrix(sc_desc.width as f32 / sc_desc.height as f32);
+    let proj_mat = generate_projection_matrix(size.width as f32 / size.height as f32);
 
     let mut model_mat = generate_identity_matrix();
 
@@ -183,7 +163,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     let trans_mat = model_mat3 * proj_mat * view_mat;
 
     // A "chain" of buffers that we render on to the display
-    let mut swap_chain = program.device.create_swap_chain(&program.surface, &sc_desc);
+    let mut swap_chain = generate_swap_chain(&program, &window);
 
     event_loop.run(move |event, _, control_flow: &mut ControlFlow| {
         *control_flow = ControlFlow::Poll;
@@ -210,6 +190,17 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                 let mut bind_group3 = default_bind_group(&program_CUBE);
                 let mut bindings3: GraphicsBindings = template_bindings_CUBE.clone();
                 let mut out_bindings3: OutGraphicsBindings = template_out_bindings_CUBE.clone();
+
+                let sc_desc = wgpu::SwapChainDescriptor {
+                    usage: wgpu::TextureUsage::OUTPUT_ATTACHMENT,
+                    format: wgpu::TextureFormat::Bgra8UnormSrgb,
+                    // Window dimensions
+                    width: size.width,
+                    height: size.height,
+                    // Only update during the "vertical blanking interval"
+                    // As opposed to Immediate where it is possible to see visual tearing(where multiple frames are visible at once)
+                    present_mode: wgpu::PresentMode::Mailbox,
+                };
 
                 let multisampled_texture_extent = wgpu::Extent3d {
                     width: sc_desc.width,
@@ -294,27 +285,27 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                 light_direction = rotate_vec3(&light_direction, 0.05);
 
                 const BIND_CONTEXT_1: [&str; 32] =
-                    update_bind_context!(STARTING_BIND_CONTEXT, "a_normal");
-                bind_vec3(
+                    update_bind_context(&STARTING_BIND_CONTEXT, "u_view");
+                bind_mat4(
                     &program,
                     &mut bindings,
                     &mut out_bindings,
-                    &normals,
-                    "a_normal".to_string(),
+                    view_mat,
+                    "u_view".to_string(),
                 );
                 {
                     const BIND_CONTEXT_2: [&str; 32] =
-                        update_bind_context!(BIND_CONTEXT_1, "u_view");
-                    bind_mat4(
+                        update_bind_context(&BIND_CONTEXT_1, "a_normal");
+                    bind_vec3(
                         &program,
                         &mut bindings,
                         &mut out_bindings,
-                        view_mat,
-                        "u_view".to_string(),
+                        &normals,
+                        "a_normal".to_string(),
                     );
                     {
                         const BIND_CONTEXT_3: [&str; 32] =
-                            update_bind_context!(BIND_CONTEXT_2, "u_model");
+                            update_bind_context(&BIND_CONTEXT_2, "u_model");
                         bind_mat4(
                             &program,
                             &mut bindings,
@@ -324,7 +315,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                         );
                         {
                             const BIND_CONTEXT_4: [&str; 32] =
-                                update_bind_context!(BIND_CONTEXT_3, "u_proj");
+                                update_bind_context(&BIND_CONTEXT_3, "u_proj");
                             bind_mat4(
                                 &program,
                                 &mut bindings,
@@ -334,7 +325,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                             );
                             {
                                 const BIND_CONTEXT_5: [&str; 32] =
-                                    update_bind_context!(BIND_CONTEXT_4, "Ambient");
+                                    update_bind_context(&BIND_CONTEXT_4, "Ambient");
                                 bind_vec3(
                                     &program,
                                     &mut bindings,
@@ -344,7 +335,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                 );
                                 {
                                     const BIND_CONTEXT_6: [&str; 32] =
-                                        update_bind_context!(BIND_CONTEXT_5, "LightDirection");
+                                        update_bind_context(&BIND_CONTEXT_5, "LightDirection");
                                     bind_vec3(
                                         &program,
                                         &mut bindings,
@@ -354,7 +345,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                     );
                                     {
                                         const BIND_CONTEXT_7: [&str; 32] =
-                                            update_bind_context!(BIND_CONTEXT_6, "a_position");
+                                            update_bind_context(&BIND_CONTEXT_6, "a_position");
 
                                         bind_vec3(
                                             &program,
@@ -381,27 +372,27 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                     }
                 }
                 const BIND_CONTEXT_1_1: [&str; 32] =
-                    update_bind_context!(STARTING_BIND_CONTEXT, "a_normal");
-                bind_vec3(
+                    update_bind_context(&STARTING_BIND_CONTEXT, "u_view");
+                bind_mat4(
                     &program,
                     &mut bindings2,
                     &mut out_bindings2,
-                    &normals2,
-                    "a_normal".to_string(),
+                    view_mat,
+                    "u_view".to_string(),
                 );
                 {
                     const BIND_CONTEXT_2_1: [&str; 32] =
-                        update_bind_context!(BIND_CONTEXT_1_1, "u_view");
-                    bind_mat4(
+                        update_bind_context(&BIND_CONTEXT_1_1, "a_normal");
+                    bind_vec3(
                         &program,
                         &mut bindings2,
                         &mut out_bindings2,
-                        view_mat,
-                        "u_view".to_string(),
+                        &normals2,
+                        "a_normal".to_string(),
                     );
                     {
                         const BIND_CONTEXT_3_1: [&str; 32] =
-                            update_bind_context!(BIND_CONTEXT_2_1, "u_model");
+                            update_bind_context(&BIND_CONTEXT_2_1, "u_model");
                         bind_mat4(
                             &program,
                             &mut bindings2,
@@ -411,7 +402,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                         );
                         {
                             const BIND_CONTEXT_4_1: [&str; 32] =
-                                update_bind_context!(BIND_CONTEXT_3_1, "u_proj");
+                                update_bind_context(&BIND_CONTEXT_3_1, "u_proj");
                             bind_mat4(
                                 &program,
                                 &mut bindings2,
@@ -421,7 +412,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                             );
                             {
                                 const BIND_CONTEXT_5_1: [&str; 32] =
-                                    update_bind_context!(BIND_CONTEXT_4_1, "Ambient");
+                                    update_bind_context(&BIND_CONTEXT_4_1, "Ambient");
                                 bind_vec3(
                                     &program,
                                     &mut bindings2,
@@ -431,7 +422,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                 );
                                 {
                                     const BIND_CONTEXT_6_1: [&str; 32] =
-                                        update_bind_context!(BIND_CONTEXT_5_1, "LightDirection");
+                                        update_bind_context(&BIND_CONTEXT_5_1, "LightDirection");
                                     bind_vec3(
                                         &program,
                                         &mut bindings2,
@@ -441,7 +432,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                     );
                                     {
                                         const BIND_CONTEXT_7_1: [&str; 32] =
-                                            update_bind_context!(BIND_CONTEXT_6_1, "a_position");
+                                            update_bind_context(&BIND_CONTEXT_6_1, "a_position");
 
                                         bind_vec3(
                                             &program,
@@ -470,7 +461,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                 rpass.set_pipeline(&program_CUBE.pipeline);
 
                 const BIND_CONTEXT_1_2: [&str; 32] =
-                    update_bind_context!(STARTING_BIND_CONTEXT_CUBE, "a_Pos");
+                    update_bind_context(&STARTING_BIND_CONTEXT_CUBE, "a_Pos");
                 bind_vec3(
                     &program_CUBE,
                     &mut bindings3,
@@ -480,7 +471,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                 );
                 {
                     const BIND_CONTEXT_2_2: [&str; 32] =
-                        update_bind_context!(BIND_CONTEXT_1_2, "u_Transform");
+                        update_bind_context(&BIND_CONTEXT_1_2, "u_Transform");
                     bind_mat4(
                         &program_CUBE,
                         &mut bindings3,
@@ -490,7 +481,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                     );
                     {
                         const BIND_CONTEXT_3_2: [&str; 32] =
-                            update_bind_context!(BIND_CONTEXT_2_2, "a_TexCoord");
+                            update_bind_context(&BIND_CONTEXT_2_2, "a_TexCoord");
                         bind_vec2(
                             &program_CUBE,
                             &mut bindings3,
@@ -500,7 +491,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                         );
                         {
                             const BIND_CONTEXT_4_2: [&str; 32] =
-                                update_bind_context!(BIND_CONTEXT_3_2, "t_Color");
+                                update_bind_context(&BIND_CONTEXT_3_2, "t_Color");
                             bind_texture(
                                 &program_CUBE,
                                 &mut bindings3,
@@ -510,7 +501,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                             );
                             {
                                 const BIND_CONTEXT_5_2: [&str; 32] =
-                                    update_bind_context!(BIND_CONTEXT_4_2, "s_Color");
+                                    update_bind_context(&BIND_CONTEXT_4_2, "s_Color");
                                 bind_sampler(
                                     &program_CUBE,
                                     &mut bindings3,
@@ -519,9 +510,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                     "s_Color".to_string(),
                                 );
                                 {
-                                    static_assertions::const_assert!(ready_to_run(
-                                        BIND_CONTEXT_5_2
-                                    ));
+                                    ready_to_run(BIND_CONTEXT_5_2);
                                     wgpu_graphics_header::graphics_run_indicies(
                                         &program_CUBE,
                                         rpass,

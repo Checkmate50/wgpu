@@ -5,7 +5,7 @@ extern crate pipeline;
 pub use pipeline::shared;
 pub use pipeline::wgpu_compute_header;
 
-pub use pipeline::shared::{bind_vec, is_gl_builtin, new_bind_scope, ready_to_run};
+pub use pipeline::shared::{bind_vec, is_gl_builtin, update_bind_context, ready_to_run};
 pub use pipeline::wgpu_compute_header::{compile, read_uvec, run, ComputeShader};
 
 pub use static_assertions::const_assert;
@@ -58,27 +58,21 @@ async fn execute_gpu() {
     /*     const BIND_CONTEXT_1: ([&str; 32], bool) = new_bind_scope(&STARTING_BIND_CONTEXT, "indices");
     const_assert!(BIND_CONTEXT_1.1); */
 
-    macro_rules! update_bind_context {
-        ($bind_context:tt, $bind_name:tt) => {{
-            const BIND_CONTEXT: ([&str; 32], bool) = new_bind_scope(&$bind_context, $bind_name);
-            const_assert!(BIND_CONTEXT.1);
-            BIND_CONTEXT.0
-        }};
-    }
-
-    const BIND_CONTEXT_1: [&str; 32] = update_bind_context!(STARTING_BIND_CONTEXT, "indices");
-    bind_vec(
-        &program,
-        &mut bindings,
-        &mut out_bindings,
-        &indices,
-        "indices".to_string(),
-    );
-
     {
-        ready_to_run(BIND_CONTEXT_1);
-        let result = run(&program, &mut bindings, out_bindings);
-        println!("{:?}", read_uvec(&program, &result, "indices").await);
+        const BIND_CONTEXT_1: [&str; 32] = update_bind_context(&STARTING_BIND_CONTEXT, "indices");
+        bind_vec(
+            &program,
+            &mut bindings,
+            &mut out_bindings,
+            &indices,
+            "indices".to_string(),
+        );
+
+        {
+            ready_to_run(BIND_CONTEXT_1);
+            let result = run(&program, &mut bindings, out_bindings);
+            println!("{:?}", read_uvec(&program, &result, "indices").await);
+        }
     }
 }
 

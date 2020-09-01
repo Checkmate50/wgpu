@@ -46,13 +46,13 @@ async fn execute_gpu() {
     let (program, mut bindings, mut out_bindings) = compile(&S).await;
     let (_, _, mut out_bindings2) = compile(&S).await;
 
-    let indices_1: Vec<u32> = vec![1, 2, 3, 4];
-    let indices_2: Vec<u32> = vec![2, 2, 2, 2];
-    let indices2: Vec<u32> = vec![4, 3, 2, 1];
+    let indices: Vec<u32> = vec![1, 2, 3, 4];
+    let indices2_1: Vec<u32> = vec![1, 2, 3, 4];
+    let indices2_2: Vec<u32> = vec![4, 3, 2, 1];
 
     const BIND_CONTEXT_1: (BindingContext, MetaContext) = update_bind_context(
         &STARTING_BIND_CONTEXT,
-        "indices2",
+        "indices",
         STARTING_META_CONTEXT,
         "BIND_CONTEXT_1",
     );
@@ -60,13 +60,13 @@ async fn execute_gpu() {
         &program,
         &mut bindings,
         &mut out_bindings,
-        &indices2,
-        "indices2".to_string(),
+        &indices,
+        "indices".to_string(),
     );
     {
         const BIND_CONTEXT_2: (BindingContext, MetaContext) = update_bind_context(
             &BIND_CONTEXT_1.0,
-            "indices",
+            "indices2",
             BIND_CONTEXT_1.1,
             "BIND_CONTEXT_2",
         );
@@ -74,18 +74,18 @@ async fn execute_gpu() {
             &program,
             &mut bindings,
             &mut out_bindings,
-            &indices_1,
-            "indices".to_string(),
+            &indices2_1,
+            "indices2".to_string(),
         );
         const NEXT_META_CONTEXT: MetaContext = ready_to_run(BIND_CONTEXT_2.0, BIND_CONTEXT_2.1);
         {
             let result1 = run(&program, &mut bindings, out_bindings);
             println!("{:?}", read_uvec(&program, &result1, "indices").await);
         }
-
+        debug!(NEXT_META_CONTEXT);
         const BIND_CONTEXT_4: (BindingContext, MetaContext) = update_bind_context(
             &BIND_CONTEXT_1.0,
-            "indices",
+            "indices2",
             NEXT_META_CONTEXT,
             "BIND_CONTEXT_4",
         );
@@ -93,8 +93,8 @@ async fn execute_gpu() {
             &program,
             &mut bindings,
             &mut out_bindings2,
-            &indices_2,
-            "indices".to_string(),
+            &indices2_2,
+            "indices2".to_string(),
         );
         {
             const FINAL_META_CONTEXT: MetaContext =

@@ -1,7 +1,10 @@
 {
     "cSpell.words": [
+        "GLSLTYPE",
         "glsl",
         "multisampling",
-        "wgpu"
+        "wgpu",
+        "winit",
+        "zerocopy"
     ]
 }

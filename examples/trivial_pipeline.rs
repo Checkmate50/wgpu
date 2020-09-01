@@ -5,7 +5,7 @@ extern crate pipeline;
 pub use pipeline::shared;
 pub use pipeline::wgpu_compute_header;
 
-pub use pipeline::shared::{bind_vec, can_pipe, is_gl_builtin, new_bind_scope, ready_to_run};
+pub use pipeline::shared::{bind_vec, can_pipe, is_gl_builtin, update_bind_context, ready_to_run};
 pub use pipeline::wgpu_compute_header::{compile, pipe, read_uvec, run, ComputeShader};
 
 pub use static_assertions::const_assert;
@@ -61,7 +61,7 @@ async fn execute_gpu() {
 
     let indices: Vec<u32> = vec![1, 2, 3, 4];
 
-    const BIND_CONTEXT_1: [&str; 32] = update_bind_context!(STARTING_BIND_CONTEXT, "add_one_in");
+    const BIND_CONTEXT_1: [&str; 32] = update_bind_context(&STARTING_BIND_CONTEXT, "add_one_in");
     bind_vec(
         &program1,
         &mut bindings1,

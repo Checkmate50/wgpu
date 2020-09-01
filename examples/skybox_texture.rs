@@ -12,12 +12,12 @@ pub use static_assertions::const_assert;
 pub use pipeline::wgpu_graphics_header;
 pub use pipeline::wgpu_graphics_header::{
     bind_sampler, bind_texture, compile_buffer, default_bind_group, graphics_starting_context,
-    setup_render_pass, valid_fragment_shader, valid_vertex_shader, GraphicsShader,
+    setup_render_pass, valid_fragment_shader, valid_vertex_shader, GraphicsShader, generate_swap_chain
 };
 
 pub use pipeline::shared;
 pub use pipeline::shared::{
-    bind_fvec, bind_mat4, bind_vec3, is_gl_builtin, new_bind_scope, ready_to_run, Bindings,
+    bind_fvec, bind_mat4, bind_vec3, is_gl_builtin, update_bind_context, ready_to_run, Bindings,
 };
 
 pub use pipeline::helper::{generate_projection_matrix, generate_view_matrix};
@@ -60,37 +60,21 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         }}
     };
 
-    const S_v: GraphicsShader = VERTEXT.0;
+    const S_V: GraphicsShader = VERTEXT.0;
     const VERTEXT_STARTING_BIND_CONTEXT: [&str; 32] = VERTEXT.1;
-    const S_f: GraphicsShader = FRAGMENT.0;
+    const S_F: GraphicsShader = FRAGMENT.0;
     const STARTING_BIND_CONTEXT: [&str; 32] =
-        graphics_starting_context(VERTEXT_STARTING_BIND_CONTEXT, S_f);
+        graphics_starting_context(VERTEXT_STARTING_BIND_CONTEXT, S_F);
 
-    let mut compile_buffer: [wgpu::VertexAttributeDescriptor; 32] = compile_buffer();
+    let (program, template_bindings, template_out_bindings, _) =
+        compile_valid_graphics_program!(window, S_V, S_F);
 
-    static_assertions::const_assert!(valid_vertex_shader(&S_v));
-    static_assertions::const_assert!(valid_fragment_shader(&S_f));
-    let (program, mut template_bindings, mut template_out_bindings) =
-        wgpu_graphics_header::graphics_compile(&mut compile_buffer, &window, &S_v, &S_f).await;
-
-    // For drawing to window
-    let mut sc_desc = wgpu::SwapChainDescriptor {
-        usage: wgpu::TextureUsage::OUTPUT_ATTACHMENT,
-        format: wgpu::TextureFormat::Bgra8UnormSrgb,
-        // Window dimensions
-        width: size.width,
-        height: size.height,
-        // Only update during the "vertical blanking interval"
-        // As opposed to Immediate where it is possible to see visual tearing(where multiple frames are visible at once)
-        present_mode: wgpu::PresentMode::Mailbox,
-    };
-
-    let proj_mat = generate_projection_matrix(sc_desc.width as f32 / sc_desc.height as f32);
+    let proj_mat = generate_projection_matrix(size.width as f32 / size.height as f32);
 
     let view_mat = generate_view_matrix();
 
     // A "chain" of buffers that we render on to the display
-    let mut swap_chain = program.device.create_swap_chain(&program.surface, &sc_desc);
+    let mut swap_chain = generate_swap_chain(&program, &window);
 
     event_loop.run(move |event, _, control_flow: &mut ControlFlow| {
         *control_flow = ControlFlow::Poll;
@@ -197,7 +181,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                 let mut bind_group = default_bind_group(&program);
 
                 const BIND_CONTEXT_1: [&str; 32] =
-                    update_bind_context!(STARTING_BIND_CONTEXT, "t_Cubemap");
+                    update_bind_context(&STARTING_BIND_CONTEXT, "t_Cubemap");
                 bind_texture(
                     &program,
                     &mut bindings,
@@ -207,7 +191,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                 );
                 {
                     const BIND_CONTEXT_2: [&str; 32] =
-                        update_bind_context!(BIND_CONTEXT_1, "s_Cubemap");
+                        update_bind_context(&BIND_CONTEXT_1, "s_Cubemap");
                     bind_sampler(
                         &program,
                         &mut bindings,
@@ -217,7 +201,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                     );
                     {
                         const BIND_CONTEXT_3: [&str; 32] =
-                            update_bind_context!(BIND_CONTEXT_2, "view");
+                            update_bind_context(&BIND_CONTEXT_2, "view");
                         bind_mat4(
                             &program,
                             &mut bindings,
@@ -227,7 +211,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                         );
                         {
                             const BIND_CONTEXT_4: [&str; 32] =
-                                update_bind_context!(BIND_CONTEXT_3, "proj");
+                                update_bind_context(&BIND_CONTEXT_3, "proj");
                             bind_mat4(
                                 &program,
                                 &mut bindings,
@@ -236,7 +220,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                 "proj".to_string(),
                             );
                             {
-                                static_assertions::const_assert!(ready_to_run(BIND_CONTEXT_4));
+                                ready_to_run(BIND_CONTEXT_4);
                                 wgpu_graphics_header::graphics_run(
                                     &program,
                                     rpass,

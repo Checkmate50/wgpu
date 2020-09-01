@@ -7,17 +7,17 @@ use winit::{
     window::Window,
 };
 
-pub use static_assertions::const_assert;
-
-pub use pipeline::wgpu_graphics_header;
 pub use pipeline::wgpu_graphics_header::{
-    compile_buffer, default_bind_group, setup_render_pass, valid_fragment_shader,
-    valid_vertex_shader, GraphicsBindings, GraphicsShader, OutGraphicsBindings,
+    default_bind_group, generate_swap_chain, graphics_run_indicies, setup_render_pass,
+    GraphicsBindings, GraphicsShader, OutGraphicsBindings,
 };
 
-pub use pipeline::shared;
 pub use pipeline::shared::{
-    bind_fvec, bind_mat4, bind_vec3, is_gl_builtin, new_bind_scope, ready_to_run, Bindings,
+    bind_fvec, bind_mat4, bind_vec3, Bindings,
+};
+
+pub use pipeline::context::{
+    ready_to_run, update_bind_context, BindingContext, MetaContext
 };
 
 pub use pipeline::helper::{
@@ -28,7 +28,7 @@ pub use pipeline::helper::{
 async fn run(event_loop: EventLoop<()>, window: Window) {
     let size = window.inner_size();
 
-    const VERTEXT: (GraphicsShader, [&str; 32], [&str; 32]) = graphics_shader! {
+    const VERTEXT: (GraphicsShader, BindingContext) = graphics_shader! {
         [[vertex in] vec3] a_position;
         [[vertex in] vec3] a_normal;
         [[uniform in] vec3] Ambient;
@@ -52,7 +52,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         }}
     };
 
-    const FRAGMENT: (GraphicsShader, [&str; 32], [&str; 32]) = graphics_shader! {
+    const FRAGMENT: (GraphicsShader, BindingContext) = graphics_shader! {
         [[in] vec3] fragmentNormal;
         [[uniform in] vec3] Ambient;
         [[uniform in] vec3] LightDirection;
@@ -66,15 +66,12 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     };
 
     const S_V: GraphicsShader = VERTEXT.0;
-    const STARTING_BIND_CONTEXT: [&str; 32] = VERTEXT.1;
+    const STARTING_BIND_CONTEXT: BindingContext = VERTEXT.1;
     const S_F: GraphicsShader = FRAGMENT.0;
+    const STARTING_META_CONTEXT : MetaContext = MetaContext::new();
 
-    let mut compile_buffer: [wgpu::VertexAttributeDescriptor; 32] = compile_buffer();
-
-    static_assertions::const_assert!(valid_vertex_shader(&S_V));
-    static_assertions::const_assert!(valid_fragment_shader(&S_F));
-    let (program, template_bindings, template_out_bindings) =
-        wgpu_graphics_header::graphics_compile(&mut compile_buffer, &window, &S_V, &S_F).await;
+    let (program, template_bindings, template_out_bindings, _) =
+        compile_valid_graphics_program!(window, S_V, S_F);
 
     let (positions, normals, indices) = load_model("src/models/teapot.obj");
 
@@ -82,26 +79,14 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 
     let light_ambient = vec![[0.1, 0.0, 0.0]];
 
-    // For drawing to window
-    let sc_desc = wgpu::SwapChainDescriptor {
-        usage: wgpu::TextureUsage::OUTPUT_ATTACHMENT,
-        format: wgpu::TextureFormat::Bgra8UnormSrgb,
-        // Window dimensions
-        width: size.width,
-        height: size.height,
-        // Only update during the "vertical blanking interval"
-        // As opposed to Immediate where it is possible to see visual tearing(where multiple frames are visible at once)
-        present_mode: wgpu::PresentMode::Mailbox,
-    };
-
     let view_mat = generate_view_matrix();
 
-    let proj_mat = generate_projection_matrix(sc_desc.width as f32 / sc_desc.height as f32);
+    let proj_mat = generate_projection_matrix(size.width as f32 / size.height as f32);
 
     let mut model_mat = generate_identity_matrix();
 
     // A "chain" of buffers that we render on to the display
-    let mut swap_chain = program.device.create_swap_chain(&program.surface, &sc_desc);
+    let mut swap_chain = generate_swap_chain(&program, &window);
 
     event_loop.run(move |event, _, control_flow: &mut ControlFlow| {
         *control_flow = ControlFlow::Poll;
@@ -113,11 +98,11 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                     .device
                     .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
-                let mut frame = swap_chain
+                let frame = swap_chain
                     .get_next_texture()
                     .expect("Timeout when acquiring next swap chain texture");
 
-                let mut rpass = setup_render_pass(&program, &mut init_encoder, &frame);
+                let rpass = setup_render_pass(&program, &mut init_encoder, &frame);
                 let mut bind_group = default_bind_group(&program);
 
                 let mut bindings: GraphicsBindings = template_bindings.clone();
@@ -133,8 +118,8 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 
                 light_direction = rotate_vec3(&light_direction, 0.05);
 
-                const BIND_CONTEXT_1: [&str; 32] =
-                    update_bind_context!(STARTING_BIND_CONTEXT, "a_position");
+                const BIND_CONTEXT_1: (BindingContext, MetaContext) =
+                    update_bind_context(&STARTING_BIND_CONTEXT, "a_position", STARTING_META_CONTEXT, "BIND_CONTEXT_1");
                 bind_vec3(
                     &program,
                     &mut bindings,
@@ -143,8 +128,8 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                     "a_position".to_string(),
                 );
                 {
-                    const BIND_CONTEXT_2: [&str; 32] =
-                        update_bind_context!(BIND_CONTEXT_1, "u_view");
+                    const BIND_CONTEXT_2: (BindingContext, MetaContext) =
+                        update_bind_context(&BIND_CONTEXT_1.0, "u_view", BIND_CONTEXT_1.1, "BIND_CONTEXT_2");
                     bind_mat4(
                         &program,
                         &mut bindings,
@@ -153,8 +138,8 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                         "u_view".to_string(),
                     );
                     {
-                        const BIND_CONTEXT_3: [&str; 32] =
-                            update_bind_context!(BIND_CONTEXT_2, "u_model");
+                        const BIND_CONTEXT_3: (BindingContext, MetaContext) =
+                            update_bind_context(&BIND_CONTEXT_2.0, "u_model", BIND_CONTEXT_2.1, "BIND_CONTEXT_3");
                         bind_mat4(
                             &program,
                             &mut bindings,
@@ -163,8 +148,8 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                             "u_model".to_string(),
                         );
                         {
-                            const BIND_CONTEXT_4: [&str; 32] =
-                                update_bind_context!(BIND_CONTEXT_3, "u_proj");
+                            const BIND_CONTEXT_4: (BindingContext, MetaContext) =
+                                update_bind_context(&BIND_CONTEXT_3.0, "u_proj", BIND_CONTEXT_3.1, "BIND_CONTEXT_4");
                             bind_mat4(
                                 &program,
                                 &mut bindings,
@@ -173,8 +158,8 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                 "u_proj".to_string(),
                             );
                             {
-                                const BIND_CONTEXT_5: [&str; 32] =
-                                    update_bind_context!(BIND_CONTEXT_4, "Ambient");
+                                const BIND_CONTEXT_5: (BindingContext, MetaContext) =
+                                    update_bind_context(&BIND_CONTEXT_4.0, "Ambient", BIND_CONTEXT_4.1, "BIND_CONTEXT_5");
                                 bind_vec3(
                                     &program,
                                     &mut bindings,
@@ -183,8 +168,8 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                     "Ambient".to_string(),
                                 );
                                 {
-                                    const BIND_CONTEXT_6: [&str; 32] =
-                                        update_bind_context!(BIND_CONTEXT_5, "LightDirection");
+                                    const BIND_CONTEXT_6: (BindingContext, MetaContext) =
+                                        update_bind_context(&BIND_CONTEXT_5.0, "LightDirection", BIND_CONTEXT_5.1, "BIND_CONTEXT_6");
                                     bind_vec3(
                                         &program,
                                         &mut bindings,
@@ -193,8 +178,8 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                         "LightDirection".to_string(),
                                     );
                                     {
-                                        const BIND_CONTEXT_7: [&str; 32] =
-                                            update_bind_context!(BIND_CONTEXT_6, "a_normal");
+                                        const BIND_CONTEXT_7: (BindingContext, MetaContext) =
+                                            update_bind_context(&BIND_CONTEXT_6.0, "a_normal", BIND_CONTEXT_6.1, "BIND_CONTEXT_7");
                                         bind_vec3(
                                             &program,
                                             &mut bindings,
@@ -203,8 +188,8 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                             "a_normal".to_string(),
                                         );
                                         {
-                                            ready_to_run(BIND_CONTEXT_7);
-                                            wgpu_graphics_header::graphics_run_indicies(
+                                            const Next_Meta_Context: MetaContext = ready_to_run(BIND_CONTEXT_7.0, BIND_CONTEXT_7.1);
+                                            graphics_run_indicies(
                                                 &program,
                                                 rpass,
                                                 &mut bind_group,

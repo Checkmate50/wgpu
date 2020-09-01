@@ -18,7 +18,7 @@ pub use pipeline::wgpu_graphics_header::{
 
 pub use pipeline::shared;
 pub use pipeline::shared::{
-    bind_fvec, bind_mat4, bind_vec2, bind_vec3, is_gl_builtin, new_bind_scope, ready_to_run,
+    bind_fvec, bind_mat4, bind_vec2, bind_vec3, is_gl_builtin, ready_to_run, update_bind_context,
     Bindings,
 };
 
@@ -57,18 +57,14 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         }}
     };
 
-    const S_v: GraphicsShader = VERTEXT.0;
+    const S_V: GraphicsShader = VERTEXT.0;
     const VERTEXT_STARTING_BIND_CONTEXT: [&str; 32] = VERTEXT.1;
-    const S_f: GraphicsShader = FRAGMENT.0;
+    const S_F: GraphicsShader = FRAGMENT.0;
     const STARTING_BIND_CONTEXT: [&str; 32] =
-        graphics_starting_context(VERTEXT_STARTING_BIND_CONTEXT, S_f);
+        graphics_starting_context(VERTEXT_STARTING_BIND_CONTEXT, S_F);
 
-    let mut compile_buffer: [wgpu::VertexAttributeDescriptor; 32] = compile_buffer();
-
-    static_assertions::const_assert!(valid_vertex_shader(&S_v));
-    static_assertions::const_assert!(valid_fragment_shader(&S_f));
-    let (program, mut template_bindings, mut template_out_bindings) =
-        wgpu_graphics_header::graphics_compile(&mut compile_buffer, &window, &S_v, &S_f).await;
+    let (program, template_bindings, template_out_bindings, _) =
+        compile_valid_graphics_program!(window, S_V, S_F);
 
     let (positions, _, index_data) = load_cube();
 
@@ -221,7 +217,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                 let mut out_bindings: OutGraphicsBindings = template_out_bindings.clone();
 
                 const BIND_CONTEXT_1: [&str; 32] =
-                    update_bind_context!(STARTING_BIND_CONTEXT, "a_Pos");
+                    update_bind_context(&STARTING_BIND_CONTEXT, "a_Pos");
                 bind_vec3(
                     &program,
                     &mut bindings,
@@ -231,7 +227,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                 );
                 {
                     const BIND_CONTEXT_2: [&str; 32] =
-                        update_bind_context!(BIND_CONTEXT_1, "u_Transform");
+                        update_bind_context(&BIND_CONTEXT_1, "u_Transform");
                     bind_mat4(
                         &program,
                         &mut bindings,
@@ -241,7 +237,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                     );
                     {
                         const BIND_CONTEXT_3: [&str; 32] =
-                            update_bind_context!(BIND_CONTEXT_2, "a_TexCoord");
+                            update_bind_context(&BIND_CONTEXT_2, "a_TexCoord");
                         bind_vec2(
                             &program,
                             &mut bindings,
@@ -251,7 +247,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                         );
                         {
                             const BIND_CONTEXT_4: [&str; 32] =
-                                update_bind_context!(BIND_CONTEXT_3, "t_Color");
+                                update_bind_context(&BIND_CONTEXT_3, "t_Color");
                             bind_texture(
                                 &program,
                                 &mut bindings,
@@ -261,7 +257,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                             );
                             {
                                 const BIND_CONTEXT_5: [&str; 32] =
-                                    update_bind_context!(BIND_CONTEXT_4, "s_Color");
+                                    update_bind_context(&BIND_CONTEXT_4, "s_Color");
                                 bind_sampler(
                                     &program,
                                     &mut bindings,
@@ -270,7 +266,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                     "s_Color".to_string(),
                                 );
                                 {
-                                    static_assertions::const_assert!(ready_to_run(BIND_CONTEXT_5));
+                                    const _: () = ready_to_run(BIND_CONTEXT_5);
                                     wgpu_graphics_header::graphics_run_indicies(
                                         &program,
                                         rpass,
