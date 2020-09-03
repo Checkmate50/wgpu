@@ -11,13 +11,14 @@ pub use static_assertions::const_assert;
 
 pub use pipeline::wgpu_graphics_header;
 pub use pipeline::wgpu_graphics_header::{
-    compile_buffer, default_bind_group, setup_render_pass, valid_fragment_shader,
-    valid_vertex_shader, GraphicsBindings, GraphicsShader, OutGraphicsBindings, generate_swap_chain
+    compile_buffer, default_bind_group, generate_swap_chain, setup_render_pass,
+    valid_fragment_shader, valid_vertex_shader, GraphicsBindings, GraphicsShader,
+    OutGraphicsBindings,
 };
 
 pub use pipeline::shared;
 pub use pipeline::shared::{
-    bind_fvec, bind_vec3, is_gl_builtin, ready_to_run, Bindings, update_bind_context
+    bind_fvec, bind_vec3, is_gl_builtin, ready_to_run, update_bind_context, Bindings,
 };
 
 async fn run(event_loop: EventLoop<()>, window: Window) {
@@ -58,7 +59,6 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 
     let positions = vec![[0.0, 0.7, 0.0], [-0.5, 0.5, 0.0], [0.5, -0.5, 0.0]];
     let brightness = vec![0.5, 0.5, 0.9];
-
 
     // A "chain" of buffers that we render on to the display
     let mut swap_chain = generate_swap_chain(&program, &window);

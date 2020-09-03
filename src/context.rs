@@ -3,18 +3,18 @@ use crate::shared::string_compare;
 #[derive(Debug)]
 pub struct MetaContext {
     mutating_contexts: [&'static str; 32],
-    mut_acc : u32,
+    mut_acc: u32,
     invalidated_contexts: [&'static str; 32],
-    inval_acc : u32,
+    inval_acc: u32,
 }
 
 impl MetaContext {
     pub const fn new() -> MetaContext {
         MetaContext {
             mutating_contexts: [""; 32],
-            mut_acc : 0,
+            mut_acc: 0,
             invalidated_contexts: [""; 32],
-            inval_acc : 0,
+            inval_acc: 0,
         }
     }
 
@@ -36,8 +36,8 @@ impl MetaContext {
         MetaContext {
             mutating_contexts,
             mut_acc,
-            invalidated_contexts : self.invalidated_contexts,
-            inval_acc : self.inval_acc,
+            invalidated_contexts: self.invalidated_contexts,
+            inval_acc: self.inval_acc,
         }
     }
 
@@ -47,16 +47,16 @@ impl MetaContext {
         let mut inval_acc = self.inval_acc;
         while acc < self.mut_acc {
             if inval_acc < 32 {
-            invalidated_contexts[inval_acc as usize] = self.mutating_contexts[acc as usize];
-            inval_acc += 1;
+                invalidated_contexts[inval_acc as usize] = self.mutating_contexts[acc as usize];
+                inval_acc += 1;
             } else {
                 panic!("whoops we ran out of space in out meta-context and idk what to do")
             }
             acc += 1;
         }
         MetaContext {
-            mutating_contexts : [""; 32],
-            mut_acc : 0,
+            mutating_contexts: [""; 32],
+            mut_acc: 0,
             invalidated_contexts,
             inval_acc,
         }
@@ -89,7 +89,7 @@ pub const fn update_bind_context(
     bind_context: &BindingContext,
     bind_name: &'static str,
     meta_context: MetaContext,
-    context_name : &'static str,
+    context_name: &'static str,
 ) -> (BindingContext, MetaContext) {
     let mut acc = 0;
     let mut found_it = false;
@@ -121,7 +121,7 @@ pub const fn update_bind_context(
         starting_context: new_bind_context,
         result_context: bind_context.result_context,
         has_out_bound: has_out,
-        name : context_name,
+        name: context_name,
     };
 
     let new_meta_context = if has_out {

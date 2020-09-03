@@ -11,18 +11,15 @@ pub use static_assertions::const_assert;
 
 pub use pipeline::wgpu_graphics_header;
 pub use pipeline::wgpu_graphics_header::{
-    compile_buffer, default_bind_group, setup_render_pass, valid_fragment_shader,
-    valid_vertex_shader, GraphicsBindings, GraphicsShader, OutGraphicsBindings, generate_swap_chain
+    compile_buffer, default_bind_group, generate_swap_chain, setup_render_pass,
+    valid_fragment_shader, valid_vertex_shader, GraphicsBindings, GraphicsShader,
+    OutGraphicsBindings,
 };
 
 pub use pipeline::shared;
-pub use pipeline::shared::{
-    bind_fvec, bind_mat4, bind_vec3, is_gl_builtin, Bindings,
-};
+pub use pipeline::shared::{bind_fvec, bind_mat4, bind_vec3, is_gl_builtin, Bindings};
 
-pub use pipeline::context::{
-update_bind_context, ready_to_run,
-};
+pub use pipeline::context::{ready_to_run, update_bind_context};
 
 pub use pipeline::helper::{
     generate_identity_matrix, generate_projection_matrix, generate_view_matrix, load_cube,
@@ -194,9 +191,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                     );
 
                                     {
-                                        ready_to_run(
-                                            BIND_CONTEXT_5
-                                        );
+                                        ready_to_run(BIND_CONTEXT_5);
                                         rpass = wgpu_graphics_header::graphics_run_indicies(
                                             &program,
                                             rpass,
@@ -262,9 +257,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                     );
 
                                     {
-                                        ready_to_run(
-                                            BIND_CONTEXT_5_1
-                                        );
+                                        ready_to_run(BIND_CONTEXT_5_1);
                                         wgpu_graphics_header::graphics_run_indicies(
                                             &program,
                                             rpass,

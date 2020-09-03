@@ -6,7 +6,7 @@ pub use pipeline::shared;
 pub use pipeline::wgpu_compute_header;
 
 pub use pipeline::shared::{
-    bind_float, bind_vec, bind_vec3, is_gl_builtin, update_bind_context, ready_to_run,
+    bind_float, bind_vec, bind_vec3, is_gl_builtin, ready_to_run, update_bind_context,
 };
 pub use pipeline::wgpu_compute_header::{compile, read_fvec3, run, ComputeShader};
 

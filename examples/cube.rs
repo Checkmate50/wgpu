@@ -11,13 +11,14 @@ pub use static_assertions::const_assert;
 
 pub use pipeline::wgpu_graphics_header;
 pub use pipeline::wgpu_graphics_header::{
-    compile_buffer, default_bind_group, setup_render_pass, valid_fragment_shader,
-    valid_vertex_shader, GraphicsBindings, GraphicsShader, OutGraphicsBindings, generate_swap_chain
+    compile_buffer, default_bind_group, generate_swap_chain, setup_render_pass,
+    valid_fragment_shader, valid_vertex_shader, GraphicsBindings, GraphicsShader,
+    OutGraphicsBindings,
 };
 
 pub use pipeline::shared;
 pub use pipeline::shared::{
-    bind_fvec, bind_mat4, bind_vec3, is_gl_builtin, update_bind_context, ready_to_run, Bindings,
+    bind_fvec, bind_mat4, bind_vec3, is_gl_builtin, ready_to_run, update_bind_context, Bindings,
 };
 
 pub use pipeline::helper::load_cube;

@@ -11,14 +11,14 @@ pub use static_assertions::const_assert;
 
 pub use pipeline::wgpu_graphics_header;
 pub use pipeline::wgpu_graphics_header::{
-    compile_buffer, default_bind_group, graphics_run_indicies, setup_render_pass,
-    valid_fragment_shader, valid_vertex_shader, GraphicsBindings, GraphicsShader,
-    OutGraphicsBindings, generate_swap_chain
+    compile_buffer, default_bind_group, generate_swap_chain, graphics_run_indicies,
+    setup_render_pass, valid_fragment_shader, valid_vertex_shader, GraphicsBindings,
+    GraphicsShader, OutGraphicsBindings,
 };
 
 pub use pipeline::shared;
 pub use pipeline::shared::{
-    bind_fvec, bind_mat4, bind_vec3, is_gl_builtin, update_bind_context, ready_to_run, Bindings,
+    bind_fvec, bind_mat4, bind_vec3, is_gl_builtin, ready_to_run, update_bind_context, Bindings,
 };
 
 pub use pipeline::helper::{
@@ -61,22 +61,22 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 
     let (positions, normals, indices) = load_model("src/models/teapot.obj");
 
-/*     println!("{:?}", positions); */
+    /*     println!("{:?}", positions); */
 
     let mut view_mat = generate_view_matrix();
-/* view_mat = translate(view_mat, 0.0, -1.0, 0.1); */
+    /* view_mat = translate(view_mat, 0.0, -1.0, 0.1); */
 
-/*     println!("{:?}", generate_view_matrix()); */
+    /*     println!("{:?}", generate_view_matrix()); */
 
     println!("View mat: {:?}", view_mat);
 
     let mut proj_mat = generate_projection_matrix(size.width as f32 / size.height as f32);
 
     /*     proj_mat = rotation_x(proj_mat, 34.0);
-proj_mat = rotation_y(proj_mat, 3.0); */
+    proj_mat = rotation_y(proj_mat, 3.0); */
 
     let mut model_mat = generate_identity_matrix();
-/*     model_mat = scale(model_mat, 0.5); */
+    /*     model_mat = scale(model_mat, 0.5); */
 
     // A "chain" of buffers that we render on to the display
     let mut swap_chain = generate_swap_chain(&program, &window);

@@ -12,13 +12,9 @@ pub use pipeline::wgpu_graphics_header::{
     GraphicsBindings, GraphicsShader, OutGraphicsBindings,
 };
 
-pub use pipeline::shared::{
-    bind_fvec, bind_mat4, bind_vec3, Bindings,
-};
+pub use pipeline::shared::{bind_fvec, bind_mat4, bind_vec3, Bindings};
 
-pub use pipeline::context::{
-    ready_to_run, update_bind_context, BindingContext, MetaContext
-};
+pub use pipeline::context::{ready_to_run, update_bind_context, BindingContext, MetaContext};
 
 pub use pipeline::helper::{
     generate_identity_matrix, generate_projection_matrix, generate_view_matrix, load_model,
@@ -68,7 +64,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     const S_V: GraphicsShader = VERTEXT.0;
     const STARTING_BIND_CONTEXT: BindingContext = VERTEXT.1;
     const S_F: GraphicsShader = FRAGMENT.0;
-    const STARTING_META_CONTEXT : MetaContext = MetaContext::new();
+    const STARTING_META_CONTEXT: MetaContext = MetaContext::new();
 
     let (program, template_bindings, template_out_bindings, _) =
         compile_valid_graphics_program!(window, S_V, S_F);
@@ -118,8 +114,12 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 
                 light_direction = rotate_vec3(&light_direction, 0.05);
 
-                const BIND_CONTEXT_1: (BindingContext, MetaContext) =
-                    update_bind_context(&STARTING_BIND_CONTEXT, "a_position", STARTING_META_CONTEXT, "BIND_CONTEXT_1");
+                const BIND_CONTEXT_1: (BindingContext, MetaContext) = update_bind_context(
+                    &STARTING_BIND_CONTEXT,
+                    "a_position",
+                    STARTING_META_CONTEXT,
+                    "BIND_CONTEXT_1",
+                );
                 bind_vec3(
                     &program,
                     &mut bindings,
@@ -128,8 +128,12 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                     "a_position".to_string(),
                 );
                 {
-                    const BIND_CONTEXT_2: (BindingContext, MetaContext) =
-                        update_bind_context(&BIND_CONTEXT_1.0, "u_view", BIND_CONTEXT_1.1, "BIND_CONTEXT_2");
+                    const BIND_CONTEXT_2: (BindingContext, MetaContext) = update_bind_context(
+                        &BIND_CONTEXT_1.0,
+                        "u_view",
+                        BIND_CONTEXT_1.1,
+                        "BIND_CONTEXT_2",
+                    );
                     bind_mat4(
                         &program,
                         &mut bindings,
@@ -138,8 +142,12 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                         "u_view".to_string(),
                     );
                     {
-                        const BIND_CONTEXT_3: (BindingContext, MetaContext) =
-                            update_bind_context(&BIND_CONTEXT_2.0, "u_model", BIND_CONTEXT_2.1, "BIND_CONTEXT_3");
+                        const BIND_CONTEXT_3: (BindingContext, MetaContext) = update_bind_context(
+                            &BIND_CONTEXT_2.0,
+                            "u_model",
+                            BIND_CONTEXT_2.1,
+                            "BIND_CONTEXT_3",
+                        );
                         bind_mat4(
                             &program,
                             &mut bindings,
@@ -149,7 +157,12 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                         );
                         {
                             const BIND_CONTEXT_4: (BindingContext, MetaContext) =
-                                update_bind_context(&BIND_CONTEXT_3.0, "u_proj", BIND_CONTEXT_3.1, "BIND_CONTEXT_4");
+                                update_bind_context(
+                                    &BIND_CONTEXT_3.0,
+                                    "u_proj",
+                                    BIND_CONTEXT_3.1,
+                                    "BIND_CONTEXT_4",
+                                );
                             bind_mat4(
                                 &program,
                                 &mut bindings,
@@ -159,7 +172,12 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                             );
                             {
                                 const BIND_CONTEXT_5: (BindingContext, MetaContext) =
-                                    update_bind_context(&BIND_CONTEXT_4.0, "Ambient", BIND_CONTEXT_4.1, "BIND_CONTEXT_5");
+                                    update_bind_context(
+                                        &BIND_CONTEXT_4.0,
+                                        "Ambient",
+                                        BIND_CONTEXT_4.1,
+                                        "BIND_CONTEXT_5",
+                                    );
                                 bind_vec3(
                                     &program,
                                     &mut bindings,
@@ -169,7 +187,12 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                 );
                                 {
                                     const BIND_CONTEXT_6: (BindingContext, MetaContext) =
-                                        update_bind_context(&BIND_CONTEXT_5.0, "LightDirection", BIND_CONTEXT_5.1, "BIND_CONTEXT_6");
+                                        update_bind_context(
+                                            &BIND_CONTEXT_5.0,
+                                            "LightDirection",
+                                            BIND_CONTEXT_5.1,
+                                            "BIND_CONTEXT_6",
+                                        );
                                     bind_vec3(
                                         &program,
                                         &mut bindings,
@@ -179,7 +202,12 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                     );
                                     {
                                         const BIND_CONTEXT_7: (BindingContext, MetaContext) =
-                                            update_bind_context(&BIND_CONTEXT_6.0, "a_normal", BIND_CONTEXT_6.1, "BIND_CONTEXT_7");
+                                            update_bind_context(
+                                                &BIND_CONTEXT_6.0,
+                                                "a_normal",
+                                                BIND_CONTEXT_6.1,
+                                                "BIND_CONTEXT_7",
+                                            );
                                         bind_vec3(
                                             &program,
                                             &mut bindings,
@@ -188,7 +216,8 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                             "a_normal".to_string(),
                                         );
                                         {
-                                            const Next_Meta_Context: MetaContext = ready_to_run(BIND_CONTEXT_7.0, BIND_CONTEXT_7.1);
+                                            const Next_Meta_Context: MetaContext =
+                                                ready_to_run(BIND_CONTEXT_7.0, BIND_CONTEXT_7.1);
                                             graphics_run_indicies(
                                                 &program,
                                                 rpass,

@@ -5,7 +5,7 @@ extern crate pipeline;
 pub use pipeline::shared;
 pub use pipeline::wgpu_compute_header;
 
-pub use pipeline::shared::{bind_vec, can_pipe, is_gl_builtin, update_bind_context, ready_to_run};
+pub use pipeline::shared::{bind_vec, can_pipe, is_gl_builtin, ready_to_run, update_bind_context};
 pub use pipeline::wgpu_compute_header::{compile, pipe, read_uvec, run, ComputeShader};
 
 pub use static_assertions::const_assert;

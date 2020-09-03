@@ -972,7 +972,13 @@ macro_rules! compile_valid_graphics_program {
 
         const _: () = pipeline::wgpu_graphics_header::valid_vertex_shader(&$vertex);
         const _: () = pipeline::wgpu_graphics_header::valid_fragment_shader(&$fragment);
-        let (x, y, z) = pipeline::wgpu_graphics_header::graphics_compile(&mut compile_buffer, &$window, &$vertex, &$fragment).await;
+        let (x, y, z) = pipeline::wgpu_graphics_header::graphics_compile(
+            &mut compile_buffer,
+            &$window,
+            &$vertex,
+            &$fragment,
+        )
+        .await;
         (x, y, z, compile_buffer)
     }};
 }
