@@ -1,6 +1,6 @@
 #![crate_type = "lib"]
 #![feature(const_fn, const_panic)]
-#![feature(const_mut_refs)]
+#![feature(const_mut_refs, unsized_locals)]
 #[macro_use]
 pub mod debug;
 pub mod context;

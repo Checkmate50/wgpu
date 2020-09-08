@@ -9,7 +9,7 @@ pub use pipeline::wgpu_compute_header::{compile, read_uvec, run, ComputeShader};
 
 pub use pipeline::shared::{bind_vec, is_gl_builtin};
 
-pub use pipeline::context::{ready_to_run, update_bind_context, BindingContext, MetaContext};
+pub use pipeline::context::{ready_to_run, update_bind_context, BindingContext};
 
 pub use static_assertions::const_assert;
 
@@ -41,7 +41,6 @@ async fn execute_gpu() {
 
     const S: ComputeShader = TRIVIAL.0;
     const STARTING_BIND_CONTEXT: BindingContext = TRIVIAL.1;
-    const STARTING_META_CONTEXT: MetaContext = MetaContext::new();
 
     let (program, mut bindings, mut out_bindings) = compile(&S).await;
     let (_, _, mut out_bindings2) = compile(&S).await;
@@ -50,40 +49,7 @@ async fn execute_gpu() {
     let indices2_1: Vec<u32> = vec![1, 2, 3, 4];
     let indices2_2: Vec<u32> = vec![4, 3, 2, 1];
 
-    #[allow(dead_code)]
-    {
-        const BIND_CONTEXT_1: (BindingContext, MetaContext) = update_bind_context(
-            &STARTING_BIND_CONTEXT,
-            "indices",
-            STARTING_META_CONTEXT,
-            "BIND_CONTEXT_1",
-        );
-        {
-            const BIND_CONTEXT_2: (BindingContext, MetaContext) = update_bind_context(
-                &BIND_CONTEXT_1.0,
-                "indices2",
-                BIND_CONTEXT_1.1,
-                "BIND_CONTEXT_2",
-            );
-
-            const NEXT_META_CONTEXT1: MetaContext = {
-                const NEXT_META_CONTEXT: MetaContext =
-                    ready_to_run(BIND_CONTEXT_2.0, BIND_CONTEXT_2.1);
-                NEXT_META_CONTEXT
-            };
-            const BIND_CONTEXT_4: (BindingContext, MetaContext) = update_bind_context(
-                &BIND_CONTEXT_1.0,
-                "indices2",
-                NEXT_META_CONTEXT1,
-                "BIND_CONTEXT_4",
-            );
-            {
-                const FINAL_META_CONTEXT: MetaContext =
-                    ready_to_run(BIND_CONTEXT_4.0, BIND_CONTEXT_4.1);
-            }
-        }
-    }
-
+    const BIND_CONTEXT_1: BindingContext = update_bind_context(&STARTING_BIND_CONTEXT, "indices");
     bind_vec(
         &program,
         &mut bindings,
@@ -92,6 +58,7 @@ async fn execute_gpu() {
         "indices".to_string(),
     );
     {
+        const BIND_CONTEXT_2: BindingContext = update_bind_context(&BIND_CONTEXT_1, "indices2");
         bind_vec(
             &program,
             &mut bindings,
@@ -100,9 +67,11 @@ async fn execute_gpu() {
             "indices2".to_string(),
         );
         {
+            const _: () = ready_to_run(BIND_CONTEXT_2);
             let result1 = run(&program, &mut bindings, out_bindings);
             println!("{:?}", read_uvec(&program, &result1, "indices").await);
         }
+        const BIND_CONTEXT_4: BindingContext = update_bind_context(&BIND_CONTEXT_1, "indices2");
         bind_vec(
             &program,
             &mut bindings,
@@ -111,7 +80,7 @@ async fn execute_gpu() {
             "indices2".to_string(),
         );
         {
-
+            const _: () = ready_to_run(BIND_CONTEXT_4);
             let result1 = run(&program, &mut bindings, out_bindings2);
             println!("{:?}", read_uvec(&program, &result1, "indices").await);
         }

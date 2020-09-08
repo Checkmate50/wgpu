@@ -76,7 +76,7 @@ pub trait Program {
     fn get_device(&self) -> &wgpu::Device;
 }
 
-fn bind<'a>(
+fn bind_helper<'a>(
     program: &dyn Program,
     bindings: &mut dyn ProgramBindings,
     out_bindings: &mut dyn OutProgramBindings,
@@ -125,40 +125,81 @@ fn bind<'a>(
     binding.length = Some(length);
 }
 
-pub fn bind_vec(
-    program: &dyn Program,
-    bindings: &mut dyn ProgramBindings,
-    out_bindings: &mut dyn OutProgramBindings,
-    numbers: &Vec<u32>,
-    name: String,
-) {
-    bind(
-        program,
-        bindings,
-        out_bindings,
-        numbers.as_slice().as_bytes(),
-        numbers.len() as u64,
-        vec![GLSLTYPE::ArrayInt, GLSLTYPE::ArrayUint],
-        name,
-    )
+pub trait Bindable {
+    fn bind(
+        &self,
+        program: &dyn Program,
+        bindings: &mut dyn ProgramBindings,
+        out_bindings: &mut dyn OutProgramBindings,
+        name: String,
+    );
+    fn bind_consume(
+        &self,
+        program: &dyn Program,
+        bindings: dyn ProgramBindings,
+        out_bindings: dyn OutProgramBindings,
+        name: String,
+    ) -> (&mut dyn ProgramBindings, &mut dyn OutProgramBindings);
 }
 
-pub fn bind_fvec(
-    program: &dyn Program,
-    bindings: &mut dyn ProgramBindings,
-    out_bindings: &mut dyn OutProgramBindings,
-    numbers: &Vec<f32>,
-    name: String,
-) {
-    bind(
-        program,
-        bindings,
-        out_bindings,
-        numbers.as_slice().as_bytes(),
-        numbers.len() as u64,
-        vec![GLSLTYPE::Float, GLSLTYPE::ArrayFloat],
-        name,
-    )
+impl Bindable for Vec<u32> {
+    fn bind(
+        &self,
+        program: &dyn Program,
+        bindings: &mut dyn ProgramBindings,
+        out_bindings: &mut dyn OutProgramBindings,
+        name: String,
+    ) {
+        bind_helper(
+            program,
+            bindings,
+            out_bindings,
+            self.as_slice().as_bytes(),
+            self.len() as u64,
+            vec![GLSLTYPE::ArrayInt, GLSLTYPE::ArrayUint],
+            name,
+        )
+    }
+    fn bind_consume(
+        &self,
+        program: &dyn Program,
+        bindings: dyn ProgramBindings,
+        out_bindings: dyn OutProgramBindings,
+        name: String,
+    ) -> (dyn ProgramBindings, dyn OutProgramBindings) {
+        self.bind(program, &mut bindings, &mut out_bindings, name);
+        (bindings, out_bindings)
+    }
+}
+
+impl Bindable for Vec<f32> {
+    fn bind(
+        &self,
+        program: &dyn Program,
+        bindings: &mut dyn ProgramBindings,
+        out_bindings: &mut dyn OutProgramBindings,
+        name: String,
+    ) {
+        bind_helper(
+            program,
+            bindings,
+            out_bindings,
+            self.as_slice().as_bytes(),
+            self.len() as u64,
+            vec![GLSLTYPE::Float, GLSLTYPE::ArrayFloat],
+            name,
+        )
+    }
+    fn bind_consume(
+        &self,
+        program: &dyn Program,
+        bindings: dyn ProgramBindings,
+        out_bindings: dyn OutProgramBindings,
+        name: String,
+    ) -> (&mut dyn ProgramBindings, &mut dyn OutProgramBindings) {
+        self.bind(program, &mut bindings, &mut out_bindings, name);
+        (bindings, out_bindings)
+    }
 }
 
 pub fn bind_vec2(
@@ -174,7 +215,7 @@ pub fn bind_vec2(
         .map(|x| x.to_vec())
         .flatten()
         .collect();
-    bind(
+    bind_helper(
         program,
         bindings,
         out_bindings,
@@ -202,7 +243,7 @@ pub fn bind_fvec2(
             "Your trying to bind to vec to but your not giving a vector that can be split into 2's"
         )
     }
-    bind(
+    bind_helper(
         program,
         bindings,
         out_bindings,
@@ -231,7 +272,7 @@ pub fn bind_vec3(
         .map(|x| x.to_vec())
         .flatten()
         .collect();
-    bind(
+    bind_helper(
         program,
         bindings,
         out_bindings,
@@ -250,7 +291,7 @@ pub fn bind_mat4(
     name: String,
 ) {
     let mat_slice: &[f32; 16] = mat.as_ref();
-    bind(
+    bind_helper(
         program,
         bindings,
         out_bindings,
@@ -268,7 +309,7 @@ pub fn bind_float(
     numbers: &f32,
     name: String,
 ) {
-    bind(
+    bind_helper(
         program,
         bindings,
         out_bindings,
