@@ -76,11 +76,11 @@ pub trait Program {
     fn get_device(&self) -> &wgpu::Device;
 }
 
-fn bind_helper<'a>(
+fn bind_helper<R: ProgramBindings, T: OutProgramBindings>(
     program: &dyn Program,
-    bindings: &mut dyn ProgramBindings,
-    out_bindings: &mut dyn OutProgramBindings,
-    data: &'a [u8],
+    bindings: &mut R,
+    out_bindings: &mut T,
+    data: &[u8],
     length: u64,
     acceptable_types: Vec<GLSLTYPE>,
     name: String,
@@ -125,31 +125,73 @@ fn bind_helper<'a>(
     binding.length = Some(length);
 }
 
+pub struct Context {}
+
+impl Context {
+    pub fn new() -> Context {
+        Context {}
+    }
+}
+
 pub trait Bindable {
-    fn bind(
+    fn bind<R: ProgramBindings, T: OutProgramBindings>(
         &self,
         program: &dyn Program,
-        bindings: &mut dyn ProgramBindings,
-        out_bindings: &mut dyn OutProgramBindings,
+        bindings: &mut R,
+        out_bindings: &mut T,
         name: String,
-    );
-    fn bind_consume(
+        context: &Context,
+    ) -> Context;
+
+    fn bind_consume<R: ProgramBindings, T: OutProgramBindings>(
         &self,
         program: &dyn Program,
-        bindings: dyn ProgramBindings,
-        out_bindings: dyn OutProgramBindings,
+        bindings: &mut R,
+        out_bindings: &mut T,
         name: String,
-    ) -> (&mut dyn ProgramBindings, &mut dyn OutProgramBindings);
+        context: Context,
+    ) -> Context;
+}
+
+#[macro_export]
+macro_rules! bind {
+    ($program:tt, $bindings:tt, $out_bindings:tt, $name:tt, $data:tt, $context:tt, $bind_context:tt) => {{
+        if $bind_context.do_consume {panic!("You need to use bind_consume here")}
+        Bindable::bind(
+            &$data,
+            &$program,
+            &mut $bindings,
+            &mut $out_bindings,
+            $name.to_string(),
+            &$context,
+        )
+    }};
+}
+
+#[macro_export]
+macro_rules! bind_consume {
+    ($program:tt, $bindings:tt, $out_bindings:tt, $name:tt, $data:tt, $context:tt, $bind_context:tt) => {{
+            if !$bind_context.do_consume {panic!("You should be using bind here")}
+            Bindable::bind_consume(
+                &$data,
+                &$program,
+                &mut $bindings,
+                &mut $out_bindings,
+                $name.to_string(),
+                $context,
+            )
+        }};
 }
 
 impl Bindable for Vec<u32> {
-    fn bind(
+    fn bind<R: ProgramBindings, T: OutProgramBindings>(
         &self,
         program: &dyn Program,
-        bindings: &mut dyn ProgramBindings,
-        out_bindings: &mut dyn OutProgramBindings,
+        bindings: &mut R,
+        out_bindings: &mut T,
         name: String,
-    ) {
+        _context: &Context,
+    ) -> Context {
         bind_helper(
             program,
             bindings,
@@ -158,21 +200,32 @@ impl Bindable for Vec<u32> {
             self.len() as u64,
             vec![GLSLTYPE::ArrayInt, GLSLTYPE::ArrayUint],
             name,
-        )
+        );
+        Context::new()
     }
-    fn bind_consume(
+
+    fn bind_consume<R: ProgramBindings, T: OutProgramBindings>(
         &self,
         program: &dyn Program,
-        bindings: dyn ProgramBindings,
-        out_bindings: dyn OutProgramBindings,
+        bindings: &mut R,
+        out_bindings: &mut T,
         name: String,
-    ) -> (dyn ProgramBindings, dyn OutProgramBindings) {
-        self.bind(program, &mut bindings, &mut out_bindings, name);
-        (bindings, out_bindings)
+        context: Context,
+    ) -> Context {
+        bind_helper(
+            program,
+            bindings,
+            out_bindings,
+            self.as_slice().as_bytes(),
+            self.len() as u64,
+            vec![GLSLTYPE::ArrayInt, GLSLTYPE::ArrayUint],
+            name,
+        );
+        context
     }
 }
 
-impl Bindable for Vec<f32> {
+/* impl Bindable for Vec<f32> {
     fn bind(
         &self,
         program: &dyn Program,
@@ -200,9 +253,9 @@ impl Bindable for Vec<f32> {
         self.bind(program, &mut bindings, &mut out_bindings, name);
         (bindings, out_bindings)
     }
-}
+} */
 
-pub fn bind_vec2(
+/* pub fn bind_vec2(
     program: &dyn Program,
     bindings: &mut dyn ProgramBindings,
     out_bindings: &mut dyn OutProgramBindings,
@@ -229,9 +282,9 @@ pub fn bind_vec2(
         },
         name,
     )
-}
+} */
 
-pub fn bind_fvec2(
+/* pub fn bind_fvec2(
     program: &dyn Program,
     bindings: &mut dyn ProgramBindings,
     out_bindings: &mut dyn OutProgramBindings,
@@ -257,9 +310,9 @@ pub fn bind_fvec2(
         },
         name,
     )
-}
+} */
 
-pub fn bind_vec3(
+/* pub fn bind_vec3(
     program: &dyn Program,
     bindings: &mut dyn ProgramBindings,
     out_bindings: &mut dyn OutProgramBindings,
@@ -281,9 +334,9 @@ pub fn bind_vec3(
         vec![GLSLTYPE::Vec3, GLSLTYPE::ArrayVec3],
         name,
     )
-}
+} */
 
-pub fn bind_mat4(
+/* pub fn bind_mat4(
     program: &dyn Program,
     bindings: &mut dyn ProgramBindings,
     out_bindings: &mut dyn OutProgramBindings,
@@ -300,9 +353,9 @@ pub fn bind_mat4(
         vec![GLSLTYPE::Mat4],
         name,
     )
-}
+} */
 
-pub fn bind_float(
+/* pub fn bind_float(
     program: &dyn Program,
     bindings: &mut dyn ProgramBindings,
     out_bindings: &mut dyn OutProgramBindings,
@@ -318,7 +371,7 @@ pub fn bind_float(
         vec![GLSLTYPE::Float],
         name,
     )
-}
+} */
 
 // TODO functions to get the rust size and typing
 

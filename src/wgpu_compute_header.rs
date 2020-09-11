@@ -19,6 +19,20 @@ pub struct OutComputeBindings {
     pub bindings: Vec<DefaultBinding>,
 }
 
+impl OutComputeBindings {
+    pub fn move_buffers(&mut self) -> OutComputeBindings {
+        let mut new_binds = new_bindings(&self.bindings);
+        for i in self.bindings.iter_mut() {
+            let bind_pos = new_binds.iter_mut().position(|x| x.name == i.name).unwrap();
+
+            new_binds[bind_pos].data = std::mem::replace(&mut i.data, None);
+            new_binds[bind_pos].length = std::mem::replace(&mut i.length, None);
+
+        }
+        OutComputeBindings{bindings: new_binds}
+    }
+}
+
 impl Bindings for ComputeBindings {
     fn clone(&self) -> ComputeBindings {
         ComputeBindings {
@@ -296,6 +310,8 @@ pub fn run(
             .iter()
             .find(|i| i.qual.contains(&QUALIFIER::LOOP));
     }
+
+
     let length = if bind.is_none() {
         1
     } else {

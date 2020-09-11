@@ -1,3 +1,5 @@
+#![feature(const_panic)]
+
 #[macro_use]
 extern crate pipeline;
 
@@ -7,7 +9,7 @@ pub use pipeline::wgpu_compute_header;
 
 pub use pipeline::wgpu_compute_header::{compile, read_uvec, run, ComputeShader};
 
-pub use pipeline::shared::{is_gl_builtin, Bindable};
+pub use pipeline::shared::{is_gl_builtin, Bindable, Context};
 
 pub use pipeline::context::{ready_to_run, update_bind_context, BindingContext};
 
@@ -43,48 +45,58 @@ async fn execute_gpu() {
     const STARTING_BIND_CONTEXT: BindingContext = TRIVIAL.1;
 
     let (program, mut bindings, mut out_bindings) = compile(&S).await;
-    let (_, _, mut out_bindings2) = compile(&S).await;
 
     let indices_1: Vec<u32> = vec![1, 2, 3, 4];
     let indices_2: Vec<u32> = vec![2, 2, 2, 2];
     let indices2: Vec<u32> = vec![4, 3, 2, 1];
 
-    const BIND_CONTEXT_1: BindingContext = update_bind_context(&STARTING_BIND_CONTEXT, "indices2");
-    Bindable::bind(
-        &indices2,
-        &program,
-        &mut bindings,
-        &mut out_bindings,
-        "indices2".to_string(),
-    );
+    let context = Context::new();
     {
-        const BIND_CONTEXT_2: BindingContext = update_bind_context(&BIND_CONTEXT_1, "indices");
-        Bindable::bind(
-            &indices_1,
-            &program,
-            &mut bindings,
-            &mut out_bindings,
-            "indices".to_string(),
+        const BIND_CONTEXT_1: BindingContext =
+            update_bind_context(&STARTING_BIND_CONTEXT, "indices2");
+        let context1 = bind!(
+            program,
+            bindings,
+            out_bindings,
+            "indices2",
+            indices2,
+            context,
+            BIND_CONTEXT_1
         );
-
         {
-            const _: () = ready_to_run(BIND_CONTEXT_2);
-            let result1 = run(&program, &mut bindings, out_bindings);
-            println!("{:?}", read_uvec(&program, &result1, "indices").await);
+            const BIND_CONTEXT_2: BindingContext = update_bind_context(&BIND_CONTEXT_1, "indices");
+            let _ = bind!(
+                program,
+                bindings,
+                out_bindings,
+                "indices",
+                indices_1,
+                context1,
+                BIND_CONTEXT_2
+            );
+            {
+                const _: () = ready_to_run(BIND_CONTEXT_2);
+                let result_out_bindings = out_bindings.move_buffers();
+                let result1 = run(&program, &mut bindings, result_out_bindings);
+                println!("{:?}", read_uvec(&program, &result1, "indices").await);
+            }
         }
-
-        const BIND_CONTEXT_4: BindingContext = update_bind_context(&BIND_CONTEXT_1, "indices");
-        Bindable::bind(
-            &indices_2,
-            &program,
-            &mut bindings,
-            &mut out_bindings2,
-            "indices".to_string(),
-        );
         {
-            const _: () = ready_to_run(BIND_CONTEXT_4);
-            let result1 = run(&program, &mut bindings, out_bindings2);
-            println!("{:?}", read_uvec(&program, &result1, "indices").await);
+            const BIND_CONTEXT_4: BindingContext = update_bind_context(&BIND_CONTEXT_1, "indices");
+            let _ = bind!(
+                program,
+                bindings,
+                out_bindings,
+                "indices",
+                indices_2,
+                context1,
+                BIND_CONTEXT_4
+            );
+            {
+                const _: () = ready_to_run(BIND_CONTEXT_4);
+                let result1 = run(&program, &mut bindings, out_bindings);
+                println!("{:?}", read_uvec(&program, &result1, "indices").await);
+            }
         }
     }
 }

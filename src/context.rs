@@ -5,6 +5,7 @@ pub struct BindingContext {
     starting_context: [&'static str; 32],
     result_context: [&'static str; 32],
     has_out_bound: bool,
+    pub do_consume : bool,
 }
 
 impl BindingContext {
@@ -16,6 +17,7 @@ impl BindingContext {
             starting_context,
             result_context,
             has_out_bound: false,
+            do_consume : false,
         }
     }
 }
@@ -28,13 +30,14 @@ pub const fn update_bind_context(
     let mut found_it = false;
     let mut new_bind_context = [""; 32];
 
-    let mut has_out = bind_context.has_out_bound;
+    let mut has_out_bound = bind_context.has_out_bound;
+    let do_consume = bind_context.has_out_bound || has_out_bound;
 
     while acc < 32 {
         if string_compare(bind_context.starting_context[acc], bind_name) {
             found_it = true;
-            if !has_out && params_contain_string(&bind_context.result_context, bind_name) {
-                has_out = true;
+            if !has_out_bound && params_contain_string(&bind_context.result_context, bind_name) {
+                has_out_bound = true;
             }
         } else {
             new_bind_context[acc] = bind_context.starting_context[acc];
@@ -49,7 +52,8 @@ pub const fn update_bind_context(
     BindingContext {
         starting_context: new_bind_context,
         result_context: bind_context.result_context,
-        has_out_bound: has_out,
+        has_out_bound,
+        do_consume
     }
 }
 
