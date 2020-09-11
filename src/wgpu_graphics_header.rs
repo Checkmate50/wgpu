@@ -2,6 +2,7 @@ use glsl_to_spirv::ShaderType;
 use zerocopy::AsBytes as _;
 
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use winit::window::Window;
 
@@ -29,7 +30,7 @@ impl Program for GraphicsProgram {
 pub struct TextureBinding {
     pub binding_number: u32,
     pub name: String,
-    pub data: Option<wgpu::TextureView>,
+    pub data: Option<Rc<wgpu::TextureView>>,
     pub gtype: GLSLTYPE,
     pub qual: Vec<QUALIFIER>,
 }
@@ -38,7 +39,7 @@ pub struct TextureBinding {
 pub struct SamplerBinding {
     pub binding_number: u32,
     pub name: String,
-    pub data: Option<wgpu::Sampler>,
+    pub data: Option<Rc<wgpu::Sampler>>,
     pub gtype: GLSLTYPE,
     pub qual: Vec<QUALIFIER>,
 }
@@ -624,7 +625,7 @@ pub fn bind_sampler(
             out_bindings.samplers[x] */
         }
     };
-    binding.data = Some(sample);
+    binding.data = Some(Rc::new(sample));
 }
 
 pub fn bind_texture(
@@ -646,7 +647,7 @@ pub fn bind_texture(
             out_bindings.samplers[x] */
         }
     };
-    binding.data = Some(texture);
+    binding.data = Some(Rc::new(texture));
 }
 
 fn draw(

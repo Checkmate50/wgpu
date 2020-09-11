@@ -17,9 +17,9 @@ pub use pipeline::wgpu_graphics_header::{
 };
 
 pub use pipeline::shared;
-pub use pipeline::shared::{bind_fvec, bind_mat4, bind_vec3, is_gl_builtin, Bindings};
+pub use pipeline::shared::{is_gl_builtin, Bindable, Bindings, Context};
 
-pub use pipeline::context::{ready_to_run, update_bind_context};
+pub use pipeline::context::{ready_to_run, update_bind_context, BindingContext};
 
 pub use pipeline::helper::{
     generate_identity_matrix, generate_projection_matrix, generate_view_matrix, load_cube,
@@ -29,7 +29,7 @@ pub use pipeline::helper::{
 async fn run(event_loop: EventLoop<()>, window: Window) {
     let size = window.inner_size();
 
-    const VERTEXT: (GraphicsShader, [&str; 32], [&str; 32]) = graphics_shader! {
+    const VERTEXT: (GraphicsShader, BindingContext) = graphics_shader! {
         [[vertex in] vec3] a_position;
         [[vertex in] vec3] vertexColor;
         [[uniform in] mat4] u_view;
@@ -47,7 +47,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         }}
     };
 
-    const FRAGMENT: (GraphicsShader, [&str; 32], [&str; 32]) = graphics_shader! {
+    const FRAGMENT: (GraphicsShader, BindingContext) = graphics_shader! {
         [[in] vec3] fragmentColor;
         [[out] vec4] color;
         {{
@@ -58,7 +58,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     };
 
     const S_V: GraphicsShader = VERTEXT.0;
-    const STARTING_BIND_CONTEXT: [&str; 32] = VERTEXT.1;
+    const STARTING_BIND_CONTEXT: BindingContext = VERTEXT.1;
     const S_F: GraphicsShader = FRAGMENT.0;
 
     let (program, template_bindings, template_out_bindings, _) =
@@ -139,133 +139,155 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 
                     let mut rpass = setup_render_pass(&program, &mut init_encoder, &frame);
 
-                    const BIND_CONTEXT_1: [&str; 32] =
-                        update_bind_context(&STARTING_BIND_CONTEXT, "a_position");
-                    bind_vec3(
-                        &program,
-                        &mut bindings,
-                        &mut out_bindings,
-                        &positions,
-                        "a_position".to_string(),
-                    );
+                    let context = Context::new();
+
                     {
-                        const BIND_CONTEXT_2: [&str; 32] =
-                            update_bind_context(&BIND_CONTEXT_1, "u_view");
-                        bind_mat4(
-                            &program,
-                            &mut bindings,
-                            &mut out_bindings,
-                            view_mat,
-                            "u_view".to_string(),
+                        const BIND_CONTEXT_1: BindingContext =
+                            update_bind_context(&STARTING_BIND_CONTEXT, "a_position");
+                        let context1 = bind!(
+                            program,
+                            bindings,
+                            out_bindings,
+                            "a_position",
+                            positions,
+                            context,
+                            BIND_CONTEXT_1
                         );
                         {
-                            const BIND_CONTEXT_3: [&str; 32] =
-                                update_bind_context(&BIND_CONTEXT_2, "vertexColor");
-                            bind_vec3(
-                                &program,
-                                &mut bindings,
-                                &mut out_bindings,
-                                &color_data,
-                                "vertexColor".to_string(),
+                            const BIND_CONTEXT_2: BindingContext =
+                                update_bind_context(&BIND_CONTEXT_1, "u_view");
+                            let context2 = bind!(
+                                program,
+                                bindings,
+                                out_bindings,
+                                "u_view",
+                                view_mat,
+                                context1,
+                                BIND_CONTEXT_2
                             );
-
                             {
-                                const BIND_CONTEXT_4: [&str; 32] =
-                                    update_bind_context(&BIND_CONTEXT_3, "u_proj");
-                                bind_mat4(
-                                    &program,
-                                    &mut bindings,
-                                    &mut out_bindings,
-                                    proj_mat,
-                                    "u_proj".to_string(),
+                                const BIND_CONTEXT_3: BindingContext =
+                                    update_bind_context(&BIND_CONTEXT_2, "vertexColor");
+                                let context3 = bind!(
+                                    program,
+                                    bindings,
+                                    out_bindings,
+                                    "vertexColor",
+                                    color_data,
+                                    context2,
+                                    BIND_CONTEXT_3
                                 );
                                 {
-                                    const BIND_CONTEXT_5: [&str; 32] =
-                                        update_bind_context(&BIND_CONTEXT_4, "u_model");
-                                    bind_mat4(
-                                        &program,
-                                        &mut bindings,
-                                        &mut out_bindings,
-                                        model_mat,
-                                        "u_model".to_string(),
+                                    const BIND_CONTEXT_4: BindingContext =
+                                        update_bind_context(&BIND_CONTEXT_3, "u_proj");
+                                    let context4 = bind!(
+                                        program,
+                                        bindings,
+                                        out_bindings,
+                                        "u_proj",
+                                        proj_mat,
+                                        context3,
+                                        BIND_CONTEXT_4
                                     );
-
                                     {
-                                        ready_to_run(BIND_CONTEXT_5);
-                                        rpass = wgpu_graphics_header::graphics_run_indicies(
-                                            &program,
-                                            rpass,
-                                            &mut bind_group,
-                                            &mut bindings,
-                                            &out_bindings,
-                                            &index_data,
+                                        const BIND_CONTEXT_5: BindingContext =
+                                            update_bind_context(&BIND_CONTEXT_4, "u_model");
+                                        let context5 = bind!(
+                                            program,
+                                            bindings,
+                                            out_bindings,
+                                            "u_model",
+                                            model_mat,
+                                            context4,
+                                            BIND_CONTEXT_5
                                         );
+                                        {
+                                            ready_to_run(BIND_CONTEXT_5);
+                                            rpass = wgpu_graphics_header::graphics_run_indicies(
+                                                &program,
+                                                rpass,
+                                                &mut bind_group,
+                                                &mut bindings,
+                                                &out_bindings,
+                                                &index_data,
+                                            );
+                                        }
                                     }
                                 }
                             }
                         }
                     }
-                    const BIND_CONTEXT_1_1: [&str; 32] =
-                        update_bind_context(&STARTING_BIND_CONTEXT, "a_position");
-                    bind_vec3(
-                        &program,
-                        &mut bindings2,
-                        &mut out_bindings2,
-                        &positions,
-                        "a_position".to_string(),
-                    );
                     {
-                        const BIND_CONTEXT_2_1: [&str; 32] =
-                            update_bind_context(&BIND_CONTEXT_1_1, "u_view");
-                        bind_mat4(
-                            &program,
-                            &mut bindings2,
-                            &mut out_bindings2,
-                            view_mat,
-                            "u_view".to_string(),
+                        const BIND_CONTEXT_1_1: BindingContext =
+                            update_bind_context(&STARTING_BIND_CONTEXT, "a_position");
+                        let context1 = bind!(
+                            program,
+                            bindings,
+                            out_bindings,
+                            "a_position",
+                            positions,
+                            context,
+                            BIND_CONTEXT_1_1
                         );
                         {
-                            const BIND_CONTEXT_3_1: [&str; 32] =
-                                update_bind_context(&BIND_CONTEXT_2_1, "vertexColor");
-                            bind_vec3(
-                                &program,
-                                &mut bindings2,
-                                &mut out_bindings2,
-                                &color_data,
-                                "vertexColor".to_string(),
+                            const BIND_CONTEXT_2_1: BindingContext =
+                                update_bind_context(&BIND_CONTEXT_1_1, "u_view");
+                            let context2 = bind!(
+                                program,
+                                bindings,
+                                out_bindings,
+                                "u_view",
+                                view_mat,
+                                context1,
+                                BIND_CONTEXT_2_1
                             );
-
                             {
-                                const BIND_CONTEXT_4_1: [&str; 32] =
-                                    update_bind_context(&BIND_CONTEXT_3_1, "u_proj");
-                                bind_mat4(
-                                    &program,
-                                    &mut bindings2,
-                                    &mut out_bindings2,
-                                    proj_mat,
-                                    "u_proj".to_string(),
+                                const BIND_CONTEXT_3_1: BindingContext =
+                                    update_bind_context(&BIND_CONTEXT_2_1, "vertexColor");
+                                let context3 = bind!(
+                                    program,
+                                    bindings,
+                                    out_bindings,
+                                    "vertexColor",
+                                    color_data,
+                                    context2,
+                                    BIND_CONTEXT_3_1
                                 );
                                 {
-                                    const BIND_CONTEXT_5_1: [&str; 32] =
-                                        update_bind_context(&BIND_CONTEXT_4_1, "u_model");
-                                    bind_mat4(
-                                        &program,
-                                        &mut bindings2,
-                                        &mut out_bindings2,
-                                        model_mat2,
-                                        "u_model".to_string(),
+                                    const BIND_CONTEXT_4_1: BindingContext =
+                                        update_bind_context(&BIND_CONTEXT_3_1, "u_proj");
+                                    let context4 = bind!(
+                                        program,
+                                        bindings,
+                                        out_bindings,
+                                        "u_proj",
+                                        proj_mat,
+                                        context3,
+                                        BIND_CONTEXT_4_1
                                     );
-
                                     {
-                                        ready_to_run(BIND_CONTEXT_5_1);
-                                        wgpu_graphics_header::graphics_run_indicies(
-                                            &program,
-                                            rpass,
-                                            &mut bind_group2,
-                                            &mut bindings2,
-                                            &out_bindings2,
-                                            &index_data,
+                                        const BIND_CONTEXT_5_1: BindingContext =
+                                            update_bind_context(&BIND_CONTEXT_4_1, "u_model");
+                                        let context5 = bind!(
+                                            program,
+                                            bindings,
+                                            out_bindings,
+                                            "u_model",
+                                            model_mat2,
+                                            context4,
+                                            BIND_CONTEXT_5_1
                                         );
+                                        {
+                                            ready_to_run(BIND_CONTEXT_5_1);
+                                            wgpu_graphics_header::graphics_run_indicies(
+                                                &program,
+                                                rpass,
+                                                &mut bind_group2,
+                                                &mut bindings2,
+                                                &out_bindings2,
+                                                &index_data,
+                                            );
+                                        }
                                     }
                                 }
                             }

@@ -156,7 +156,9 @@ pub trait Bindable {
 #[macro_export]
 macro_rules! bind {
     ($program:tt, $bindings:tt, $out_bindings:tt, $name:tt, $data:tt, $context:tt, $bind_context:tt) => {{
-        if $bind_context.do_consume {panic!("You need to use bind_consume here")}
+        if $bind_context.do_consume {
+            panic!("You need to use bind_consume here")
+        }
         Bindable::bind(
             &$data,
             &$program,
@@ -171,16 +173,18 @@ macro_rules! bind {
 #[macro_export]
 macro_rules! bind_consume {
     ($program:tt, $bindings:tt, $out_bindings:tt, $name:tt, $data:tt, $context:tt, $bind_context:tt) => {{
-            if !$bind_context.do_consume {panic!("You should be using bind here")}
-            Bindable::bind_consume(
-                &$data,
-                &$program,
-                &mut $bindings,
-                &mut $out_bindings,
-                $name.to_string(),
-                $context,
-            )
-        }};
+        if !$bind_context.do_consume {
+            panic!("You should be using bind here")
+        }
+        Bindable::bind_consume(
+            &$data,
+            &$program,
+            &mut $bindings,
+            &mut $out_bindings,
+            $name.to_string(),
+            $context,
+        )
+    }};
 }
 
 impl Bindable for Vec<u32> {
@@ -219,6 +223,123 @@ impl Bindable for Vec<u32> {
             self.as_slice().as_bytes(),
             self.len() as u64,
             vec![GLSLTYPE::ArrayInt, GLSLTYPE::ArrayUint],
+            name,
+        );
+        context
+    }
+}
+
+impl Bindable for Vec<[f32; 3]> {
+    fn bind<R: ProgramBindings, T: OutProgramBindings>(
+        &self,
+        program: &dyn Program,
+        bindings: &mut R,
+        out_bindings: &mut T,
+        name: String,
+        _context: &Context,
+    ) -> Context {
+        let numbers: Vec<f32> = self
+            .clone()
+            .into_iter()
+            .map(|x| x.to_vec())
+            .flatten()
+            .collect();
+        bind_helper(
+            program,
+            bindings,
+            out_bindings,
+            numbers.as_slice().as_bytes(),
+            self.len() as u64,
+            vec![GLSLTYPE::Vec3, GLSLTYPE::ArrayVec3],
+            name,
+        );
+        Context::new()
+    }
+
+    fn bind_consume<R: ProgramBindings, T: OutProgramBindings>(
+        &self,
+        program: &dyn Program,
+        bindings: &mut R,
+        out_bindings: &mut T,
+        name: String,
+        context: Context,
+    ) -> Context {
+        let numbers: Vec<f32> = self
+            .clone()
+            .into_iter()
+            .map(|x| x.to_vec())
+            .flatten()
+            .collect();
+        bind_helper(
+            program,
+            bindings,
+            out_bindings,
+            numbers.as_slice().as_bytes(),
+            self.len() as u64,
+            vec![GLSLTYPE::Vec3, GLSLTYPE::ArrayVec3],
+            name,
+        );
+        context
+    }
+}
+
+/* pub fn bind_mat4(
+    program: &dyn Program,
+    bindings: &mut dyn ProgramBindings,
+    out_bindings: &mut dyn OutProgramBindings,
+    mat: cgmath::Matrix4<f32>,
+    name: String,
+) {
+    let mat_slice: &[f32; 16] = mat.as_ref();
+    bind_helper(
+        program,
+        bindings,
+        out_bindings,
+        bytemuck::cast_slice(mat_slice.as_bytes()),
+        64 as u64,
+        vec![GLSLTYPE::Mat4],
+        name,
+    )
+} */
+
+impl Bindable for cgmath::Matrix4<f32> {
+    fn bind<R: ProgramBindings, T: OutProgramBindings>(
+        &self,
+        program: &dyn Program,
+        bindings: &mut R,
+        out_bindings: &mut T,
+        name: String,
+        _context: &Context,
+    ) -> Context {
+        let mat_slice: &[f32; 16] = self.as_ref();
+        bind_helper(
+            program,
+            bindings,
+            out_bindings,
+            bytemuck::cast_slice(mat_slice.as_bytes()),
+            64 as u64,
+            vec![GLSLTYPE::Mat4],
+            name,
+        );
+        Context::new()
+    }
+
+    fn bind_consume<R: ProgramBindings, T: OutProgramBindings>(
+        &self,
+        program: &dyn Program,
+        bindings: &mut R,
+        out_bindings: &mut T,
+        name: String,
+        context: Context,
+    ) -> Context {
+        let mat_slice: &[f32; 16] = self.as_ref();
+        bind_helper(
+            program,
+            bindings,
+            out_bindings,
+            bytemuck::cast_slice(mat_slice.as_bytes()),
+            64 as u64,
+            vec![GLSLTYPE::Mat4],
             name,
         );
         context
@@ -308,49 +429,6 @@ impl Bindable for Vec<u32> {
             //todo only ArrayVec
             vec![GLSLTYPE::Vec2, GLSLTYPE::ArrayVec2]
         },
-        name,
-    )
-} */
-
-/* pub fn bind_vec3(
-    program: &dyn Program,
-    bindings: &mut dyn ProgramBindings,
-    out_bindings: &mut dyn OutProgramBindings,
-    vecs: &Vec<[f32; 3]>,
-    name: String,
-) {
-    let numbers: Vec<f32> = vecs
-        .clone()
-        .into_iter()
-        .map(|x| x.to_vec())
-        .flatten()
-        .collect();
-    bind_helper(
-        program,
-        bindings,
-        out_bindings,
-        numbers.as_slice().as_bytes(),
-        vecs.len() as u64,
-        vec![GLSLTYPE::Vec3, GLSLTYPE::ArrayVec3],
-        name,
-    )
-} */
-
-/* pub fn bind_mat4(
-    program: &dyn Program,
-    bindings: &mut dyn ProgramBindings,
-    out_bindings: &mut dyn OutProgramBindings,
-    mat: cgmath::Matrix4<f32>,
-    name: String,
-) {
-    let mat_slice: &[f32; 16] = mat.as_ref();
-    bind_helper(
-        program,
-        bindings,
-        out_bindings,
-        bytemuck::cast_slice(mat_slice.as_bytes()),
-        64 as u64,
-        vec![GLSLTYPE::Mat4],
         name,
     )
 } */
