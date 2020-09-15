@@ -53,7 +53,7 @@ async fn execute_gpu() {
     {
         const BIND_CONTEXT_1: BindingContext =
             update_bind_context(&STARTING_BIND_CONTEXT, "indices");
-        let context1 = bind!(
+        let context1 = bind_mutate!(
             program,
             bindings,
             out_bindings,

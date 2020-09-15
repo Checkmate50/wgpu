@@ -125,11 +125,21 @@ fn bind_helper<R: ProgramBindings, T: OutProgramBindings>(
     binding.length = Some(length);
 }
 
+// TODO some formalism
+// A Context is a reusable set of bindings.
+// A MutContext is a single use set of bindings.
 pub struct Context {}
+pub struct MutContext {}
 
 impl Context {
     pub fn new() -> Context {
         Context {}
+    }
+}
+
+impl MutContext {
+    fn new() -> MutContext {
+        MutContext {}
     }
 }
 
@@ -143,21 +153,49 @@ pub trait Bindable {
         context: &Context,
     ) -> Context;
 
+    fn bind_mutate<R: ProgramBindings, T: OutProgramBindings>(
+        &self,
+        program: &dyn Program,
+        bindings: &mut R,
+        out_bindings: &mut T,
+        name: String,
+        context: &Context,
+    ) -> MutContext;
+
     fn bind_consume<R: ProgramBindings, T: OutProgramBindings>(
         &self,
         program: &dyn Program,
         bindings: &mut R,
         out_bindings: &mut T,
         name: String,
-        context: Context,
-    ) -> Context;
+        context: MutContext,
+    ) -> MutContext;
 }
 
 #[macro_export]
 macro_rules! bind {
     ($program:tt, $bindings:tt, $out_bindings:tt, $name:tt, $data:tt, $context:tt, $bind_context:tt) => {{
-        if $bind_context.do_consume {panic!("You need to use bind_consume here")}
+        if $bind_context.has_out_bound {
+            panic!("You need to use bind_mutate here")
+        }
         Bindable::bind(
+            &$data,
+            &$program,
+            &mut $bindings,
+            &mut $out_bindings,
+            $name.to_string(),
+            &$context,
+        )
+    }};
+}
+
+#[macro_export]
+macro_rules! bind_mutate {
+    ($program:tt, $bindings:tt, $out_bindings:tt, $name:tt, $data:tt, $context:tt, $bind_context:tt) => {{
+        if !$bind_context.has_out_bound {
+            panic!("You should be using bind here")
+        }
+        Bindable::bind_mutate(
             &$data,
             &$program,
             &mut $bindings,
@@ -171,16 +209,15 @@ macro_rules! bind {
 #[macro_export]
 macro_rules! bind_consume {
     ($program:tt, $bindings:tt, $out_bindings:tt, $name:tt, $data:tt, $context:tt, $bind_context:tt) => {{
-            if !$bind_context.do_consume {panic!("You should be using bind here")}
-            Bindable::bind_consume(
-                &$data,
-                &$program,
-                &mut $bindings,
-                &mut $out_bindings,
-                $name.to_string(),
-                $context,
-            )
-        }};
+        Bindable::bind_consume(
+            &$data,
+            &$program,
+            &mut $bindings,
+            &mut $out_bindings,
+            $name.to_string(),
+            $context,
+        )
+    }};
 }
 
 impl Bindable for Vec<u32> {
@@ -204,14 +241,34 @@ impl Bindable for Vec<u32> {
         Context::new()
     }
 
+    fn bind_mutate<R: ProgramBindings, T: OutProgramBindings>(
+        &self,
+        program: &dyn Program,
+        bindings: &mut R,
+        out_bindings: &mut T,
+        name: String,
+        _context: &Context,
+    ) -> MutContext {
+        bind_helper(
+            program,
+            bindings,
+            out_bindings,
+            self.as_slice().as_bytes(),
+            self.len() as u64,
+            vec![GLSLTYPE::ArrayInt, GLSLTYPE::ArrayUint],
+            name,
+        );
+        MutContext::new()
+    }
+
     fn bind_consume<R: ProgramBindings, T: OutProgramBindings>(
         &self,
         program: &dyn Program,
         bindings: &mut R,
         out_bindings: &mut T,
         name: String,
-        context: Context,
-    ) -> Context {
+        context: MutContext,
+    ) -> MutContext {
         bind_helper(
             program,
             bindings,

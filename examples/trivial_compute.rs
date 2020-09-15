@@ -65,7 +65,7 @@ async fn execute_gpu() {
         );
         {
             const BIND_CONTEXT_2: BindingContext = update_bind_context(&BIND_CONTEXT_1, "indices");
-            let _ = bind!(
+            let _ = bind_mutate!(
                 program,
                 bindings,
                 out_bindings,
@@ -83,7 +83,7 @@ async fn execute_gpu() {
         }
         {
             const BIND_CONTEXT_4: BindingContext = update_bind_context(&BIND_CONTEXT_1, "indices");
-            let _ = bind!(
+            let _ = bind_mutate!(
                 program,
                 bindings,
                 out_bindings,

@@ -4,7 +4,7 @@ use crate::shared::string_compare;
 pub struct BindingContext {
     starting_context: [&'static str; 32],
     result_context: [&'static str; 32],
-    has_out_bound: bool,
+    pub has_out_bound: bool,
     pub do_consume : bool,
 }
 
