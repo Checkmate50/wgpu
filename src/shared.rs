@@ -125,7 +125,8 @@ fn bind_helper<R: ProgramBindings, T: OutProgramBindings>(
     binding.length = Some(length);
 }
 
-// TODO some formalism
+// TODO make a wiki page that describes what this is and talk about the context stuff
+//
 // A Context is a reusable set of bindings.
 // A MutContext is a single use set of bindings.
 pub struct Context {}
@@ -175,9 +176,8 @@ pub trait Bindable {
 #[macro_export]
 macro_rules! bind {
     ($program:tt, $bindings:tt, $out_bindings:tt, $name:tt, $data:tt, $context:tt, $bind_context:tt) => {{
-        if $bind_context.has_out_bound {
-            panic!("You need to use bind_mutate here")
-        }
+        // const?
+        const _ : () = if $bind_context.has_out_bound {panic!("You need to use bind_mutate here")};
         Bindable::bind(
             &$data,
             &$program,

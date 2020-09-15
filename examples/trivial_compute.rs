@@ -54,7 +54,7 @@ async fn execute_gpu() {
     {
         const BIND_CONTEXT_1: BindingContext =
             update_bind_context(&STARTING_BIND_CONTEXT, "indices2");
-        let context1 = bind!(
+        let context1 = bind_mutate!(
             program,
             bindings,
             out_bindings,
@@ -65,7 +65,7 @@ async fn execute_gpu() {
         );
         {
             const BIND_CONTEXT_2: BindingContext = update_bind_context(&BIND_CONTEXT_1, "indices");
-            let _ = bind_mutate!(
+            let _ = bind_consume!(
                 program,
                 bindings,
                 out_bindings,
@@ -81,7 +81,7 @@ async fn execute_gpu() {
                 println!("{:?}", read_uvec(&program, &result1, "indices").await);
             }
         }
-        {
+        /* {
             const BIND_CONTEXT_4: BindingContext = update_bind_context(&BIND_CONTEXT_1, "indices");
             let _ = bind_mutate!(
                 program,
@@ -97,7 +97,7 @@ async fn execute_gpu() {
                 let result1 = run(&program, &mut bindings, out_bindings);
                 println!("{:?}", read_uvec(&program, &result1, "indices").await);
             }
-        }
+        } */
     }
 }
 
