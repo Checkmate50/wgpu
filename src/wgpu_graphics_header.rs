@@ -47,7 +47,7 @@ pub struct SamplerBinding {
 #[derive(Debug)]
 pub struct GraphicsBindings {
     pub bindings: Vec<DefaultBinding>,
-    pub indicies: Option<wgpu::Buffer>,
+    pub indicies: Option<Rc<wgpu::Buffer>>,
     pub index_len: Option<u32>,
     pub textures: Vec<TextureBinding>,
     pub samplers: Vec<SamplerBinding>,
@@ -687,85 +687,120 @@ fn buffer_map_setup<'a>(
     buffer_map
 }
 
+pub struct BindingPreprocess<'a> {
+    indicies: Option<Rc<wgpu::Buffer>>,
+    index_len: Option<u32>,
+    num_instances: u32,
+    verticies: Vec<(u32, Rc<wgpu::Buffer>)>,
+    num_verts: u32,
+    bind_group_vec: Vec<wgpu::Binding<'a>>,
+    //bgd: wgpu::BindGroupDescriptor,
+}
+
+impl<'a> BindingPreprocess<'a> {
+    pub fn new(
+        bindings: &'a GraphicsBindings,
+        out_bindings: &'a OutGraphicsBindings,
+    ) -> BindingPreprocess<'a> {
+        let bind = bindings
+            .bindings
+            .iter()
+            .find(|i| i.qual.contains(&QUALIFIER::VERTEX));
+
+        let num_verts: u32 = if bind.is_none() {
+            3
+        } else {
+            bind.unwrap().length.unwrap() as u32
+        };
+
+        let bind = bindings
+            .bindings
+            .iter()
+            .find(|i| i.qual.contains(&QUALIFIER::LOOP));
+
+        let num_instances: u32 = if bind.is_none() {
+            1
+        } else {
+            bind.unwrap().length.unwrap() as u32
+        };
+
+        let buffer_map = buffer_map_setup(bindings, &out_bindings);
+
+        let mut bind_group_vec = Vec::new();
+        let mut verticies = Vec::new();
+
+        for i in 0..(buffer_map.len()) {
+            let b = buffer_map.get(&(i as u32)).expect(&format!(
+                "I assumed all bindings would be buffers but I guess that has been invalidated"
+            ));
+
+            if b.qual.contains(&QUALIFIER::VERTEX) && b.qual.contains(&QUALIFIER::IN) {
+                verticies.push((
+                    b.binding_number,
+                    b.data.expect(&format!("The binding of {} was not set", &b.name)),
+                ))
+            } else {
+                bind_group_vec.push(wgpu::Binding {
+                    binding: b.binding_number,
+                    resource: wgpu::BindingResource::Buffer {
+                        buffer: &b
+                            .data
+                            .as_ref()
+                            .expect(&format!("The binding of {} was not set", &b.name)),
+                        range: 0..b
+                            .length
+                            .expect(&format!("The size of {} was not set", &b.name)),
+                    },
+                })
+            }
+        }
+        for i in bindings.samplers.iter() {
+            bind_group_vec.push(wgpu::Binding {
+                binding: i.binding_number,
+                resource: wgpu::BindingResource::Sampler(
+                    &i.data
+                        .as_ref()
+                        .expect(&format!("The sampler for {} was not set", &i.name)),
+                ),
+            });
+        }
+
+        for i in bindings.textures.iter() {
+            bind_group_vec.push(wgpu::Binding {
+                binding: i.binding_number,
+                resource: wgpu::BindingResource::TextureView(
+                    &i.data
+                        .as_ref()
+                        .expect(&format!("The sampler for {} was not set", &i.name)),
+                ),
+            });
+        }
+
+        BindingPreprocess {
+            indicies: bindings.indicies,
+            index_len: bindings.index_len,
+            num_instances,
+            verticies,
+            num_verts,
+            bind_group_vec,
+            //bgd,
+        }
+    }
+}
+
 pub fn graphics_run<'a>(
     program: &GraphicsProgram,
     mut rpass: wgpu::RenderPass<'a>,
     bind_group: &'a mut wgpu::BindGroup,
-    bindings: &'a GraphicsBindings,
-    out_bindings: &'a OutGraphicsBindings,
+    bind_preprocess: BindingPreprocess<'a>,
 ) -> wgpu::RenderPass<'a> {
     /* let mut encoder = program
-    .device
+            .device
     .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None }); */
 
-    let bind = bindings
-        .bindings
-        .iter()
-        .find(|i| i.qual.contains(&QUALIFIER::VERTEX));
-
-    let verts: u32 = if bind.is_none() {
-        3
-    } else {
-        bind.unwrap().length.unwrap() as u32
-    };
-
-    let bind = bindings
-        .bindings
-        .iter()
-        .find(|i| i.qual.contains(&QUALIFIER::LOOP));
-
-    let instances: u32 = if bind.is_none() {
-        1
-    } else {
-        bind.unwrap().length.unwrap() as u32
-    };
-
-    let buffer_map = buffer_map_setup(bindings, &out_bindings);
-
-    let mut empty_vec = Vec::new();
-
-    for i in 0..(buffer_map.len()) {
-        let b = buffer_map.get(&(i as u32)).expect(&format!(
-            "I assumed all bindings would be buffers but I guess that has been invalidated"
-        ));
-
-        empty_vec.push(wgpu::Binding {
-            binding: b.binding_number,
-            resource: wgpu::BindingResource::Buffer {
-                buffer: &b
-                    .data
-                    .as_ref()
-                    .expect(&format!("The binding of {} was not set", &b.name)),
-                range: 0..b
-                    .length
-                    .expect(&format!("The size of {} was not set", &b.name)),
-            },
-        });
-    }
-    for i in bindings.samplers.iter() {
-        empty_vec.push(wgpu::Binding {
-            binding: i.binding_number,
-            resource: wgpu::BindingResource::Sampler(
-                &i.data
-                    .as_ref()
-                    .expect(&format!("The sampler for {} was not set", &i.name)),
-            ),
-        });
-    }
-
-    for i in bindings.textures.iter() {
-        empty_vec.push(wgpu::Binding {
-            binding: i.binding_number,
-            resource: wgpu::BindingResource::TextureView(
-                &i.data
-                    .as_ref()
-                    .expect(&format!("The sampler for {} was not set", &i.name)),
-            ),
-        });
-    }
     let bgd = &wgpu::BindGroupDescriptor {
         layout: &program.bind_group_layout,
-        bindings: empty_vec.as_slice(),
+        bindings: bind_preprocess.bind_group_vec.as_slice(),
         label: None,
     };
 
@@ -777,28 +812,15 @@ pub fn graphics_run<'a>(
 
         rpass.set_bind_group(0, bind_group, &[]);
 
-        if bindings.indicies.is_some() {
-            rpass.set_index_buffer(&bindings.indicies.as_ref().unwrap(), 0, 0);
+        if bind_preprocess.indicies.is_some() {
+            rpass.set_index_buffer(&bind_preprocess.indicies.as_ref().unwrap(), 0, 0);
         }
 
-        for i in 0..(bindings.bindings.len()) {
-            let b = bindings.bindings.get(i as usize).expect(&format!(
-                "I assumed all bindings would be buffers but I guess that has been invalidated"
-            ));
-
-            if b.qual.contains(&QUALIFIER::VERTEX) {
-                rpass.set_vertex_buffer(
-                    b.binding_number,
-                    &b.data
-                        .as_ref()
-                        .expect(&format!("The binding of {} was not set", &b.name)),
-                    0,
-                    0,
-                );
-            }
+        for (i, d) in bind_preprocess.verticies.into_iter() {
+            rpass.set_vertex_buffer(i, &d, 0, 0);
         }
 
-        for i in 0..(out_bindings.bindings.len()) {
+        /* for i in 0..(out_bindings.bindings.len()) {
             let b = out_bindings.bindings.get(i as usize).expect(&format!(
                 "I assumed all bindings would be buffers but I guess that has been invalidated"
             ));
@@ -813,12 +835,20 @@ pub fn graphics_run<'a>(
                     0,
                 );
             }
-        }
+        } */
 
-        if bindings.indicies.is_some() {
-            draw_indexed(&mut rpass, 0..bindings.index_len.unwrap(), 0..instances)
+        if bind_preprocess.indicies.is_some() {
+            draw_indexed(
+                &mut rpass,
+                0..bind_preprocess.index_len.unwrap(),
+                0..bind_preprocess.num_instances,
+            )
         } else {
-            draw(&mut rpass, 0..verts, 0..instances);
+            draw(
+                &mut rpass,
+                0..bind_preprocess.num_verts,
+                0..bind_preprocess.num_instances,
+            );
         }
     }
     rpass
@@ -830,19 +860,18 @@ pub fn graphics_run_indicies<'a>(
     program: &'a GraphicsProgram,
     pass: wgpu::RenderPass<'a>,
     bind_group: &'a mut wgpu::BindGroup,
-    bindings: &'a mut GraphicsBindings,
-    out_bindings: &'a OutGraphicsBindings,
+    mut bind_preprocess: BindingPreprocess<'a>,
     indicies: &Vec<u16>,
 ) -> wgpu::RenderPass<'a> {
-    bindings.indicies = Some(
+    bind_preprocess.indicies = Some(Rc::new(
         program
             .get_device()
             .create_buffer_with_data(indicies.as_slice().as_bytes(), wgpu::BufferUsage::INDEX),
-    );
-    bindings.index_len = Some(indicies.len() as u32);
-    graphics_run(program, pass, bind_group, bindings, out_bindings)
+    ));
+    bind_preprocess.index_len = Some(indicies.len() as u32);
+    graphics_run(program, pass, bind_group, bind_preprocess)
 }
-
+/* todo
 pub fn graphics_pipe(
     program: &GraphicsProgram,
     rpass: wgpu::RenderPass,
@@ -877,7 +906,7 @@ pub fn graphics_pipe(
     }
 
     graphics_run(program, rpass, bind_group, &in_bindings, out_bindings);
-}
+} */
 
 pub fn default_bind_group(program: &GraphicsProgram) -> wgpu::BindGroup {
     let bind_group_layout =

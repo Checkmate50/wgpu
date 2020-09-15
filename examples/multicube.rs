@@ -217,7 +217,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                             }
                         }
                     }
-                    {
+                    /* {
                         const BIND_CONTEXT_1_1: BindingContext =
                             update_bind_context(&STARTING_BIND_CONTEXT, "a_position");
                         let context1 = bind!(
@@ -292,7 +292,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                 }
                             }
                         }
-                    }
+                    } */
                 }
                 program.queue.submit(&[init_encoder.finish()]);
             }

@@ -2,6 +2,7 @@ use glsl_to_spirv::ShaderType;
 use regex::Regex;
 use std::fmt;
 use std::io::Read;
+use std::rc::Rc;
 use wgpu::ShaderModule;
 use zerocopy::AsBytes as _;
 
@@ -36,7 +37,7 @@ pub fn compile_shader(contents: String, shader: ShaderType, device: &wgpu::Devic
 pub struct DefaultBinding {
     pub binding_number: u32,
     pub name: String,
-    pub data: Option<wgpu::Buffer>,
+    pub data: Option<Rc<wgpu::Buffer>>,
     pub length: Option<u64>,
     pub gtype: GLSLTYPE,
     pub qual: Vec<QUALIFIER>,
@@ -121,7 +122,7 @@ fn bind_helper<R: ProgramBindings, T: OutProgramBindings>(
         },
     );
 
-    binding.data = Some(buffer);
+    binding.data = Some(Rc::new(buffer));
     binding.length = Some(length);
 }
 

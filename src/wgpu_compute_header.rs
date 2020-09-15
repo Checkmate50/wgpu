@@ -3,6 +3,7 @@ use glsl_to_spirv::ShaderType;
 use std::collections::HashMap;
 
 use std::convert::TryInto;
+use std::rc::Rc;
 
 use crate::shared::{
     check_gl_builtin_type, compile_shader, new_bindings, process_body, Bindings, DefaultBinding,
@@ -27,9 +28,10 @@ impl OutComputeBindings {
 
             new_binds[bind_pos].data = std::mem::replace(&mut i.data, None);
             new_binds[bind_pos].length = std::mem::replace(&mut i.length, None);
-
         }
-        OutComputeBindings{bindings: new_binds}
+        OutComputeBindings {
+            bindings: new_binds,
+        }
     }
 }
 
@@ -311,7 +313,6 @@ pub fn run(
             .find(|i| i.qual.contains(&QUALIFIER::LOOP));
     }
 
-
     let length = if bind.is_none() {
         1
     } else {
@@ -320,8 +321,8 @@ pub fn run(
 
     for i in 0..(out_bindings.bindings.len()) {
         if !(out_bindings.bindings[i].qual.contains(&QUALIFIER::IN)) {
-            out_bindings.bindings[i].data =
-                Some(program.device.create_buffer(&wgpu::BufferDescriptor {
+            out_bindings.bindings[i].data = Some(Rc::new(program.device.create_buffer(
+                &wgpu::BufferDescriptor {
                     label: None,
                     size: (length * 3 * std::mem::size_of::<u32>() as u64) as u64,
                     usage: wgpu::BufferUsage::STORAGE
@@ -329,7 +330,8 @@ pub fn run(
                         | wgpu::BufferUsage::COPY_DST
                         | wgpu::BufferUsage::COPY_SRC
                         | wgpu::BufferUsage::VERTEX,
-                }));
+                },
+            )));
             out_bindings.bindings[i].length = Some(length);
         }
     }
