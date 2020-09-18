@@ -796,7 +796,7 @@ pub fn graphics_run<'a>(
                         .device
     .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None }); */
 
-    let mut bind_group_bindings = &mut bind_preprocess
+    let bind_group_bindings = &mut bind_preprocess
         .bind_group_vec
         .iter()
         .map(|(idx, buffer, len_range)| wgpu::Binding {
@@ -980,6 +980,70 @@ pub fn setup_render_pass<'a>(
             clear_color: wgpu::Color::TRANSPARENT,
         }],
         depth_stencil_attachment: None,
+    });
+
+    rpass.set_pipeline(&program.pipeline);
+    rpass
+}
+
+pub fn setup_render_pass_depth<'a>(
+    program: &'a GraphicsProgram,
+    encoder: &'a mut wgpu::CommandEncoder,
+    texture: &'a wgpu::TextureView,
+) -> wgpu::RenderPass<'a> {
+    let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+        // color_attachments is literally where we draw the colors to
+        color_attachments: &[],
+        depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachmentDescriptor {
+            // The texture we are saving the colors to
+            attachment: &texture,
+            depth_load_op: wgpu::LoadOp::Clear,
+            depth_store_op: wgpu::StoreOp::Store,
+            stencil_load_op: wgpu::LoadOp::Clear,
+            stencil_store_op: wgpu::StoreOp::Store,
+            clear_depth: 1.0,
+            clear_stencil: 0,
+        }),
+    });
+
+    rpass.set_pipeline(&program.pipeline);
+    rpass
+}
+
+pub fn setup_render_pass_color_depth<'a>(
+    program: &'a GraphicsProgram,
+    encoder: &'a mut wgpu::CommandEncoder,
+    frame: &'a wgpu::SwapChainOutput,
+    texture: &'a wgpu::TextureView,
+) -> wgpu::RenderPass<'a> {
+    let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+        // color_attachments is literally where we draw the colors to
+        color_attachments: &[wgpu::RenderPassColorAttachmentDescriptor {
+            // The texture we are saving the colors to
+            attachment: &frame.view,
+            resolve_target: None,
+            load_op: wgpu::LoadOp::Clear,
+            store_op: wgpu::StoreOp::Store,
+            // Default color for all pixels
+            // Use Color to specify a specific rgba value
+            /* clear_color: wgpu::Color::TRANSPARENT, */
+            clear_color: wgpu::Color {
+                r: 0.1,
+                g: 0.2,
+                b: 0.3,
+                a: 1.0,
+            },
+        }],
+        depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachmentDescriptor {
+            // The texture we are saving the colors to
+            attachment: &texture,
+            depth_load_op: wgpu::LoadOp::Clear,
+            depth_store_op: wgpu::StoreOp::Store,
+            stencil_load_op: wgpu::LoadOp::Clear,
+            stencil_store_op: wgpu::StoreOp::Store,
+            clear_depth: 1.0,
+            clear_stencil: 0,
+        }),
     });
 
     rpass.set_pipeline(&program.pipeline);

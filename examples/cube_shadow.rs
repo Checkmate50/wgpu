@@ -9,7 +9,8 @@ use winit::{
 
 pub use pipeline::wgpu_graphics_header::{
     default_bind_group, generate_swap_chain, graphics_run_indicies, setup_render_pass,
-    BindingPreprocess, GraphicsBindings, GraphicsShader, OutGraphicsBindings,
+    setup_render_pass_color_depth, setup_render_pass_depth, BindingPreprocess, GraphicsBindings,
+    GraphicsShader, OutGraphicsBindings,
 };
 
 pub use pipeline::shared::{is_gl_builtin, Bindable, Bindings, Context};
@@ -26,28 +27,70 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 
     const VERTEXT: (GraphicsShader, BindingContext) = graphics_shader! {
         [[vertex in] vec3] a_position;
-        [[vertex in] vec3] vertexColor;
-        [[uniform in] mat4] u_view;
-        [[uniform in] mat4] u_proj;
-        [[uniform in] mat4] u_model;
+        [[vertex in] vec3] a_normal;
 
+        [[out] vec4] v_position;
+        [[out] vec3] v_normal;
 
-        [[out] vec3] fragmentColor;
-        [[out] vec4] gl_Position;
+        [[uniform in] mat4] u_viewProj;
+        [[uniform in] mat4] u_World;
+        [[uniform in] vec4] u_Color;
+
         {{
             void main() {
-                fragmentColor = vertexColor;
-                gl_Position = u_proj * u_view * u_model * vec4(0.5 * a_position, 1.0);
+                v_normal = mat3(u_World) * a_normal;
+                v_Position = u_World * vec4(a_position, 1.0);
+                gl_Position = u-viewProj * v_Position;
             }
         }}
     };
 
     const FRAGMENT: (GraphicsShader, BindingContext) = graphics_shader! {
-        [[in] vec3] fragmentColor;
+        [[in] vec4] v_position;
+        [[in] vec3] v_normal;
+
         [[out] vec4] color;
+
+        [[uniform in] mat4] u_viewProj;
+        [[uniform in] mat4] light_proj;
+        [[uniform in] vec4] light_pos;
+        [[uniform in] vec4] light_color;
+
+        [[uniform] texture2DArray] t_Shadow;
+        [[uniform] samplerShadow] s_Shadow;
+        [[uniform in] mat4] u_World;
+        [[uniform in] vec4] u_Color;
         {{
+            float fetch_shadow(int light_id, vec4 homogeneous_coords) {
+                if (homogeneous_coords.w <= 0.0) {
+                    return 1.0;
+                }
+                // compensate for the Y-flip difference between the NDC and texture coordinates
+                const vec2 flip_correction = vec2(0.5, -0.5);
+                // compute texture coordinates for shadow lookup
+                vec4 light_local = vec4(
+                    homogeneous_coords.xy * flip_correction/homogeneous_coords.w + 0.5,
+                    light_id,
+                    homogeneous_coords.z / homogeneous_coords.w
+                );
+                // do the lookup, using HW PCF and comparison
+                return texture(sampler2DArrayShadow(t_Shadow, s_Shadow), light_local);
+            }
+
             void main() {
-                color = vec4(fragmentColor, 1.0);
+                vec3 normal = normalize(v_normal);
+                vec3 ambient = vec3(0.05, 0.05, 0.05);
+                // accumulate color
+                vec3 o_Target = ambient;
+                // project into the light space
+                float shadow = fetch_shadow(0, light_proj * v_position);
+                // compute Lambertian diffuse term
+                vec3 light_dir = normalize(light_pos.xyz - v_position.xyz);
+                float diffuse = max(0.0, dot(normal, light_dir));
+                // add light contribution
+                o_Target += shadow * diffuse * light_color.xyz;
+                // multiply the light by material color
+                color = vec4(o_Target, 1.0) * u_Color;
             }
         }}
     };
@@ -56,10 +99,12 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     const STARTING_BIND_CONTEXT: BindingContext = VERTEXT.1;
     const S_F: GraphicsShader = FRAGMENT.0;
 
+    std::process::exit(0);
+
     let (program, template_bindings, template_out_bindings, _) =
         compile_valid_graphics_program!(window, S_V, S_F);
 
-    let (positions, _, index_data) = load_cube();
+    let (positions, normals, index_data) = load_cube();
 
     let color_data = vec![
         [0.583, 0.771, 0.014],
@@ -131,12 +176,26 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                     let mut bind_group2 = default_bind_group(&program);
 
                     let mut bind_prerun;
-                    let mut bind_prerun2;
-                    let mut rpass = setup_render_pass(&program, &mut init_encoder, &frame);
+                    //let mut bind_prerun2;
+                    /* let mut rpass = setup_render_pass(&program, &mut init_encoder, &frame); */
 
                     let context = Context::new();
 
+                    /* {
+                        let mut rpass = setup_render_pass_depth(
+                            &program,
+                            &mut init_encoder,
+                            unimplemented!(),
+                        );
+                    } */
                     {
+                        /* let mut rpass = setup_render_pass_color_depth(
+                            &program,
+                            &mut init_encoder,
+                            &frame,
+                            unimplemented!(),
+                        ); */
+                        let mut rpass = setup_render_pass(&program, &mut init_encoder, &frame);
                         const BIND_CONTEXT_1: BindingContext =
                             update_bind_context(&STARTING_BIND_CONTEXT, "a_position");
                         let context1 = bind!(
@@ -207,33 +266,6 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                                 rpass,
                                                 &mut bind_group,
                                                 &mut bind_prerun,
-                                                &index_data,
-                                            );
-                                        }
-                                    }
-                                    {
-                                        const BIND_CONTEXT_5_1: BindingContext =
-                                            update_bind_context(&BIND_CONTEXT_4, "u_model");
-                                        let _ = bind!(
-                                            program,
-                                            bindings,
-                                            out_bindings,
-                                            "u_model",
-                                            model_mat2,
-                                            context4,
-                                            BIND_CONTEXT_5_1
-                                        );
-                                        {
-                                            ready_to_run(BIND_CONTEXT_5_1);
-                                            bind_prerun2 = BindingPreprocess::bind(
-                                                &mut bindings,
-                                                &out_bindings,
-                                            );
-                                            graphics_run_indicies(
-                                                &program,
-                                                rpass,
-                                                &mut bind_group2,
-                                                &mut bind_prerun2,
                                                 &index_data,
                                             );
                                         }

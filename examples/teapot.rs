@@ -9,12 +9,12 @@ use winit::{
 
 pub use pipeline::wgpu_graphics_header::{
     default_bind_group, generate_swap_chain, graphics_run_indicies, setup_render_pass,
-    GraphicsBindings, GraphicsShader, OutGraphicsBindings,
+    BindingPreprocess, GraphicsBindings, GraphicsShader, OutGraphicsBindings,
 };
 
-pub use pipeline::shared::{bind_fvec, bind_mat4, bind_vec3, Bindings};
+pub use pipeline::shared::{is_gl_builtin, Bindable, Bindings, Context};
 
-pub use pipeline::context::{ready_to_run, update_bind_context, BindingContext, MetaContext};
+pub use pipeline::context::{ready_to_run, update_bind_context, BindingContext};
 
 pub use pipeline::helper::{
     generate_identity_matrix, generate_projection_matrix, generate_view_matrix, load_model,
@@ -64,7 +64,6 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     const S_V: GraphicsShader = VERTEXT.0;
     const STARTING_BIND_CONTEXT: BindingContext = VERTEXT.1;
     const S_F: GraphicsShader = FRAGMENT.0;
-    const STARTING_META_CONTEXT: MetaContext = MetaContext::new();
 
     let (program, template_bindings, template_out_bindings, _) =
         compile_valid_graphics_program!(window, S_V, S_F);
@@ -97,135 +96,132 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                 let frame = swap_chain
                     .get_next_texture()
                     .expect("Timeout when acquiring next swap chain texture");
-
-                let rpass = setup_render_pass(&program, &mut init_encoder, &frame);
-                let mut bind_group = default_bind_group(&program);
-
-                let mut bindings: GraphicsBindings = template_bindings.clone();
-                let mut out_bindings: OutGraphicsBindings = template_out_bindings.clone();
-
-                model_mat = rotation_y(model_mat, 0.05);
-
-                fn rotate_vec3(start: &Vec<[f32; 3]>, delta_y: f32) -> Vec<[f32; 3]> {
-                    let mut temp_vec3 = cgmath::Vector3::new(start[0][0], start[0][1], start[0][2]);
-                    temp_vec3 = cgmath::Matrix3::from_angle_y(cgmath::Rad(delta_y)) * temp_vec3;
-                    vec![[temp_vec3.x, temp_vec3.y, temp_vec3.z]]
-                };
-
-                light_direction = rotate_vec3(&light_direction, 0.05);
-
-                const BIND_CONTEXT_1: (BindingContext, MetaContext) = update_bind_context(
-                    &STARTING_BIND_CONTEXT,
-                    "a_position",
-                    STARTING_META_CONTEXT,
-                    "BIND_CONTEXT_1",
-                );
-                bind_vec3(
-                    &program,
-                    &mut bindings,
-                    &mut out_bindings,
-                    &positions,
-                    "a_position".to_string(),
-                );
                 {
-                    const BIND_CONTEXT_2: (BindingContext, MetaContext) = update_bind_context(
-                        &BIND_CONTEXT_1.0,
-                        "u_view",
-                        BIND_CONTEXT_1.1,
-                        "BIND_CONTEXT_2",
-                    );
-                    bind_mat4(
-                        &program,
-                        &mut bindings,
-                        &mut out_bindings,
-                        view_mat,
-                        "u_view".to_string(),
-                    );
+                    let mut bind_group = default_bind_group(&program);
+
+                    let mut bindings: GraphicsBindings = template_bindings.clone();
+                    let mut out_bindings: OutGraphicsBindings = template_out_bindings.clone();
+                    let mut bind_group = default_bind_group(&program);
+                    let mut bind_prerun;
+
+                    let mut rpass = setup_render_pass(&program, &mut init_encoder, &frame);
+
+                    model_mat = rotation_y(model_mat, 0.05);
+
+                    fn rotate_vec3(start: &Vec<[f32; 3]>, delta_y: f32) -> Vec<[f32; 3]> {
+                        let mut temp_vec3 =
+                            cgmath::Vector3::new(start[0][0], start[0][1], start[0][2]);
+                        temp_vec3 = cgmath::Matrix3::from_angle_y(cgmath::Rad(delta_y)) * temp_vec3;
+                        vec![[temp_vec3.x, temp_vec3.y, temp_vec3.z]]
+                    };
+
+                    light_direction = rotate_vec3(&light_direction, 0.05);
+                    let context = Context::new();
                     {
-                        const BIND_CONTEXT_3: (BindingContext, MetaContext) = update_bind_context(
-                            &BIND_CONTEXT_2.0,
-                            "u_model",
-                            BIND_CONTEXT_2.1,
-                            "BIND_CONTEXT_3",
-                        );
-                        bind_mat4(
-                            &program,
-                            &mut bindings,
-                            &mut out_bindings,
-                            model_mat,
-                            "u_model".to_string(),
+                        const BIND_CONTEXT_1: BindingContext =
+                            update_bind_context(&STARTING_BIND_CONTEXT, "a_position");
+                        let context1 = bind!(
+                            program,
+                            bindings,
+                            out_bindings,
+                            "a_position",
+                            positions,
+                            context,
+                            BIND_CONTEXT_1
                         );
                         {
-                            const BIND_CONTEXT_4: (BindingContext, MetaContext) =
-                                update_bind_context(
-                                    &BIND_CONTEXT_3.0,
-                                    "u_proj",
-                                    BIND_CONTEXT_3.1,
-                                    "BIND_CONTEXT_4",
-                                );
-                            bind_mat4(
-                                &program,
-                                &mut bindings,
-                                &mut out_bindings,
-                                proj_mat,
-                                "u_proj".to_string(),
+                            const BIND_CONTEXT_2: BindingContext =
+                                update_bind_context(&BIND_CONTEXT_1, "u_view");
+                            let context2 = bind!(
+                                program,
+                                bindings,
+                                out_bindings,
+                                "u_view",
+                                view_mat,
+                                context1,
+                                BIND_CONTEXT_2
                             );
                             {
-                                const BIND_CONTEXT_5: (BindingContext, MetaContext) =
-                                    update_bind_context(
-                                        &BIND_CONTEXT_4.0,
-                                        "Ambient",
-                                        BIND_CONTEXT_4.1,
-                                        "BIND_CONTEXT_5",
-                                    );
-                                bind_vec3(
-                                    &program,
-                                    &mut bindings,
-                                    &mut out_bindings,
-                                    &light_ambient,
-                                    "Ambient".to_string(),
+                                const BIND_CONTEXT_3: BindingContext =
+                                    update_bind_context(&BIND_CONTEXT_2, "u_model");
+                                let context3 = bind!(
+                                    program,
+                                    bindings,
+                                    out_bindings,
+                                    "u_model",
+                                    model_mat,
+                                    context2,
+                                    BIND_CONTEXT_3
                                 );
                                 {
-                                    const BIND_CONTEXT_6: (BindingContext, MetaContext) =
-                                        update_bind_context(
-                                            &BIND_CONTEXT_5.0,
-                                            "LightDirection",
-                                            BIND_CONTEXT_5.1,
-                                            "BIND_CONTEXT_6",
-                                        );
-                                    bind_vec3(
-                                        &program,
-                                        &mut bindings,
-                                        &mut out_bindings,
-                                        &light_direction,
-                                        "LightDirection".to_string(),
+                                    const BIND_CONTEXT_4: BindingContext =
+                                        update_bind_context(&BIND_CONTEXT_3, "u_proj");
+                                    let context4 = bind!(
+                                        program,
+                                        bindings,
+                                        out_bindings,
+                                        "u_proj",
+                                        proj_mat,
+                                        context3,
+                                        BIND_CONTEXT_4
                                     );
                                     {
-                                        const BIND_CONTEXT_7: (BindingContext, MetaContext) =
-                                            update_bind_context(
-                                                &BIND_CONTEXT_6.0,
-                                                "a_normal",
-                                                BIND_CONTEXT_6.1,
-                                                "BIND_CONTEXT_7",
-                                            );
-                                        bind_vec3(
-                                            &program,
-                                            &mut bindings,
-                                            &mut out_bindings,
-                                            &normals,
-                                            "a_normal".to_string(),
+                                        const BIND_CONTEXT_5: BindingContext =
+                                            update_bind_context(&BIND_CONTEXT_4, "Ambient");
+                                        let context5 = bind!(
+                                            program,
+                                            bindings,
+                                            out_bindings,
+                                            "Ambient",
+                                            light_ambient,
+                                            context4,
+                                            BIND_CONTEXT_5
                                         );
                                         {
-                                            const Next_Meta_Context: MetaContext =
-                                                ready_to_run(BIND_CONTEXT_7.0, BIND_CONTEXT_7.1);
-                                            graphics_run_indicies(
-                                                &program,
-                                                rpass,
-                                                &mut bind_group,
-                                                &mut bindings,
-                                                &out_bindings,
-                                                &indices,
+                                            const BIND_CONTEXT_6: BindingContext =
+                                                update_bind_context(
+                                                    &BIND_CONTEXT_5,
+                                                    "LightDirection",
+                                                );
+                                            let context6 = bind!(
+                                                program,
+                                                bindings,
+                                                out_bindings,
+                                                "LightDirection",
+                                                light_direction,
+                                                context5,
+                                                BIND_CONTEXT_6
                                             );
+                                            {
+                                                const BIND_CONTEXT_7: BindingContext =
+                                                    update_bind_context(
+                                                        &BIND_CONTEXT_6,
+                                                        "a_normal",
+                                                    );
+                                                let context7 = bind!(
+                                                    program,
+                                                    bindings,
+                                                    out_bindings,
+                                                    "a_normal",
+                                                    normals,
+                                                    context6,
+                                                    BIND_CONTEXT_7
+                                                );
+                                                {
+                                                    ready_to_run(BIND_CONTEXT_7);
+                                                    bind_prerun = BindingPreprocess::bind(
+                                                        &mut bindings,
+                                                        &out_bindings,
+                                                    );
+                                                    rpass = graphics_run_indicies(
+                                                        &program,
+                                                        rpass,
+                                                        &mut bind_group,
+                                                        &mut bind_prerun,
+                                                        &indices,
+                                                    );
+                                                }
+                                            }
                                         }
                                     }
                                 }
