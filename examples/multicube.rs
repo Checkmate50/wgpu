@@ -218,61 +218,9 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                             );
                                         }
                                     }
-                                }
-                            }
-                        }
-                    }
-                    {
-                        const BIND_CONTEXT_1_1: BindingContext =
-                            update_bind_context(&STARTING_BIND_CONTEXT, "a_position");
-                        let context1 = bind!(
-                            program,
-                            bindings,
-                            out_bindings,
-                            "a_position",
-                            positions,
-                            context,
-                            BIND_CONTEXT_1_1
-                        );
-                        {
-                            const BIND_CONTEXT_2_1: BindingContext =
-                                update_bind_context(&BIND_CONTEXT_1_1, "u_view");
-                            let context2 = bind!(
-                                program,
-                                bindings,
-                                out_bindings,
-                                "u_view",
-                                view_mat,
-                                context1,
-                                BIND_CONTEXT_2_1
-                            );
-                            {
-                                const BIND_CONTEXT_3_1: BindingContext =
-                                    update_bind_context(&BIND_CONTEXT_2_1, "vertexColor");
-                                let context3 = bind!(
-                                    program,
-                                    bindings,
-                                    out_bindings,
-                                    "vertexColor",
-                                    color_data,
-                                    context2,
-                                    BIND_CONTEXT_3_1
-                                );
-                                {
-                                    const BIND_CONTEXT_4_1: BindingContext =
-                                        update_bind_context(&BIND_CONTEXT_3_1, "u_proj");
-                                    let context4 = bind!(
-                                        program,
-                                        bindings,
-                                        out_bindings,
-                                        "u_proj",
-                                        proj_mat,
-                                        context3,
-                                        BIND_CONTEXT_4_1
-                                    );
                                     {
                                         const BIND_CONTEXT_5_1: BindingContext =
-                                            update_bind_context(&BIND_CONTEXT_4_1, "u_model");
+                                            update_bind_context(&BIND_CONTEXT_4, "u_model");
                                         let context5 = bind!(
                                             program,
                                             bindings,
@@ -283,13 +231,11 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                             BIND_CONTEXT_5_1
                                         );
                                         {
-                                            debug!(bindings);
                                             ready_to_run(BIND_CONTEXT_5_1);
                                             bind_prerun2 = BindingPreprocess::bind(
                                                 &mut bindings,
                                                 &out_bindings,
                                             );
-                                            debug!(bind_prerun);
                                             rpass = wgpu_graphics_header::graphics_run_indicies(
                                                 &program,
                                                 rpass,

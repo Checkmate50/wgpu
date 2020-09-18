@@ -667,17 +667,19 @@ fn draw_indexed(
 }
 
 #[derive(Debug)]
-pub struct BindingPreprocess<'a> {
+pub struct BindingPreprocess {
     indicies: Option<Rc<wgpu::Buffer>>,
     index_len: Option<u32>,
     num_instances: u32,
     verticies: Vec<(u32, Rc<wgpu::Buffer>)>,
     num_verts: u32,
-    bind_group_vec: Vec<wgpu::Binding>,
+    bind_group_vec: Vec<(u32, Rc<wgpu::Buffer>, std::ops::Range<u64>)>,
+    texture_vec: Vec<(u32, Rc<wgpu::TextureView>)>,
+    sampler_vec: Vec<(u32, Rc<wgpu::Sampler>)>,
     //bgd: wgpu::BindGroupDescriptor,
 }
 
-impl<'a> Default for BindingPreprocess<'a> {
+impl<'a> Default for BindingPreprocess {
     fn default() -> Self {
         BindingPreprocess {
             indicies: None,
@@ -686,15 +688,17 @@ impl<'a> Default for BindingPreprocess<'a> {
             verticies: Vec::new(),
             num_verts: 0,
             bind_group_vec: Vec::new(),
+            texture_vec: Vec::new(),
+            sampler_vec: Vec::new(),
             //bgd,
         }
     }
 }
-impl<'a> BindingPreprocess<'a> {
+impl<'a> BindingPreprocess {
     pub fn bind(
         bindings: &GraphicsBindings,
         out_bindings: &OutGraphicsBindings,
-    ) -> BindingPreprocess<'a> {
+    ) -> BindingPreprocess {
         let bind = bindings
             .bindings
             .iter()
@@ -719,6 +723,8 @@ impl<'a> BindingPreprocess<'a> {
 
         let mut bind_group_vec = Vec::new();
         let mut verticies = Vec::new();
+        let mut textures = Vec::new();
+        let mut samplers = Vec::new();
 
         for b in bindings.bindings.iter() {
             if b.qual.contains(&QUALIFIER::VERTEX) && b.qual.contains(&QUALIFIER::IN) {
@@ -733,39 +739,37 @@ impl<'a> BindingPreprocess<'a> {
             } else {
                 bind_group_vec.push((
                     b.binding_number,
-                    resource: wgpu::BindingResource::Buffer {
-                        buffer: &b
-                            .data
+                    Rc::clone(
+                        b.data
                             .as_ref()
                             .expect(&format!("The binding of {} was not set", &b.name)),
-                        range: 0..b
-                            .length
-                            .expect(&format!("The size of {} was not set", &b.name)),
-                    },
-                })
+                    ),
+                    0..b.length
+                        .expect(&format!("The size of {} was not set", &b.name)),
+                ))
             }
         }
 
         for i in bindings.samplers.iter() {
-            bind_group_vec.push(wgpu::Binding {
-                binding: i.binding_number,
-                resource: wgpu::BindingResource::Sampler(
-                    &i.data
+            samplers.push((
+                i.binding_number,
+                Rc::clone(
+                    i.data
                         .as_ref()
                         .expect(&format!("The sampler for {} was not set", &i.name)),
                 ),
-            });
+            ));
         }
 
         for i in bindings.textures.iter() {
-            bind_group_vec.push(wgpu::Binding {
-                binding: i.binding_number,
-                resource: wgpu::BindingResource::TextureView(
-                    &i.data
+            textures.push((
+                i.binding_number,
+                Rc::clone(
+                    i.data
                         .as_ref()
                         .expect(&format!("The sampler for {} was not set", &i.name)),
                 ),
-            });
+            ));
         }
 
         BindingPreprocess {
@@ -775,6 +779,8 @@ impl<'a> BindingPreprocess<'a> {
             verticies,
             num_verts,
             bind_group_vec,
+            texture_vec: textures,
+            sampler_vec: samplers,
             //bgd,
         }
     }
@@ -784,15 +790,51 @@ pub fn graphics_run<'a>(
     program: &GraphicsProgram,
     mut rpass: wgpu::RenderPass<'a>,
     bind_group: &'a mut wgpu::BindGroup,
-    bind_preprocess: &'a BindingPreprocess<'a>,
+    bind_preprocess: &'a BindingPreprocess,
 ) -> wgpu::RenderPass<'a> {
     /* let mut encoder = program
-            .device
+                        .device
     .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None }); */
+
+    let mut bind_group_bindings = &mut bind_preprocess
+        .bind_group_vec
+        .iter()
+        .map(|(idx, buffer, len_range)| wgpu::Binding {
+            binding: *idx,
+            resource: wgpu::BindingResource::Buffer {
+                buffer,
+                range: len_range.clone(),
+            },
+        })
+        .collect::<Vec<wgpu::Binding>>();
+
+    bind_group_bindings.append(
+        &mut bind_preprocess
+            .sampler_vec
+            .iter()
+            .map(|(idx, sample)| wgpu::Binding {
+                binding: *idx,
+                resource: wgpu::BindingResource::Sampler(sample),
+            })
+            .collect::<Vec<wgpu::Binding>>(),
+    );
+
+    bind_group_bindings.append(
+        &mut bind_preprocess
+            .texture_vec
+            .iter()
+            .map(|(idx, texture)| wgpu::Binding {
+                binding: *idx,
+                resource: wgpu::BindingResource::TextureView(texture),
+            })
+            .collect::<Vec<wgpu::Binding>>(),
+    );
+
+    // todo append textures and samplers
 
     let bgd = &wgpu::BindGroupDescriptor {
         layout: &program.bind_group_layout,
-        bindings: bind_preprocess.bind_group_vec.as_slice(),
+        bindings: bind_group_bindings.as_slice(),
         label: None,
     };
 
@@ -852,7 +894,7 @@ pub fn graphics_run_indicies<'a>(
     program: &'a GraphicsProgram,
     pass: wgpu::RenderPass<'a>,
     bind_group: &'a mut wgpu::BindGroup,
-    bind_preprocess: &'a mut BindingPreprocess<'a>,
+    bind_preprocess: &'a mut BindingPreprocess,
     indicies: &Vec<u16>,
 ) -> wgpu::RenderPass<'a> {
     bind_preprocess.indicies = Some(Rc::new(
