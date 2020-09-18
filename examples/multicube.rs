@@ -12,8 +12,8 @@ pub use static_assertions::const_assert;
 pub use pipeline::wgpu_graphics_header;
 pub use pipeline::wgpu_graphics_header::{
     compile_buffer, default_bind_group, generate_swap_chain, setup_render_pass,
-    valid_fragment_shader, valid_vertex_shader, GraphicsBindings, GraphicsShader,
-    OutGraphicsBindings,
+    valid_fragment_shader, valid_vertex_shader, BindingPreprocess, GraphicsBindings,
+    GraphicsShader, OutGraphicsBindings,
 };
 
 pub use pipeline::shared;
@@ -137,6 +137,8 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                     let mut out_bindings2: OutGraphicsBindings = template_out_bindings.clone();
                     let mut bind_group2 = default_bind_group(&program);
 
+                    let mut bind_prerun = BindingPreprocess::default();
+                    let mut bind_prerun2 = BindingPreprocess::default();
                     let mut rpass = setup_render_pass(&program, &mut init_encoder, &frame);
 
                     let context = Context::new();
@@ -203,12 +205,15 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                         );
                                         {
                                             ready_to_run(BIND_CONTEXT_5);
+                                            bind_prerun = BindingPreprocess::bind(
+                                                &mut bindings,
+                                                &out_bindings,
+                                            );
                                             rpass = wgpu_graphics_header::graphics_run_indicies(
                                                 &program,
                                                 rpass,
                                                 &mut bind_group,
-                                                &mut bindings,
-                                                &out_bindings,
+                                                &mut bind_prerun,
                                                 &index_data,
                                             );
                                         }
@@ -217,7 +222,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                             }
                         }
                     }
-                    /* {
+                    {
                         const BIND_CONTEXT_1_1: BindingContext =
                             update_bind_context(&STARTING_BIND_CONTEXT, "a_position");
                         let context1 = bind!(
@@ -278,13 +283,18 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                             BIND_CONTEXT_5_1
                                         );
                                         {
+                                            debug!(bindings);
                                             ready_to_run(BIND_CONTEXT_5_1);
-                                            wgpu_graphics_header::graphics_run_indicies(
+                                            bind_prerun2 = BindingPreprocess::bind(
+                                                &mut bindings,
+                                                &out_bindings,
+                                            );
+                                            debug!(bind_prerun);
+                                            rpass = wgpu_graphics_header::graphics_run_indicies(
                                                 &program,
                                                 rpass,
                                                 &mut bind_group2,
-                                                &mut bindings2,
-                                                &out_bindings2,
+                                                &mut bind_prerun2,
                                                 &index_data,
                                             );
                                         }
@@ -292,9 +302,10 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                 }
                             }
                         }
-                    } */
+                    }
                 }
                 program.queue.submit(&[init_encoder.finish()]);
+                /* std::process::exit(0); */
             }
             // When the window closes we are done. Change the status
             Event::WindowEvent {
