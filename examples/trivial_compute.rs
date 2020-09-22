@@ -3,17 +3,11 @@
 #[macro_use]
 extern crate pipeline;
 
-// use for the shader! macro
-pub use pipeline::shared;
-pub use pipeline::wgpu_compute_header;
-
 pub use pipeline::wgpu_compute_header::{compile, read_uvec, run, ComputeShader};
 
 pub use pipeline::shared::{is_gl_builtin, Bindable, Context};
 
 pub use pipeline::context::{ready_to_run, update_bind_context, BindingContext};
-
-pub use static_assertions::const_assert;
 
 async fn execute_gpu() {
     // qualifiers
@@ -54,7 +48,7 @@ async fn execute_gpu() {
     {
         const BIND_CONTEXT_1: BindingContext =
             update_bind_context(&STARTING_BIND_CONTEXT, "indices2");
-        let context1 = bind_mutate!(
+        let context1 = bind!(
             program,
             bindings,
             out_bindings,
@@ -65,7 +59,7 @@ async fn execute_gpu() {
         );
         {
             const BIND_CONTEXT_2: BindingContext = update_bind_context(&BIND_CONTEXT_1, "indices");
-            let _ = bind_consume!(
+            let _ = bind_mutate!(
                 program,
                 bindings,
                 out_bindings,
@@ -81,7 +75,7 @@ async fn execute_gpu() {
                 println!("{:?}", read_uvec(&program, &result1, "indices").await);
             }
         }
-        /* {
+        {
             const BIND_CONTEXT_4: BindingContext = update_bind_context(&BIND_CONTEXT_1, "indices");
             let _ = bind_mutate!(
                 program,
@@ -97,7 +91,7 @@ async fn execute_gpu() {
                 let result1 = run(&program, &mut bindings, out_bindings);
                 println!("{:?}", read_uvec(&program, &result1, "indices").await);
             }
-        } */
+        }
     }
 }
 

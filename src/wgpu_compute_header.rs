@@ -27,9 +27,10 @@ impl OutComputeBindings {
 
             new_binds[bind_pos].data = std::mem::replace(&mut i.data, None);
             new_binds[bind_pos].length = std::mem::replace(&mut i.length, None);
-
         }
-        OutComputeBindings{bindings: new_binds}
+        OutComputeBindings {
+            bindings: new_binds,
+        }
     }
 }
 
@@ -311,7 +312,6 @@ pub fn run(
             .find(|i| i.qual.contains(&QUALIFIER::LOOP));
     }
 
-
     let length = if bind.is_none() {
         1
     } else {
@@ -510,6 +510,6 @@ pub struct ComputeShader {
 macro_rules! compute_shader {
         ($($body:tt)*) => {{
             const S : (&[pipeline::shared::PARAMETER], &'static str, pipeline::context::BindingContext) = shader!($($body)*);
-            (wgpu_compute_header::ComputeShader{params:S.0, body:S.1}, S.2)
+            (pipeline::wgpu_compute_header::ComputeShader{params:S.0, body:S.1}, S.2)
         }};
     }

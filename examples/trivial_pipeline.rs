@@ -1,14 +1,12 @@
+#![feature(const_panic)]
+
 #[macro_use]
 extern crate pipeline;
 
-// use for the shader! macro
-pub use pipeline::shared;
-pub use pipeline::wgpu_compute_header;
-
-pub use pipeline::shared::{bind_vec, can_pipe, is_gl_builtin, ready_to_run, update_bind_context};
+pub use pipeline::shared::{can_pipe, is_gl_builtin, Bindable, Context};
 pub use pipeline::wgpu_compute_header::{compile, pipe, read_uvec, run, ComputeShader};
 
-pub use static_assertions::const_assert;
+pub use pipeline::context::{ready_to_run, update_bind_context, BindingContext};
 
 async fn execute_gpu() {
     // qualifiers
@@ -22,7 +20,7 @@ async fn execute_gpu() {
     // loop: one or more of these loop annotations are required per program. Atm, the values bound is assumed to be of equal length and this gives the number of iterations(gl_GlobalInvocationID.x)
     //      the size of any out buffers that need to be created
 
-    const ADD_ONE: (ComputeShader, [&str; 32], [&str; 32]) = compute_shader! {
+    const ADD_ONE: (ComputeShader, BindingContext) = compute_shader! {
         [[buffer loop in] uint[]] add_one_in;
         // todo
         // ->
@@ -38,7 +36,7 @@ async fn execute_gpu() {
         }}
     };
 
-    const ADD_TWO: (ComputeShader, [&str; 32], [&str; 32]) = compute_shader! {
+    const ADD_TWO: (ComputeShader, BindingContext) = compute_shader! {
         [[buffer loop in] uint[]] add_two_in;
         [[buffer out] uint[]] add_two_result;
         {{
@@ -51,17 +49,17 @@ async fn execute_gpu() {
     };
 
     const S1: ComputeShader = ADD_ONE.0;
-    const STARTING_BIND_CONTEXT: [&str; 32] = ADD_ONE.1;
-    const ENDING_BIND_CONTEXT: [&str; 32] = ADD_ONE.2;
+    const STARTING_BIND_CONTEXT: BindingContext = ADD_ONE.1;
     let (program1, mut bindings1, mut out_bindings1) = compile(&S1).await;
 
     const S2: ComputeShader = ADD_TWO.0;
-    const NEXT_STARTING_CONTEXT: [&str; 32] = ADD_TWO.1;
+    const NEXT_STARTING_CONTEXT: BindingContext = ADD_TWO.1;
     let (program2, bindings2, out_bindings2) = compile(&S2).await;
 
     let indices: Vec<u32> = vec![1, 2, 3, 4];
 
-    const BIND_CONTEXT_1: [&str; 32] = update_bind_context(&STARTING_BIND_CONTEXT, "add_one_in");
+    const BIND_CONTEXT_1: BindingContext =
+        update_bind_context(&STARTING_BIND_CONTEXT, "add_one_in");
     bind_vec(
         &program1,
         &mut bindings1,

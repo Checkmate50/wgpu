@@ -1,14 +1,12 @@
+#![feature(const_panic)]
+
 #[macro_use]
 extern crate pipeline;
 
-// use for the shader! macro
-pub use pipeline::shared;
-pub use pipeline::wgpu_compute_header;
-
-pub use pipeline::shared::{bind_vec, is_gl_builtin, ready_to_run, update_bind_context};
+pub use pipeline::shared::{is_gl_builtin, Bindable, Context};
 pub use pipeline::wgpu_compute_header::{compile, read_uvec, run, ComputeShader};
 
-pub use static_assertions::const_assert;
+pub use pipeline::context::{ready_to_run, update_bind_context, BindingContext};
 
 async fn execute_gpu() {
     // qualifiers
@@ -22,7 +20,7 @@ async fn execute_gpu() {
     // loop: one or more of these loop annotations are required per program. Atm, the values bound is assumed to be of equal length and this gives the number of iterations(gl_GlobalInvocationID.x)
     //      the size of any out buffers that need to be created
 
-    const TRIVIAL: (ComputeShader, [&str; 32], [&str; 32]) = compute_shader! {
+    const TRIVIAL: (ComputeShader, BindingContext) = compute_shader! {
         [[buffer loop in out] uint[]] indices;
         //[[buffer out] uint[]] result;
         //[... uint] xindex;
@@ -49,27 +47,27 @@ async fn execute_gpu() {
     };
 
     const S: ComputeShader = TRIVIAL.0;
-    const STARTING_BIND_CONTEXT: [&str; 32] = TRIVIAL.1;
+    const STARTING_BIND_CONTEXT: BindingContext = TRIVIAL.1;
 
     let (program, mut bindings, mut out_bindings) = compile(&S).await;
 
     let indices: Vec<u32> = vec![1, 2, 3, 4];
 
-    /*     const BIND_CONTEXT_1: ([&str; 32], bool) = new_bind_scope(&STARTING_BIND_CONTEXT, "indices");
-    const_assert!(BIND_CONTEXT_1.1); */
-
+    let context = Context::new();
     {
-        const BIND_CONTEXT_1: [&str; 32] = update_bind_context(&STARTING_BIND_CONTEXT, "indices");
-        bind_vec(
-            &program,
-            &mut bindings,
-            &mut out_bindings,
-            &indices,
-            "indices".to_string(),
+        const BIND_CONTEXT_1: BindingContext =
+            update_bind_context(&STARTING_BIND_CONTEXT, "indices");
+        let context1 = bind_mutate!(
+            program,
+            bindings,
+            out_bindings,
+            "indices",
+            indices,
+            context,
+            BIND_CONTEXT_1
         );
-
         {
-            ready_to_run(BIND_CONTEXT_1);
+            const _: () = ready_to_run(BIND_CONTEXT_1);
             let result = run(&program, &mut bindings, out_bindings);
             println!("{:?}", read_uvec(&program, &result, "indices").await);
         }

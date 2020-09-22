@@ -177,7 +177,9 @@ pub trait Bindable {
 macro_rules! bind {
     ($program:tt, $bindings:tt, $out_bindings:tt, $name:tt, $data:tt, $context:tt, $bind_context:tt) => {{
         // const?
-        const _ : () = if $bind_context.has_out_bound {panic!("You need to use bind_mutate here")};
+        const _: () = if $bind_context.has_out_bound {
+            panic!("You need to use bind_mutate here")
+        };
         Bindable::bind(
             &$data,
             &$program,
