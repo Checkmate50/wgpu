@@ -35,6 +35,37 @@ async fn execute_gpu() {
         }}
     };
 
+    struct ShaderContext_indices_indices2 {}
+    struct ShaderContext_indices2 {}
+    struct ShaderContext_indices {}
+    struct ShaderContext {}
+
+    impl ShaderContext_indices_indices2 {
+        pub fn bind_indices(&self) -> ShaderContext_indices2 {
+            ShaderContext_indices2 {}
+        }
+        pub fn bind_indices2(&self) -> ShaderContext_indices {
+            ShaderContext_indices {}
+        }
+    }
+
+    impl ShaderContext_indices2 {
+        pub fn bind_indices2(self) -> ShaderContext {
+            ShaderContext {}
+        }
+    }
+
+    impl ShaderContext_indices {
+        pub fn bind_indices(&self) -> ShaderContext {
+            ShaderContext {}
+        }
+    }
+
+    impl ShaderContext {
+        pub fn run(self) {}
+        // Do compute shader context's have a pipe function?
+    }
+
     const S: ComputeShader = TRIVIAL.0;
     const STARTING_BIND_CONTEXT: BindingContext = TRIVIAL.1;
 
