@@ -97,22 +97,22 @@ fn bind_var2<R: AbstractBind>(_: &(R, Unbound)) -> (R, Bound) {
 } */
 
 fn main() {
-    let s = init();
+    let s = Context::new();
     {
-        let y = bind_var2(&s);
+        let y = (&s).bind_var2();
         {
-            let t = bind_var1_mutate(&y);
+            let t = y.bind_var1();
             {
-                run(t);
+                t.run();
             }
         }
-        /*         let t = bind_var1_mutate(&s);
+        let t = s.bind_var1();
         {
-            let y = bind_var2_consume(t);
+            let y = t.bind_var2();
             {
-                run(y);
+                y.run();
             }
-        } */
+        }
     }
 }
 

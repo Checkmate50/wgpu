@@ -63,7 +63,7 @@ impl name<T1: Unbound, T2: AbstractBind, T3: AbstractBind, T4:AbstractBind> {
 impl name<T1: Unbound, T2: AbstractBind, T3: Bound> {
     fn bind_field1_consume(self) -> name<Bound, T2, T3>
 }
- */
+*/
 /* implementation 1
 fn create_struct_name(mut set_of_params: Vec<Ident>) -> Ident {
     set_of_params.sort();
@@ -155,8 +155,7 @@ pub fn my_macro(input: TokenStream) -> TokenStream {
     TokenStream::from(collapsed_expanded)
 } */
 
-
-// Implementation 2
+/* // Implementation 2
 #[proc_macro]
 pub fn generic_bindings(input: TokenStream) -> TokenStream {
     // Parse the input tokens into a syntax tree
@@ -259,6 +258,148 @@ pub fn generic_bindings(input: TokenStream) -> TokenStream {
         all_expanded.push(quote! {
             fn #bind_consume<#(#variables : AbstractBind),*>(_: (#(#type_params),*, MutContext)) -> (#(#result_params),*, MutContext) {
                 (#(#result_params::new()),*, MutContext::new())
+            }
+        });
+    }
+
+    let mut collapsed_expanded = quote! {};
+    for i in all_expanded.into_iter() {
+        collapsed_expanded = quote! {
+            #collapsed_expanded
+            #i
+        }
+    }
+
+    println!("{}", collapsed_expanded);
+
+    // Hand the output tokens back to the compiler
+    TokenStream::from(collapsed_expanded)
+} */
+
+// Implementation 3
+#[proc_macro]
+pub fn generic_bindings(input: TokenStream) -> TokenStream {
+    // Parse the input tokens into a syntax tree
+    let input = parse_macro_input!(input as Parameters);
+
+    let input_vec: Vec<Ident> = input.params.into_iter().collect();
+    let out_vec: Vec<Ident> = input.outs.into_iter().collect();
+
+    let mut all_expanded = Vec::new();
+
+    all_expanded.push(quote! {
+        trait AbstractBind {
+            fn new() -> Self;
+        }
+
+        struct Bound {}
+
+        struct Unbound {}
+
+        impl AbstractBind for Bound {
+            fn new() -> Self {
+                Bound {}
+            }
+        }
+
+        impl AbstractBind for Unbound{
+            fn new() -> Self {
+                Unbound {}
+            }
+        }
+    });
+
+    let variables: Vec<Ident> = (1..input_vec.len() + 1)
+        .into_iter()
+        .map(|x| format_ident!("T{}", x))
+        .collect();
+    let fields: Vec<Ident> = (1..input_vec.len() + 1)
+        .into_iter()
+        .map(|x| format_ident!("field{}", x))
+        .collect();
+    let init: Vec<Ident> = iter::repeat(format_ident!("Unbound"))
+        .take(input_vec.len())
+        .collect();
+    let run: Vec<Ident> = iter::repeat(format_ident!("Bound"))
+        .take(input_vec.len())
+        .collect();
+    all_expanded.push(quote! {
+        struct Context<#(#variables: AbstractBind),*> {
+            #(#fields: #variables,)*
+        }
+        impl Context<#(#init),*> {
+            fn new() -> Self {
+                Context {
+                    #(#fields: Unbound {},)*
+                }
+            }
+        }
+        impl Context<#(#run),*> {
+            fn run(self) {
+                println!("hello");
+            }
+        }
+    });
+
+    let bound = format_ident!("Bound");
+    let unbound = format_ident!("Unbound");
+
+    for i in 0..input_vec.len() {
+        let trait_name = format_ident!("BindField{}", i + 1);
+        let bind_name = format_ident!("bind_{}", input_vec[i]);
+        let mut type_params = variables.clone();
+        type_params.remove(i);
+        type_params.insert(i, bound.clone());
+
+        let mut trait_params = variables.clone();
+        trait_params.remove(i);
+        let mut impl_params = variables.clone();
+        impl_params.remove(i);
+        impl_params.insert(i, unbound.clone());
+
+
+        // A copy of the input vec with the current param being bound removed so that the names match up with trait_params.
+        let mut bind_names = input_vec.clone();
+        bind_names.remove(i);
+
+        println!("bind_names {:?}", bind_names);
+        println!("out_vec {:?}", out_vec);
+
+        // For the first, restricted implementation
+        // Only have T_? for parameters that are not required to be unbound
+        let restricted_abstract : Vec<syn::Ident> = trait_params.clone().into_iter().enumerate()
+                .filter(|&(x, _)| !out_vec.contains(&bind_names[x]) )
+                .map(|(_, e)| e).collect();
+
+        println!("restricted_abstract {:?}", restricted_abstract);
+        // Make sure  the above are unbound
+        let restricted_trait : Vec<syn::Ident> = trait_params.clone().into_iter().enumerate()
+                .map(|(x, e)| if out_vec.contains(&bind_names[x]) {unbound.clone()} else {e}).collect();
+
+        let mut restricted_impl = restricted_trait.clone();
+        restricted_impl.insert(i, unbound.clone());
+        let mut restricted_type= restricted_trait.clone();
+        restricted_type.insert(i, bound.clone());
+
+        all_expanded.push(quote!{
+            trait #trait_name<#(#trait_params: AbstractBind),*>{
+                fn #bind_name(self) -> Context<#(#type_params),*>;
+            }
+
+            impl<#(#restricted_abstract: AbstractBind),*> #trait_name<#(#restricted_trait),*> for &Context<#(#restricted_impl),*> {
+                fn #bind_name(self) -> Context<#(#restricted_type),*> {
+                    Context {
+                        #(#fields : #restricted_type::new()),*
+                    }
+                }
+            }
+
+            impl<#(#trait_params: AbstractBind),*> #trait_name<#(#trait_params),*> for Context<#(#impl_params),*> {
+                fn #bind_name(self) -> Context<#(#type_params),*>{
+                    Context {
+                        #(#fields : #type_params::new()),*
+                    }
+                }
             }
         });
     }
