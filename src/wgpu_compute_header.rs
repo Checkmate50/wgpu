@@ -5,9 +5,10 @@ use std::collections::HashMap;
 use std::convert::TryInto;
 
 use crate::shared::{
-    check_gl_builtin_type, compile_shader, new_bindings, process_body, Bindings, DefaultBinding,
-    OutProgramBindings, Program, ProgramBindings, PARAMETER, QUALIFIER,
+    check_gl_builtin_type, compile_shader, process_body, Program, PARAMETER, QUALIFIER,
 };
+
+use crate::bind::{new_bindings, Bindings, DefaultBinding, OutProgramBindings, ProgramBindings};
 
 #[derive(Debug)]
 pub struct ComputeBindings {
@@ -43,10 +44,10 @@ impl Bindings for ComputeBindings {
 }
 
 impl ProgramBindings for ComputeBindings {
-    fn getBindings(&mut self) -> &mut Vec<DefaultBinding> {
+    fn get_bindings(&mut self) -> &mut Vec<DefaultBinding> {
         &mut self.bindings
     }
-    fn indexBinding(&mut self, index: usize) -> &mut DefaultBinding {
+    fn index_binding(&mut self, index: usize) -> &mut DefaultBinding {
         &mut self.bindings[index]
     }
 }
@@ -60,10 +61,10 @@ impl Bindings for OutComputeBindings {
 }
 
 impl OutProgramBindings for OutComputeBindings {
-    fn getBindings(&mut self) -> &mut Vec<DefaultBinding> {
+    fn get_bindings(&mut self) -> &mut Vec<DefaultBinding> {
         &mut self.bindings
     }
-    fn indexBinding(&mut self, index: usize) -> &mut DefaultBinding {
+    fn index_binding(&mut self, index: usize) -> &mut DefaultBinding {
         &mut self.bindings[index]
     }
 }
@@ -312,10 +313,10 @@ pub fn run(
             .find(|i| i.qual.contains(&QUALIFIER::LOOP));
     }
 
-    let length = if bind.is_none() {
-        1
+    let length = if let Some(b) = bind {
+        b.length.unwrap()
     } else {
-        bind.unwrap().length.unwrap()
+        1
     };
 
     for i in 0..(out_bindings.bindings.len()) {
@@ -340,19 +341,19 @@ pub fn run(
 
     {
         for i in 0..(buffer_map.len()) {
-            let b = buffer_map.get(&(i as u32)).expect(&format!(
-                "I assumed all bindings would be buffers but I guess that has been invalidated"
-            ));
+            let b = buffer_map.get(&(i as u32)).expect(
+                "I assumed all bindings would be buffers but I guess that has been invalidated",
+            );
             empty_vec.push(wgpu::Binding {
                 binding: b.binding_number,
                 resource: wgpu::BindingResource::Buffer {
                     buffer: &b
                         .data
                         .as_ref()
-                        .expect(&format!("The binding of {} was not set", &b.name)),
+                        .unwrap_or_else(|| panic!("The binding of {} was not set", &b.name)),
                     range: 0..b
                         .length
-                        .expect(&format!("The size of {} was not set", &b.name)),
+                        .unwrap_or_else(|| panic!("The size of {} was not set", &b.name)),
                 },
             });
         }
@@ -509,7 +510,7 @@ pub struct ComputeShader {
 #[macro_export]
 macro_rules! compute_shader {
         ($($body:tt)*) => {{
-            const S : (&[pipeline::shared::PARAMETER], &'static str, pipeline::context::BindingContext) = shader!($($body)*);
-            (pipeline::wgpu_compute_header::ComputeShader{params:S.0, body:S.1}, S.2)
+            const S : (&[pipeline::shared::PARAMETER], &'static str) = shader!($($body)*);
+            (pipeline::wgpu_compute_header::ComputeShader{params:S.0, body:S.1})
         }};
     }

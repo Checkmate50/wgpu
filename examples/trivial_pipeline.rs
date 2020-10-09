@@ -1,12 +1,9 @@
-#![feature(const_panic)]
-
 #[macro_use]
 extern crate pipeline;
 
-pub use pipeline::shared::{can_pipe, is_gl_builtin, Bindable, Context};
 pub use pipeline::wgpu_compute_header::{compile, pipe, read_uvec, run, ComputeShader};
 
-pub use pipeline::context::{ready_to_run, update_bind_context, BindingContext};
+pub use wgpu_macros::{generic_bindings, init};
 
 async fn execute_gpu() {
     // qualifiers
@@ -20,11 +17,10 @@ async fn execute_gpu() {
     // loop: one or more of these loop annotations are required per program. Atm, the values bound is assumed to be of equal length and this gives the number of iterations(gl_GlobalInvocationID.x)
     //      the size of any out buffers that need to be created
 
-    const ADD_ONE: (ComputeShader, BindingContext) = compute_shader! {
+    init!();
+
+    const ADD_ONE: ComputeShader = compute_shader! {
         [[buffer loop in] uint[]] add_one_in;
-        // todo
-        // ->
-        // [[varying in] uint] add_one_int;
         [[buffer out] uint[]] add_two_in;
         //unit ->
         {{
@@ -35,8 +31,9 @@ async fn execute_gpu() {
             }
         }}
     };
+    generic_bindings! {context = add_one_in; add_two_in}
 
-    const ADD_TWO: (ComputeShader, BindingContext) = compute_shader! {
+    const ADD_TWO: ComputeShader = compute_shader! {
         [[buffer loop in] uint[]] add_two_in;
         [[buffer out] uint[]] add_two_result;
         {{
@@ -47,38 +44,32 @@ async fn execute_gpu() {
             }
         }}
     };
+    generic_bindings! {next_context = add_two_in; add_two_result}
 
-    const S1: ComputeShader = ADD_ONE.0;
-    const STARTING_BIND_CONTEXT: BindingContext = ADD_ONE.1;
-    let (program1, mut bindings1, mut out_bindings1) = compile(&S1).await;
+    let (program1, mut bindings1, mut out_bindings1) = compile(&ADD_ONE).await;
 
-    const S2: ComputeShader = ADD_TWO.0;
-    const NEXT_STARTING_CONTEXT: BindingContext = ADD_TWO.1;
-    let (program2, bindings2, out_bindings2) = compile(&S2).await;
+    let (program2, bindings2, out_bindings2) = compile(&ADD_TWO).await;
 
     let indices: Vec<u32> = vec![1, 2, 3, 4];
 
-    const BIND_CONTEXT_1: BindingContext =
-        update_bind_context(&STARTING_BIND_CONTEXT, "add_one_in");
-    bind_vec(
-        &program1,
-        &mut bindings1,
-        &mut out_bindings1,
-        &indices,
-        "add_one_in".to_string(),
-    );
     {
-        ready_to_run(BIND_CONTEXT_1);
-        let result = run(&program1, &mut bindings1, out_bindings1);
-        println!("{:?}", read_uvec(&program1, &result, "add_two_in").await);
+        let context1 = context.bind_add_one_in(&indices,
+            &program1,
+            &mut bindings1,
+            &mut out_bindings1,);
+        {
+            context1.runable();
+            let result = run(&program1, &mut bindings1, out_bindings1);
+            println!("{:?}", read_uvec(&program1, &result, "add_two_in").await);
 
-        static_assertions::const_assert!(can_pipe(&ENDING_BIND_CONTEXT, &NEXT_STARTING_CONTEXT));
-        let pipe_result = pipe(&program2, bindings2, out_bindings2, result);
-        /*         println!("{:?}", read_vec(&program2, &pipe_result, "add_two_in").await); */
-        println!(
-            "{:?}",
-            read_uvec(&program2, &pipe_result, "add_two_result").await
-        );
+            context1.can_pipe(&next_context);
+            let pipe_result = pipe(&program2, bindings2, out_bindings2, result);
+            /*         println!("{:?}", read_vec(&program2, &pipe_result, "add_two_in").await); */
+            println!(
+                "{:?}",
+                read_uvec(&program2, &pipe_result, "add_two_result").await
+            );
+        }
     }
 }
 

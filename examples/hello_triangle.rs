@@ -7,24 +7,22 @@ use winit::{
     window::Window,
 };
 
-pub use static_assertions::const_assert;
-
-pub use pipeline::wgpu_graphics_header;
 pub use pipeline::wgpu_graphics_header::{
-    compile_buffer, default_bind_group, generate_swap_chain, setup_render_pass,
+    compile_buffer, default_bind_group, generate_swap_chain, graphics_run, setup_render_pass,
     valid_fragment_shader, valid_vertex_shader, GraphicsBindings, GraphicsShader,
     OutGraphicsBindings,
 };
 
-pub use pipeline::shared;
-pub use pipeline::shared::{
-    bind_fvec, bind_vec3, is_gl_builtin, ready_to_run, update_bind_context, Bindings,
-};
+pub use pipeline::bind::Bindings;
+
+pub use wgpu_macros::{generic_bindings, init};
 
 async fn run(event_loop: EventLoop<()>, window: Window) {
     let size = window.inner_size();
 
-    const VERTEXT: (GraphicsShader, [&str; 32], [&str; 32]) = graphics_shader! {
+    init!();
+
+    const VERTEXT: GraphicsShader = graphics_shader! {
         [[vertex in] vec3] a_position;
         [[vertex in] float] in_brightness;
         [[out] vec3] posColor;
@@ -39,7 +37,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         }}
     };
 
-    const FRAGMENT: (GraphicsShader, [&str; 32], [&str; 32]) = graphics_shader! {
+    const FRAGMENT: GraphicsShader = graphics_shader! {
         [[in] vec3] posColor;
         [[in] float] brightness;
         [[out] vec4] color;
@@ -50,9 +48,10 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         }}
     };
 
-    const S_V: GraphicsShader = VERTEXT.0;
-    const STARTING_BIND_CONTEXT: [&str; 32] = VERTEXT.1;
-    const S_F: GraphicsShader = FRAGMENT.0;
+    generic_bindings! {context = a_position, in_brightness; color, gl_Position}
+
+    const S_V: GraphicsShader = VERTEXT;
+    const S_F: GraphicsShader = FRAGMENT;
 
     let (program, template_bindings, template_out_bindings, _) =
         compile_valid_graphics_program!(window, S_V, S_F);
@@ -80,34 +79,32 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 
                 let mut bindings: GraphicsBindings = template_bindings.clone();
                 let mut out_bindings: OutGraphicsBindings = template_out_bindings.clone();
-                const BIND_CONTEXT_1: [&str; 32] =
-                    update_bind_context(&STARTING_BIND_CONTEXT, "in_brightness");
-                bind_fvec(
-                    &program,
-                    &mut bindings,
-                    &mut out_bindings,
-                    &brightness,
-                    "in_brightness".to_string(),
-                );
+
                 {
-                    const BIND_CONTEXT_2: [&str; 32] =
-                        update_bind_context(&BIND_CONTEXT_1, "a_position");
-                    bind_vec3(
+                    let context1 = (&context).bind_in_brightness(
+                        &brightness,
                         &program,
                         &mut bindings,
                         &mut out_bindings,
-                        &positions,
-                        "a_position".to_string(),
                     );
+
                     {
-                        ready_to_run(BIND_CONTEXT_2);
-                        wgpu_graphics_header::graphics_run(
+                        let context2 = context1.bind_a_position(
+                            &positions,
                             &program,
-                            rpass,
-                            &mut bind_group,
-                            &bindings,
-                            &out_bindings,
+                            &mut bindings,
+                            &mut out_bindings,
                         );
+                        {
+                            context2.runable();
+                            graphics_run(
+                                &program,
+                                rpass,
+                                &mut bind_group,
+                                &bindings,
+                                &out_bindings,
+                            );
+                        }
                     }
                 }
                 program.queue.submit(&[init_encoder.finish()]);

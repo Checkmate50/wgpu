@@ -6,5 +6,6 @@
         "wgpu",
         "winit",
         "zerocopy"
-    ]
+    ],
+    "rust-analyzer.inlayHints.enable": false
 }

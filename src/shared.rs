@@ -3,7 +3,6 @@ use regex::Regex;
 use std::fmt;
 use std::io::Read;
 use wgpu::ShaderModule;
-use zerocopy::AsBytes as _;
 
 // Remove spaces between tokens that should be one token
 // Strip off the starting and ending { }
@@ -32,405 +31,9 @@ pub fn compile_shader(contents: String, shader: ShaderType, device: &wgpu::Devic
     device.create_shader_module(&wgpu::read_spirv(std::io::Cursor::new(&vs[..])).unwrap())
 }
 
-#[derive(Debug)]
-pub struct DefaultBinding {
-    pub binding_number: u32,
-    pub name: String,
-    pub data: Option<wgpu::Buffer>,
-    pub length: Option<u64>,
-    pub gtype: GLSLTYPE,
-    pub qual: Vec<QUALIFIER>,
-}
-
-pub trait ProgramBindings {
-    fn getBindings(&mut self) -> &mut Vec<DefaultBinding>;
-    fn indexBinding(&mut self, index: usize) -> &mut DefaultBinding;
-}
-
-pub trait OutProgramBindings {
-    fn getBindings(&mut self) -> &mut Vec<DefaultBinding>;
-    fn indexBinding(&mut self, index: usize) -> &mut DefaultBinding;
-}
-
-pub trait Bindings {
-    fn clone(&self) -> Self;
-}
-
-pub fn new_bindings(bindings: &Vec<DefaultBinding>) -> Vec<DefaultBinding> {
-    let mut new = Vec::new();
-
-    for i in bindings.iter() {
-        new.push(DefaultBinding {
-            name: i.name.to_string(),
-            binding_number: i.binding_number,
-            qual: i.qual.clone(),
-            gtype: i.gtype.clone(),
-            data: None,
-            length: None,
-        })
-    }
-    new
-}
-
 pub trait Program {
     fn get_device(&self) -> &wgpu::Device;
 }
-
-fn bind_helper<R: ProgramBindings, T: OutProgramBindings>(
-    program: &dyn Program,
-    bindings: &mut R,
-    out_bindings: &mut T,
-    data: &[u8],
-    length: u64,
-    acceptable_types: Vec<GLSLTYPE>,
-    name: String,
-) {
-    let mut binding = match bindings.getBindings().iter().position(|x| x.name == name) {
-        Some(x) => bindings.indexBinding(x),
-        None => {
-            let x = out_bindings
-                .getBindings()
-                .iter()
-                .position(|x| x.name == name)
-                .expect(&format!("We couldn't find the binding for {}", name));
-            out_bindings.indexBinding(x)
-        }
-    };
-
-    if !acceptable_types.contains(&binding.gtype) {
-        println!("{:?}", &binding.name);
-        println!("{:?}", acceptable_types);
-        panic!(
-            "The type of the value you provided is not what was expected, {:?}",
-            &binding.gtype
-        );
-    }
-
-    let buffer = program.get_device().create_buffer_with_data(
-        data,
-        if binding.qual.contains(&QUALIFIER::VERTEX) {
-            wgpu::BufferUsage::VERTEX | wgpu::BufferUsage::COPY_DST
-        } else if binding.qual.contains(&QUALIFIER::UNIFORM) {
-            wgpu::BufferUsage::UNIFORM | wgpu::BufferUsage::COPY_DST
-        } else {
-            wgpu::BufferUsage::MAP_READ
-                | wgpu::BufferUsage::COPY_DST
-                | wgpu::BufferUsage::STORAGE
-                | wgpu::BufferUsage::COPY_SRC
-                | wgpu::BufferUsage::VERTEX
-        },
-    );
-
-    binding.data = Some(buffer);
-    binding.length = Some(length);
-}
-
-// TODO make a wiki page that describes what this is and talk about the context stuff
-//
-// A Context is a reusable set of bindings.
-// A MutContext is a single use set of bindings.
-pub struct Context {}
-pub struct MutContext {}
-
-impl Context {
-    pub fn new() -> Context {
-        Context {}
-    }
-}
-
-impl MutContext {
-    fn new() -> MutContext {
-        MutContext {}
-    }
-}
-
-pub trait Bindable {
-    fn bind<R: ProgramBindings, T: OutProgramBindings>(
-        &self,
-        program: &dyn Program,
-        bindings: &mut R,
-        out_bindings: &mut T,
-        name: String,
-        context: &Context,
-    ) -> Context;
-
-    fn bind_mutate<R: ProgramBindings, T: OutProgramBindings>(
-        &self,
-        program: &dyn Program,
-        bindings: &mut R,
-        out_bindings: &mut T,
-        name: String,
-        context: &Context,
-    ) -> MutContext;
-
-    fn bind_consume<R: ProgramBindings, T: OutProgramBindings>(
-        &self,
-        program: &dyn Program,
-        bindings: &mut R,
-        out_bindings: &mut T,
-        name: String,
-        context: MutContext,
-    ) -> MutContext;
-}
-
-#[macro_export]
-macro_rules! bind {
-    ($program:tt, $bindings:tt, $out_bindings:tt, $name:tt, $data:tt, $context:tt, $bind_context:tt) => {{
-        // const?
-        const _: () = if $bind_context.has_out_bound {
-            panic!("You need to use bind_mutate here")
-        };
-        Bindable::bind(
-            &$data,
-            &$program,
-            &mut $bindings,
-            &mut $out_bindings,
-            $name.to_string(),
-            &$context,
-        )
-    }};
-}
-
-#[macro_export]
-macro_rules! bind_mutate {
-    ($program:tt, $bindings:tt, $out_bindings:tt, $name:tt, $data:tt, $context:tt, $bind_context:tt) => {{
-        if !$bind_context.has_out_bound {
-            panic!("You should be using bind here")
-        }
-        Bindable::bind_mutate(
-            &$data,
-            &$program,
-            &mut $bindings,
-            &mut $out_bindings,
-            $name.to_string(),
-            &$context,
-        )
-    }};
-}
-
-#[macro_export]
-macro_rules! bind_consume {
-    ($program:tt, $bindings:tt, $out_bindings:tt, $name:tt, $data:tt, $context:tt, $bind_context:tt) => {{
-        Bindable::bind_consume(
-            &$data,
-            &$program,
-            &mut $bindings,
-            &mut $out_bindings,
-            $name.to_string(),
-            $context,
-        )
-    }};
-}
-
-impl Bindable for Vec<u32> {
-    fn bind<R: ProgramBindings, T: OutProgramBindings>(
-        &self,
-        program: &dyn Program,
-        bindings: &mut R,
-        out_bindings: &mut T,
-        name: String,
-        _context: &Context,
-    ) -> Context {
-        bind_helper(
-            program,
-            bindings,
-            out_bindings,
-            self.as_slice().as_bytes(),
-            self.len() as u64,
-            vec![GLSLTYPE::ArrayInt, GLSLTYPE::ArrayUint],
-            name,
-        );
-        Context::new()
-    }
-
-    fn bind_mutate<R: ProgramBindings, T: OutProgramBindings>(
-        &self,
-        program: &dyn Program,
-        bindings: &mut R,
-        out_bindings: &mut T,
-        name: String,
-        _context: &Context,
-    ) -> MutContext {
-        bind_helper(
-            program,
-            bindings,
-            out_bindings,
-            self.as_slice().as_bytes(),
-            self.len() as u64,
-            vec![GLSLTYPE::ArrayInt, GLSLTYPE::ArrayUint],
-            name,
-        );
-        MutContext::new()
-    }
-
-    fn bind_consume<R: ProgramBindings, T: OutProgramBindings>(
-        &self,
-        program: &dyn Program,
-        bindings: &mut R,
-        out_bindings: &mut T,
-        name: String,
-        context: MutContext,
-    ) -> MutContext {
-        bind_helper(
-            program,
-            bindings,
-            out_bindings,
-            self.as_slice().as_bytes(),
-            self.len() as u64,
-            vec![GLSLTYPE::ArrayInt, GLSLTYPE::ArrayUint],
-            name,
-        );
-        context
-    }
-}
-
-/* impl Bindable for Vec<f32> {
-    fn bind(
-        &self,
-        program: &dyn Program,
-        bindings: &mut dyn ProgramBindings,
-        out_bindings: &mut dyn OutProgramBindings,
-        name: String,
-    ) {
-        bind_helper(
-            program,
-            bindings,
-            out_bindings,
-            self.as_slice().as_bytes(),
-            self.len() as u64,
-            vec![GLSLTYPE::Float, GLSLTYPE::ArrayFloat],
-            name,
-        )
-    }
-    fn bind_consume(
-        &self,
-        program: &dyn Program,
-        bindings: dyn ProgramBindings,
-        out_bindings: dyn OutProgramBindings,
-        name: String,
-    ) -> (&mut dyn ProgramBindings, &mut dyn OutProgramBindings) {
-        self.bind(program, &mut bindings, &mut out_bindings, name);
-        (bindings, out_bindings)
-    }
-} */
-
-/* pub fn bind_vec2(
-    program: &dyn Program,
-    bindings: &mut dyn ProgramBindings,
-    out_bindings: &mut dyn OutProgramBindings,
-    vecs: &Vec<[f32; 2]>,
-    name: String,
-) {
-    let numbers: Vec<f32> = vecs
-        .clone()
-        .into_iter()
-        .map(|x| x.to_vec())
-        .flatten()
-        .collect();
-    bind_helper(
-        program,
-        bindings,
-        out_bindings,
-        numbers.as_slice().as_bytes(),
-        vecs.len() as u64,
-        if numbers.len() == 2 {
-            vec![GLSLTYPE::Vec2, GLSLTYPE::ArrayVec2]
-        } else {
-            //todo only ArrayVec
-            vec![GLSLTYPE::Vec2, GLSLTYPE::ArrayVec2]
-        },
-        name,
-    )
-} */
-
-/* pub fn bind_fvec2(
-    program: &dyn Program,
-    bindings: &mut dyn ProgramBindings,
-    out_bindings: &mut dyn OutProgramBindings,
-    numbers: &Vec<f32>,
-    name: String,
-) {
-    if numbers.len() % 2 != 0 {
-        panic!(
-            "Your trying to bind to vec to but your not giving a vector that can be split into 2's"
-        )
-    }
-    bind_helper(
-        program,
-        bindings,
-        out_bindings,
-        numbers.as_slice().as_bytes(),
-        (numbers.len() / 2) as u64,
-        if numbers.len() == 2 {
-            vec![GLSLTYPE::Vec2, GLSLTYPE::ArrayVec2]
-        } else {
-            //todo only ArrayVec
-            vec![GLSLTYPE::Vec2, GLSLTYPE::ArrayVec2]
-        },
-        name,
-    )
-} */
-
-/* pub fn bind_vec3(
-    program: &dyn Program,
-    bindings: &mut dyn ProgramBindings,
-    out_bindings: &mut dyn OutProgramBindings,
-    vecs: &Vec<[f32; 3]>,
-    name: String,
-) {
-    let numbers: Vec<f32> = vecs
-        .clone()
-        .into_iter()
-        .map(|x| x.to_vec())
-        .flatten()
-        .collect();
-    bind_helper(
-        program,
-        bindings,
-        out_bindings,
-        numbers.as_slice().as_bytes(),
-        vecs.len() as u64,
-        vec![GLSLTYPE::Vec3, GLSLTYPE::ArrayVec3],
-        name,
-    )
-} */
-
-/* pub fn bind_mat4(
-    program: &dyn Program,
-    bindings: &mut dyn ProgramBindings,
-    out_bindings: &mut dyn OutProgramBindings,
-    mat: cgmath::Matrix4<f32>,
-    name: String,
-) {
-    let mat_slice: &[f32; 16] = mat.as_ref();
-    bind_helper(
-        program,
-        bindings,
-        out_bindings,
-        bytemuck::cast_slice(mat_slice.as_bytes()),
-        64 as u64,
-        vec![GLSLTYPE::Mat4],
-        name,
-    )
-} */
-
-/* pub fn bind_float(
-    program: &dyn Program,
-    bindings: &mut dyn ProgramBindings,
-    out_bindings: &mut dyn OutProgramBindings,
-    numbers: &f32,
-    name: String,
-) {
-    bind_helper(
-        program,
-        bindings,
-        out_bindings,
-        numbers.as_bytes(),
-        1 as u64,
-        vec![GLSLTYPE::Float],
-        name,
-    )
-} */
 
 // TODO functions to get the rust size and typing
 
@@ -457,6 +60,31 @@ pub enum GLSLTYPE {
     Texture2D,
 }
 
+impl GLSLTYPE {
+    pub fn size_of(&self) -> usize {
+        match self {
+            GLSLTYPE::Bool => std::mem::size_of::<bool>(),
+            GLSLTYPE::Float => std::mem::size_of::<f32>(),
+            GLSLTYPE::Int => std::mem::size_of::<i32>(),
+            GLSLTYPE::Uint => std::mem::size_of::<u32>(),
+            GLSLTYPE::Vec2 => std::mem::size_of::<[f32; 2]>(),
+            GLSLTYPE::Uvec3 => std::mem::size_of::<[u32; 3]>(),
+            GLSLTYPE::Vec3 => std::mem::size_of::<[f32; 3]>(),
+            GLSLTYPE::Vec4 => std::mem::size_of::<[f32; 4]>(),
+            GLSLTYPE::Mat4 => 64,
+            GLSLTYPE::ArrayInt => panic!("TODO: I haven't checked the size of this yet"),
+            GLSLTYPE::ArrayUint => panic!("TODO: I haven't checked the size of this yet"),
+            GLSLTYPE::ArrayFloat => panic!("TODO: I haven't checked the size of this yet"),
+            GLSLTYPE::ArrayVec2 => panic!("TODO: I haven't checked the size of this yet"),
+            GLSLTYPE::ArrayVec3 => panic!("TODO: I haven't checked the size of this yet"),
+            GLSLTYPE::ArrayVec4 => panic!("TODO: I haven't checked the size of this yet"),
+            GLSLTYPE::Sampler => panic!("TODO: I haven't checked the size of this yet"),
+            GLSLTYPE::TextureCube => panic!("TODO: I haven't checked the size of this yet"),
+            GLSLTYPE::Texture2D => panic!("TODO: I haven't checked the size of this yet"),
+        }
+    }
+}
+
 impl fmt::Display for GLSLTYPE {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
@@ -479,29 +107,6 @@ impl fmt::Display for GLSLTYPE {
             GLSLTYPE::TextureCube => write!(f, "textureCube"),
             GLSLTYPE::Texture2D => write!(f, "texture2D"),
         }
-    }
-}
-
-pub fn glsl_size(x: &GLSLTYPE) -> usize {
-    match x {
-        GLSLTYPE::Bool => std::mem::size_of::<bool>(),
-        GLSLTYPE::Float => std::mem::size_of::<f32>(),
-        GLSLTYPE::Int => std::mem::size_of::<i32>(),
-        GLSLTYPE::Uint => std::mem::size_of::<u32>(),
-        GLSLTYPE::Vec2 => std::mem::size_of::<[f32; 2]>(),
-        GLSLTYPE::Uvec3 => std::mem::size_of::<[u32; 3]>(),
-        GLSLTYPE::Vec3 => std::mem::size_of::<[f32; 3]>(),
-        GLSLTYPE::Vec4 => std::mem::size_of::<[f32; 4]>(),
-        GLSLTYPE::Mat4 => 64,
-        GLSLTYPE::ArrayInt => panic!("TODO: I haven't checked the size of this yet"),
-        GLSLTYPE::ArrayUint => panic!("TODO: I haven't checked the size of this yet"),
-        GLSLTYPE::ArrayFloat => panic!("TODO: I haven't checked the size of this yet"),
-        GLSLTYPE::ArrayVec2 => panic!("TODO: I haven't checked the size of this yet"),
-        GLSLTYPE::ArrayVec3 => panic!("TODO: I haven't checked the size of this yet"),
-        GLSLTYPE::ArrayVec4 => panic!("TODO: I haven't checked the size of this yet"),
-        GLSLTYPE::Sampler => panic!("TODO: I haven't checked the size of this yet"),
-        GLSLTYPE::TextureCube => panic!("TODO: I haven't checked the size of this yet"),
-        GLSLTYPE::Texture2D => panic!("TODO: I haven't checked the size of this yet"),
     }
 }
 
@@ -613,7 +218,7 @@ pub const fn string_compare(string1: &str, string2: &str) -> bool {
 }
 
 pub const fn is_gl_builtin(p: &str) -> bool {
-    if string_compare(p, "gl_VertexID")
+    string_compare(p, "gl_VertexID")
         || string_compare(p, "gl_InstanceID")
         || string_compare(p, "gl_FragCoord")
         || string_compare(p, "gl_FrontFacing")
@@ -625,11 +230,6 @@ pub const fn is_gl_builtin(p: &str) -> bool {
         || string_compare(p, "gl_LocalInvocationID")
         || string_compare(p, "gl_GlobalInvocationID")
         || string_compare(p, "gl_LocalInvocationIndex")
-    {
-        true
-    } else {
-        false
-    }
 }
 
 #[macro_export]
@@ -758,7 +358,7 @@ macro_rules! shader {
                 }
                 acc += 1;
             }
-            (S, B, pipeline::context::BindingContext::new(INBINDCONTEXT, OUTBINDCONTEXT))
+            (S, B)
         }
       };
     }

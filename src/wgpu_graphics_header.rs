@@ -2,14 +2,16 @@ use glsl_to_spirv::ShaderType;
 use zerocopy::AsBytes as _;
 
 use std::collections::HashMap;
+use std::convert::TryInto;
 
 use winit::window::Window;
 
 use crate::shared::{
-    check_gl_builtin_type, compile_shader, glsl_size, has_in_qual, has_out_qual, has_uniform_qual,
-    new_bindings, process_body, string_compare, Bindings, DefaultBinding, OutProgramBindings,
-    Program, ProgramBindings, GLSLTYPE, PARAMETER, QUALIFIER,
+    check_gl_builtin_type, compile_shader, has_in_qual, has_out_qual, has_uniform_qual,
+    process_body, string_compare, Program, GLSLTYPE, PARAMETER, QUALIFIER,
 };
+
+use crate::bind::{new_bindings, Bindings, DefaultBinding, OutProgramBindings, ProgramBindings};
 
 pub struct GraphicsProgram {
     pub surface: wgpu::Surface,
@@ -53,10 +55,10 @@ pub struct GraphicsBindings {
 }
 
 impl ProgramBindings for GraphicsBindings {
-    fn getBindings(&mut self) -> &mut Vec<DefaultBinding> {
+    fn get_bindings(&mut self) -> &mut Vec<DefaultBinding> {
         &mut self.bindings
     }
-    fn indexBinding(&mut self, index: usize) -> &mut DefaultBinding {
+    fn index_binding(&mut self, index: usize) -> &mut DefaultBinding {
         &mut self.bindings[index]
     }
 }
@@ -67,10 +69,10 @@ pub struct OutGraphicsBindings {
 }
 
 impl OutProgramBindings for OutGraphicsBindings {
-    fn getBindings(&mut self) -> &mut Vec<DefaultBinding> {
+    fn get_bindings(&mut self) -> &mut Vec<DefaultBinding> {
         &mut self.bindings
     }
-    fn indexBinding(&mut self, index: usize) -> &mut DefaultBinding {
+    fn index_binding(&mut self, index: usize) -> &mut DefaultBinding {
         &mut self.bindings[index]
     }
 }
@@ -326,7 +328,7 @@ fn create_bindings(
                 fragment_binding_struct.push(DefaultBinding {
                     binding_number: vertex_to_fragment_map
                         .get(i.name)
-                        .expect(&format!("{} has not been bound", i.name))
+                        .unwrap_or_else(|| panic!("{} has not been bound", i.name))
                         .clone(),
                     name: i.name.to_string(),
                     data: None,
@@ -453,7 +455,7 @@ pub async fn graphics_compile(
             are_bind_enties = true;
         } else {
             vertex_binding_desc.push(wgpu::VertexBufferDescriptor {
-                stride: (glsl_size(&i.gtype)) as wgpu::BufferAddress,
+                stride: (i.gtype.size_of()) as wgpu::BufferAddress,
                 step_mode: if i.qual.contains(&QUALIFIER::VERTEX) {
                     wgpu::InputStepMode::Vertex
                 } else {
@@ -702,10 +704,10 @@ pub fn graphics_run<'a>(
         .iter()
         .find(|i| i.qual.contains(&QUALIFIER::VERTEX));
 
-    let verts: u32 = if bind.is_none() {
-        3
+    let verts: u32 = if let Some(b) = bind {
+        b.length.unwrap() as u32
     } else {
-        bind.unwrap().length.unwrap() as u32
+        3
     };
 
     let bind = bindings
@@ -713,10 +715,10 @@ pub fn graphics_run<'a>(
         .iter()
         .find(|i| i.qual.contains(&QUALIFIER::LOOP));
 
-    let instances: u32 = if bind.is_none() {
-        1
+    let instances: u32 = if let Some(b) = bind {
+        b.length.unwrap() as u32
     } else {
-        bind.unwrap().length.unwrap() as u32
+        1
     };
 
     let buffer_map = buffer_map_setup(bindings, &out_bindings);
@@ -724,9 +726,9 @@ pub fn graphics_run<'a>(
     let mut empty_vec = Vec::new();
 
     for i in 0..(buffer_map.len()) {
-        let b = buffer_map.get(&(i as u32)).expect(&format!(
-            "I assumed all bindings would be buffers but I guess that has been invalidated"
-        ));
+        let b = buffer_map.get(&(i as u32)).unwrap_or_else(|| {
+            panic!("I assumed all bindings would be buffers but I guess that has been invalidated")
+        });
 
         empty_vec.push(wgpu::Binding {
             binding: b.binding_number,
@@ -734,10 +736,10 @@ pub fn graphics_run<'a>(
                 buffer: &b
                     .data
                     .as_ref()
-                    .expect(&format!("The binding of {} was not set", &b.name)),
+                    .unwrap_or_else(|| panic!("The binding of {} was not set", &b.name)),
                 range: 0..b
                     .length
-                    .expect(&format!("The size of {} was not set", &b.name)),
+                    .unwrap_or_else(|| panic!("The size of {} was not set", &b.name)),
             },
         });
     }
@@ -747,7 +749,7 @@ pub fn graphics_run<'a>(
             resource: wgpu::BindingResource::Sampler(
                 &i.data
                     .as_ref()
-                    .expect(&format!("The sampler for {} was not set", &i.name)),
+                    .unwrap_or_else(|| panic!("The sampler for {} was not set", &i.name)),
             ),
         });
     }
@@ -758,7 +760,7 @@ pub fn graphics_run<'a>(
             resource: wgpu::BindingResource::TextureView(
                 &i.data
                     .as_ref()
-                    .expect(&format!("The sampler for {} was not set", &i.name)),
+                    .unwrap_or_else(|| panic!("The sampler for {} was not set", &i.name)),
             ),
         });
     }
@@ -781,16 +783,16 @@ pub fn graphics_run<'a>(
         }
 
         for i in 0..(bindings.bindings.len()) {
-            let b = bindings.bindings.get(i as usize).expect(&format!(
-                "I assumed all bindings would be buffers but I guess that has been invalidated"
-            ));
+            let b = bindings.bindings.get(i as usize).expect(
+                "I assumed all bindings would be buffers but I guess that has been invalidated",
+            );
 
             if b.qual.contains(&QUALIFIER::VERTEX) {
                 rpass.set_vertex_buffer(
                     b.binding_number,
                     &b.data
                         .as_ref()
-                        .expect(&format!("The binding of {} was not set", &b.name)),
+                        .unwrap_or_else(|| panic!("The binding of {} was not set", &b.name)),
                     0,
                     0,
                 );
@@ -798,16 +800,16 @@ pub fn graphics_run<'a>(
         }
 
         for i in 0..(out_bindings.bindings.len()) {
-            let b = out_bindings.bindings.get(i as usize).expect(&format!(
-                "I assumed all bindings would be buffers but I guess that has been invalidated"
-            ));
+            let b = out_bindings.bindings.get(i as usize).expect(
+                "I assumed all bindings would be buffers but I guess that has been invalidated",
+            );
 
             if b.qual.contains(&QUALIFIER::VERTEX) && b.qual.contains(&QUALIFIER::IN) {
                 rpass.set_vertex_buffer(
                     b.binding_number,
                     &b.data
                         .as_ref()
-                        .expect(&format!("The binding of {} was not set", &b.name)),
+                        .unwrap_or_else(|| panic!("The binding of {} was not set", &b.name)),
                     0,
                     0,
                 );
@@ -894,8 +896,7 @@ pub fn default_bind_group(program: &GraphicsProgram) -> wgpu::BindGroup {
         label: None,
     };
 
-    let bind_group = program.device.create_bind_group(bgd);
-    bind_group
+    program.device.create_bind_group(bgd)
 }
 
 pub fn setup_render_pass<'a>(
@@ -938,7 +939,7 @@ pub const fn valid_vertex_shader(vert: &GraphicsShader) {
                 return;
             }
         }
-        acc = acc + 1;
+        acc += 1;
     }
     panic!("This is not a valid vertex shader! Remember you need 'gl_Position' as an out of a vertex shader")
 }
@@ -951,7 +952,7 @@ pub const fn valid_fragment_shader(frag: &GraphicsShader) {
                 return;
             }
         }
-        acc = acc + 1;
+        acc += 1;
     }
     panic!("This is not a valid fragment shader! Remember you need 'color' as an out of a fragment shader")
 }
@@ -959,8 +960,8 @@ pub const fn valid_fragment_shader(frag: &GraphicsShader) {
 #[macro_export]
 macro_rules! graphics_shader {
     ($($body:tt)*) => {{
-        const S : (&[pipeline::shared::PARAMETER], &'static str, pipeline::context::BindingContext) = shader!($($body)*);
-        (pipeline::wgpu_graphics_header::GraphicsShader{params:S.0, body:S.1}, S.2)
+        const S : (&[pipeline::shared::PARAMETER], &'static str) = shader!($($body)*);
+        (pipeline::wgpu_graphics_header::GraphicsShader{params:S.0, body:S.1})
     }};
 }
 
@@ -1013,204 +1014,15 @@ pub const fn graphics_starting_context(
     graphcis_bind_context
 }
 
-// This is a crazy hack that happens because of a couple things
+// This is a crazy hack
 // -- I need to be able to create VertexAttributeDescriptors in compile and save a reference to them when creating the pipeline
-// -- I can't initialize an empty array
-// -- wgpu::VertexAttributeDescriptor is non-Copyable so doing the usual [desc; 32] doesn't work
-// -- I don't want to use unsafe code or at the moment use another library like arrayvec
+// -- I need to somehow coerce out a 32 array from a non-copyable struct
 pub fn compile_buffer() -> [wgpu::VertexAttributeDescriptor; 32] {
-    [
-        wgpu::VertexAttributeDescriptor {
+    let x : Box<[wgpu::VertexAttributeDescriptor]> = vec![0; 32].into_iter().map(|_| wgpu::VertexAttributeDescriptor {
             offset: 0,
-            // This is our connection to shader.vert
             shader_location: 0,
             format: wgpu::VertexFormat::Float,
-        },
-        wgpu::VertexAttributeDescriptor {
-            offset: 0,
-            // This is our connection to shader.vert
-            shader_location: 0,
-            format: wgpu::VertexFormat::Float,
-        },
-        wgpu::VertexAttributeDescriptor {
-            offset: 0,
-            // This is our connection to shader.vert
-            shader_location: 0,
-            format: wgpu::VertexFormat::Float,
-        },
-        wgpu::VertexAttributeDescriptor {
-            offset: 0,
-            // This is our connection to shader.vert
-            shader_location: 0,
-            format: wgpu::VertexFormat::Float,
-        },
-        wgpu::VertexAttributeDescriptor {
-            offset: 0,
-            // This is our connection to shader.vert
-            shader_location: 0,
-            format: wgpu::VertexFormat::Float,
-        },
-        wgpu::VertexAttributeDescriptor {
-            offset: 0,
-            // This is our connection to shader.vert
-            shader_location: 0,
-            format: wgpu::VertexFormat::Float,
-        },
-        wgpu::VertexAttributeDescriptor {
-            offset: 0,
-            // This is our connection to shader.vert
-            shader_location: 0,
-            format: wgpu::VertexFormat::Float,
-        },
-        wgpu::VertexAttributeDescriptor {
-            offset: 0,
-            // This is our connection to shader.vert
-            shader_location: 0,
-            format: wgpu::VertexFormat::Float,
-        },
-        wgpu::VertexAttributeDescriptor {
-            offset: 0,
-            // This is our connection to shader.vert
-            shader_location: 0,
-            format: wgpu::VertexFormat::Float,
-        },
-        wgpu::VertexAttributeDescriptor {
-            offset: 0,
-            // This is our connection to shader.vert
-            shader_location: 0,
-            format: wgpu::VertexFormat::Float,
-        },
-        wgpu::VertexAttributeDescriptor {
-            offset: 0,
-            // This is our connection to shader.vert
-            shader_location: 0,
-            format: wgpu::VertexFormat::Float,
-        },
-        wgpu::VertexAttributeDescriptor {
-            offset: 0,
-            // This is our connection to shader.vert
-            shader_location: 0,
-            format: wgpu::VertexFormat::Float,
-        },
-        wgpu::VertexAttributeDescriptor {
-            offset: 0,
-            // This is our connection to shader.vert
-            shader_location: 0,
-            format: wgpu::VertexFormat::Float,
-        },
-        wgpu::VertexAttributeDescriptor {
-            offset: 0,
-            // This is our connection to shader.vert
-            shader_location: 0,
-            format: wgpu::VertexFormat::Float,
-        },
-        wgpu::VertexAttributeDescriptor {
-            offset: 0,
-            // This is our connection to shader.vert
-            shader_location: 0,
-            format: wgpu::VertexFormat::Float,
-        },
-        wgpu::VertexAttributeDescriptor {
-            offset: 0,
-            // This is our connection to shader.vert
-            shader_location: 0,
-            format: wgpu::VertexFormat::Float,
-        },
-        wgpu::VertexAttributeDescriptor {
-            offset: 0,
-            // This is our connection to shader.vert
-            shader_location: 0,
-            format: wgpu::VertexFormat::Float,
-        },
-        wgpu::VertexAttributeDescriptor {
-            offset: 0,
-            // This is our connection to shader.vert
-            shader_location: 0,
-            format: wgpu::VertexFormat::Float,
-        },
-        wgpu::VertexAttributeDescriptor {
-            offset: 0,
-            // This is our connection to shader.vert
-            shader_location: 0,
-            format: wgpu::VertexFormat::Float,
-        },
-        wgpu::VertexAttributeDescriptor {
-            offset: 0,
-            // This is our connection to shader.vert
-            shader_location: 0,
-            format: wgpu::VertexFormat::Float,
-        },
-        wgpu::VertexAttributeDescriptor {
-            offset: 0,
-            // This is our connection to shader.vert
-            shader_location: 0,
-            format: wgpu::VertexFormat::Float,
-        },
-        wgpu::VertexAttributeDescriptor {
-            offset: 0,
-            // This is our connection to shader.vert
-            shader_location: 0,
-            format: wgpu::VertexFormat::Float,
-        },
-        wgpu::VertexAttributeDescriptor {
-            offset: 0,
-            // This is our connection to shader.vert
-            shader_location: 0,
-            format: wgpu::VertexFormat::Float,
-        },
-        wgpu::VertexAttributeDescriptor {
-            offset: 0,
-            // This is our connection to shader.vert
-            shader_location: 0,
-            format: wgpu::VertexFormat::Float,
-        },
-        wgpu::VertexAttributeDescriptor {
-            offset: 0,
-            // This is our connection to shader.vert
-            shader_location: 0,
-            format: wgpu::VertexFormat::Float,
-        },
-        wgpu::VertexAttributeDescriptor {
-            offset: 0,
-            // This is our connection to shader.vert
-            shader_location: 0,
-            format: wgpu::VertexFormat::Float,
-        },
-        wgpu::VertexAttributeDescriptor {
-            offset: 0,
-            // This is our connection to shader.vert
-            shader_location: 0,
-            format: wgpu::VertexFormat::Float,
-        },
-        wgpu::VertexAttributeDescriptor {
-            offset: 0,
-            // This is our connection to shader.vert
-            shader_location: 0,
-            format: wgpu::VertexFormat::Float,
-        },
-        wgpu::VertexAttributeDescriptor {
-            offset: 0,
-            // This is our connection to shader.vert
-            shader_location: 0,
-            format: wgpu::VertexFormat::Float,
-        },
-        wgpu::VertexAttributeDescriptor {
-            offset: 0,
-            // This is our connection to shader.vert
-            shader_location: 0,
-            format: wgpu::VertexFormat::Float,
-        },
-        wgpu::VertexAttributeDescriptor {
-            offset: 0,
-            // This is our connection to shader.vert
-            shader_location: 0,
-            format: wgpu::VertexFormat::Float,
-        },
-        wgpu::VertexAttributeDescriptor {
-            offset: 0,
-            // This is our connection to shader.vert
-            shader_location: 0,
-            format: wgpu::VertexFormat::Float,
-        },
-    ]
+        }).collect();
+    let y : Box<[wgpu::VertexAttributeDescriptor; 32]> = x.try_into().unwrap();
+    *y
 }
