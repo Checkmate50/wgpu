@@ -4,7 +4,8 @@ use std::io::BufReader;
 
 pub fn load_model(file_name: &str) -> (Vec<[f32; 3]>, Vec<[f32; 3]>, Vec<u16>) {
     let input = BufReader::new(
-        File::open(file_name).unwrap_or_else(|_| panic!("{} is not a file I could find", file_name)),
+        File::open(file_name)
+            .unwrap_or_else(|_| panic!("{} is not a file I could find", file_name)),
     );
     let dome: Obj = load_obj(input)
         .unwrap_or_else(|_| panic!("{} could not be loaded as an obj file", file_name));

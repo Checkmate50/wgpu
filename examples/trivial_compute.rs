@@ -45,9 +45,11 @@ async fn execute_gpu() {
             let context2 =
                 (&context1).bind_indices(&indices_1, &program, &mut bindings, &mut out_bindings);
             {
-                context2.runable();
                 let result_out_bindings = out_bindings.move_buffers();
-                let result1 = run(&program, &mut bindings, result_out_bindings);
+
+                let result1 =
+                    context2.runable(|| run(&program, &mut bindings, result_out_bindings));
+
                 println!("{:?}", read_uvec(&program, &result1, "indices").await);
             }
         }
@@ -55,8 +57,7 @@ async fn execute_gpu() {
             let context3 =
                 context1.bind_indices(&indices_2, &program, &mut bindings, &mut out_bindings);
             {
-                context3.runable();
-                let result1 = run(&program, &mut bindings, out_bindings);
+                let result1 = context3.runable(|| run(&program, &mut bindings, out_bindings));
                 println!("{:?}", read_uvec(&program, &result1, "indices").await);
             }
         }

@@ -53,10 +53,8 @@ async fn execute_gpu() {
     let indices: Vec<u32> = vec![1, 2, 3, 4];
 
     {
-        let context1 = context.bind_add_one_in(&indices,
-            &program1,
-            &mut bindings1,
-            &mut out_bindings1,);
+        let context1 =
+            context.bind_add_one_in(&indices, &program1, &mut bindings1, &mut out_bindings1);
         {
             context1.runable();
             let result = run(&program1, &mut bindings1, out_bindings1);

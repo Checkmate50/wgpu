@@ -1018,11 +1018,14 @@ pub const fn graphics_starting_context(
 // -- I need to be able to create VertexAttributeDescriptors in compile and save a reference to them when creating the pipeline
 // -- I need to somehow coerce out a 32 array from a non-copyable struct
 pub fn compile_buffer() -> [wgpu::VertexAttributeDescriptor; 32] {
-    let x : Box<[wgpu::VertexAttributeDescriptor]> = vec![0; 32].into_iter().map(|_| wgpu::VertexAttributeDescriptor {
+    let x: Box<[wgpu::VertexAttributeDescriptor]> = vec![0; 32]
+        .into_iter()
+        .map(|_| wgpu::VertexAttributeDescriptor {
             offset: 0,
             shader_location: 0,
             format: wgpu::VertexFormat::Float,
-        }).collect();
-    let y : Box<[wgpu::VertexAttributeDescriptor; 32]> = x.try_into().unwrap();
+        })
+        .collect();
+    let y: Box<[wgpu::VertexAttributeDescriptor; 32]> = x.try_into().unwrap();
     *y
 }

@@ -32,7 +32,7 @@ impl Parse for Parameters {
 }
 
 #[proc_macro]
-pub fn init(_:TokenStream) -> TokenStream {
+pub fn init(_: TokenStream) -> TokenStream {
     TokenStream::from(quote! {
         use pipeline::shared::{Program};
         use pipeline::bind::{ProgramBindings, OutProgramBindings, Bindable};
@@ -114,8 +114,8 @@ pub fn generic_bindings(input: TokenStream) -> TokenStream {
         }
 
         impl #context<#(#run),*> {
-            fn runable(&self) {
-                //println!("hello");
+            fn runable<P, B>(&self, f: P) -> B where P: FnOnce() -> B{
+                f()
             }
             fn can_pipe(&self, b : &dyn ContextInputs) {
                 let a = vec![#(stringify!(#out_vec).to_string()),*];
