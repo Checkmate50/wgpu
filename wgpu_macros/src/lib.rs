@@ -1,9 +1,10 @@
 extern crate proc_macro;
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
+use syn::ext::IdentExt;
 use syn::parse::{Parse, ParseStream, Result};
 use syn::punctuated::Punctuated;
-use syn::{parse_macro_input, Ident, Token};
+use syn::{braced, bracketed, parenthesized, parse_macro_input, Error, Ident, Token};
 
 use std::collections::HashSet;
 use std::iter;
@@ -11,23 +12,145 @@ use std::iter;
 use rand::Rng;
 
 struct Parameters {
-    context: Ident,
-    params: HashSet<Ident>,
-    outs: HashSet<Ident>,
+    quals: Vec<Ident>,
+    //glsl_type : Ident,
+    name: Ident,
 }
 
 impl Parse for Parameters {
     fn parse(input: ParseStream) -> Result<Self> {
+        let qual_and_type;
+        bracketed!(qual_and_type in input);
+        let qual_lst;
+        bracketed!(qual_lst in qual_and_type);
+        let mut quals = Vec::new();
+        while !qual_lst.is_empty() {
+            // loop and in tokens are not Ident's so they need to be handled differently
+            if qual_lst.peek(Token!(loop)) {
+                qual_lst.parse::<Token!(loop)>();
+                quals.push(format_ident!("loop"));
+            } else if qual_lst.peek(Token!(in)) {
+                qual_lst.parse::<Token!(in)>()?;
+                quals.push(format_ident!("in"));
+            } else {
+                quals.push(qual_lst.parse::<Ident>()?);
+            }
+        }
+
+        qual_and_type.parse::<Ident>();
+        while !qual_and_type.is_empty() {
+            let x;
+            bracketed!(x in qual_and_type);
+        }
+
+        let name = input.parse::<Ident>()?;
+        Ok(Parameters {
+            quals: quals.into_iter().collect(),
+            name,
+        })
+    }
+}
+
+fn parse_any(input: ParseStream) -> Result<()> {
+    if input.peek(Ident::peek_any) {
+        Ident::parse_any(input)?;
+    } else if input.peek(Token!(=)) {
+        input.parse::<Token!(=)>()?;
+    } else if input.peek(syn::token::Paren) {
+        let x;
+        parenthesized!(x in input);
+        while !x.is_empty() {
+            parse_any(&x)?;
+        }
+    } else if input.peek(syn::token::Brace) {
+        let x;
+        braced!(x in input);
+        while !x.is_empty() {
+            parse_any(&x)?;
+        }
+    } else if input.peek(syn::token::Bracket) {
+        let x;
+        bracketed!(x in input);
+        while !x.is_empty() {
+            parse_any(&x)?;
+        }
+    } else if input.peek(Token!(.)) {
+        input.parse::<Token!(.)>()?;
+    } else if input.peek(Token!(;)) {
+        input.parse::<Token!(;)>()?;
+    } else if input.peek(Token!(+)) {
+        input.parse::<Token!(+)>()?;
+    } else if input.peek(Token!(,)) {
+        input.parse::<Token!(,)>()?;
+    }
+    /* else if input.peek(syn::Expr) {
+        input.parse::<syn::Expr>()?;
+    } */
+    else {
+        return Err(Error::new(input.span(), "found a token I couldn't parse"));
+    }
+    return Ok(());
+}
+
+struct Shader {
+    params: Vec<Parameters>, //body: String,
+}
+
+impl Parse for Shader {
+    fn parse(input: ParseStream) -> Result<Self> {
+        let mut params = Vec::new();
+        while !input.peek(syn::token::Brace) {
+            params.push(input.parse::<Parameters>()?);
+            input.parse::<Token![;]>()?;
+        }
+
+        let x;
+        let y;
+        braced!(x in input);
+        braced!(y in x);
+        if !y.is_empty() {
+            y.step(|cursor| {
+                (*cursor).token_stream();
+                Ok(((), syn::buffer::Cursor::empty()))
+            });
+            //parse_any(&y)?;
+        }
+        Ok(Shader {
+            params: params.into_iter().collect(),
+        })
+    }
+}
+
+struct Context {
+    context: Ident,
+    ins: HashSet<Ident>,
+    outs: HashSet<Ident>,
+}
+
+impl Parse for Context {
+    fn parse(input: ParseStream) -> Result<Self> {
         let context = input.parse::<Ident>()?;
         input.parse::<Token![=]>()?;
-        let params = Punctuated::<Ident, Token![,]>::parse_separated_nonempty(input)?;
-        input.parse::<Token![;]>()?;
-        let outs = Punctuated::<Ident, Token![,]>::parse_terminated(input)?;
-        Ok(Parameters {
-            context,
-            params: params.into_iter().collect(),
-            outs: outs.into_iter().collect(),
-        })
+        let shaders = Punctuated::<Shader, Token![,]>::parse_separated_nonempty(input)?;
+
+        let mut ins = HashSet::new();
+        let mut outs = HashSet::new();
+
+        shaders.into_iter().for_each(|s| {
+            s.params.into_iter().for_each(|p| {
+                if p.quals.contains(&format_ident!("in")) {
+                    if outs.contains(&p.name) {
+                        outs.remove(&p.name);
+                    } else {
+                        ins.insert(p.name);
+                    }
+                } else if p.quals.contains(&format_ident!("out")) {
+                    outs.insert(p.name);
+                }
+            })
+        });
+
+        Ok(Context { context, ins, outs })
     }
 }
 
@@ -67,10 +190,10 @@ pub fn init(_: TokenStream) -> TokenStream {
 #[proc_macro]
 pub fn generic_bindings(input: TokenStream) -> TokenStream {
     // Parse the input tokens into a syntax tree
-    let input = parse_macro_input!(input as Parameters);
+    let shader_params = parse_macro_input!(input as Context);
 
-    let input_vec: Vec<Ident> = input.params.into_iter().collect();
-    let out_vec: Vec<Ident> = input.outs.into_iter().collect();
+    let input_vec: Vec<Ident> = shader_params.ins.into_iter().collect();
+    let out_vec: Vec<Ident> = shader_params.outs.into_iter().collect();
 
     let mut rng = rand::thread_rng();
 
@@ -93,7 +216,7 @@ pub fn generic_bindings(input: TokenStream) -> TokenStream {
     let run: Vec<Ident> = iter::repeat(format_ident!("Bound"))
         .take(input_vec.len())
         .collect();
-    let ctxloc = input.context;
+    let ctxloc = shader_params.context;
     all_expanded.push(quote! {
         struct #context<#(#variables: AbstractBind),*> {
             #(#fields: #variables,)*

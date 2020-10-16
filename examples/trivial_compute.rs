@@ -1,5 +1,9 @@
+#![recursion_limit = "256"]
 #[macro_use]
 extern crate pipeline;
+
+#[macro_use]
+extern crate eager;
 
 pub use pipeline::wgpu_compute_header::{compile, read_uvec, run, ComputeShader};
 
@@ -7,6 +11,7 @@ pub use wgpu_macros::{generic_bindings, init};
 
 async fn execute_gpu() {
     init!();
+    
     // qualifiers
     // buffer: is a buffer?
     // in: this parameter must be bound to before the program runs
@@ -18,7 +23,7 @@ async fn execute_gpu() {
     // loop: one or more of these loop annotations are required per program. Atm, the values bound is assumed to be of equal length and this gives the number of iterations(gl_GlobalInvocationID.x)
     //      the size of any out buffers that need to be created
 
-    const S: ComputeShader = compute_shader! {
+    my_shader! {compute = {
         [[buffer loop in out] uint[]] indices;
         [[buffer in] uint[]] indices2;
         //[[buffer out] uint[]] result;
@@ -30,8 +35,11 @@ async fn execute_gpu() {
                 indices[index] = indices[index]+indices2[index];
             }
         }}
-    };
-    generic_bindings! {context = indices, indices2; indices}
+    }}
+
+    const S: ComputeShader = eager! { lazy! {compute_shader! { eager!{compute!()}}}};
+
+    eager! { lazy! { generic_bindings! { context = eager!{ compute!()}}}};
 
     let (program, mut bindings, mut out_bindings) = compile(&S).await;
 

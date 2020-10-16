@@ -362,3 +362,13 @@ macro_rules! shader {
         }
       };
     }
+
+#[macro_export]
+macro_rules! my_shader {
+    ($name:tt = {$($tt:tt)*}) =>
+        {eager_macro_rules! { $eager_1
+            macro_rules! $name{
+                ()=>{$($tt)*};
+            }
+        }}
+}

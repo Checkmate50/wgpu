@@ -1,5 +1,9 @@
+#![recursion_limit = "512"]
 #[macro_use]
 extern crate pipeline;
+
+#[macro_use]
+extern crate eager;
 
 use winit::{
     event::{Event, WindowEvent},
@@ -22,7 +26,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 
     init!();
 
-    const VERTEXT: GraphicsShader = graphics_shader! {
+    my_shader! {vertex = {
         [[vertex in] vec3] a_position;
         [[vertex in] float] in_brightness;
         [[out] vec3] posColor;
@@ -35,9 +39,9 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                 gl_Position = vec4(a_position, 1.0);
             }
         }}
-    };
+    }}
 
-    const FRAGMENT: GraphicsShader = graphics_shader! {
+    my_shader! {fragment = {
         [[in] vec3] posColor;
         [[in] float] brightness;
         [[out] vec4] color;
@@ -46,9 +50,14 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                 color = vec4(posColor * brightness, 1.0);
             }
         }}
-    };
+    }}
 
-    generic_bindings! {context = a_position, in_brightness; color, gl_Position}
+    const VERTEXT: GraphicsShader = eager! { lazy! {graphics_shader! { eager!{vertex!()}}}};
+
+    const FRAGMENT: GraphicsShader = eager! { lazy! {graphics_shader! { eager!{fragment!()}}}};
+
+    //generic_bindings! {context = a_position, in_brightness; color, gl_Position}
+    eager! { lazy! { generic_bindings! { context = eager!{ vertex!(), fragment!()}}}};
 
     const S_V: GraphicsShader = VERTEXT;
     const S_F: GraphicsShader = FRAGMENT;
@@ -96,14 +105,13 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                             &mut out_bindings,
                         );
                         {
-                            context2.runable();
-                            graphics_run(
+                            context2.runable(|| graphics_run(
                                 &program,
                                 rpass,
                                 &mut bind_group,
                                 &bindings,
                                 &out_bindings,
-                            );
+                            ));
                         }
                     }
                 }

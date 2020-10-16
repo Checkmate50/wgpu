@@ -9,6 +9,7 @@ features = ["const_loop", "const_panic", "const_fn", "const_if_match"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+eager = "0.1.0"
 regex = "1"
 obj-rs = "0.6.1"
 wgpu = "0.5.0"
