@@ -295,7 +295,7 @@ fn create_bindings(
         if !check_gl_builtin_type(i.name, &i.gtype) {
             // Bindings that are kept between runs
             if i.qual.contains(&QUALIFIER::UNIFORM) {
-                if i.gtype == GLSLTYPE::Sampler {
+                if i.gtype == GLSLTYPE::Sampler || i.gtype == GLSLTYPE::SamplerShadow {
                     samplers_struct.push(SamplerBinding {
                         binding_number: uniform_binding_number,
                         name: i.name.to_string(),
@@ -304,7 +304,10 @@ fn create_bindings(
                         qual: i.qual.to_vec(),
                     });
                     uniform_binding_number += 1;
-                } else if i.gtype == GLSLTYPE::Texture2D || i.gtype == GLSLTYPE::TextureCube {
+                } else if i.gtype == GLSLTYPE::Texture2D
+                    || i.gtype == GLSLTYPE::Texture2DArray
+                    || i.gtype == GLSLTYPE::TextureCube
+                {
                     textures_struct.push(TextureBinding {
                         binding_number: uniform_binding_number,
                         name: i.name.to_string(),
@@ -314,14 +317,19 @@ fn create_bindings(
                     });
                     uniform_binding_number += 1;
                 } else {
-                    fragment_binding_struct.push(DefaultBinding {
-                        binding_number: uniform_map.get(i.name).unwrap().clone(),
-                        name: i.name.to_string(),
-                        data: None,
-                        length: None,
-                        gtype: i.gtype.clone(),
-                        qual: i.qual.to_vec(),
-                    });
+                    if uniform_map.get(i.name).is_some() {
+                    } else {
+                        fragment_binding_struct.push(DefaultBinding {
+                            binding_number: uniform_binding_number,
+                            name: i.name.to_string(),
+                            data: None,
+                            length: None,
+                            gtype: i.gtype.clone(),
+                            qual: i.qual.to_vec(),
+                        });
+                        uniform_map.insert(i.name, uniform_binding_number);
+                        uniform_binding_number += 1;
+                    }
                 }
             } else if i.qual.contains(&QUALIFIER::IN) && !i.qual.contains(&QUALIFIER::OUT) {
                 fragment_binding_struct.push(DefaultBinding {
@@ -467,16 +475,7 @@ pub async fn graphics_compile(
         }
     }
 
-    for i in &out_program_bindings1.bindings {
-        if i.qual.contains(&QUALIFIER::UNIFORM) && i.qual.contains(&QUALIFIER::IN) {
-            bind_entry.push(wgpu::BindGroupLayoutEntry {
-                binding: i.binding_number,
-                visibility: wgpu::ShaderStage::VERTEX | wgpu::ShaderStage::FRAGMENT,
-                ty: wgpu::BindingType::UniformBuffer { dynamic: false },
-            });
-            are_bind_enties = true;
-        }
-    }
+    debug!(out_program_bindings1);
 
     debug!(program_bindings2);
 
@@ -500,20 +499,30 @@ pub async fn graphics_compile(
         });
         are_bind_enties = true;
     }
+    for i in &program_bindings2.bindings {
+        if i.qual.contains(&QUALIFIER::UNIFORM) && i.qual.contains(&QUALIFIER::IN) {
+            bind_entry.push(wgpu::BindGroupLayoutEntry {
+                binding: i.binding_number,
+                visibility: wgpu::ShaderStage::FRAGMENT,
+                ty: wgpu::BindingType::UniformBuffer { dynamic: false },
+            });
+            are_bind_enties = true;
+        }
+    }
 
     debug!(bind_entry);
-    debug!(vertex_binding_desc);
+    //debug!(vertex_binding_desc);
 
     let x = stringify_shader(vertex, &program_bindings1, &out_program_bindings1);
 
-    debug_print!(x);
+    //debug_print!(x);
 
     // Our compiled vertex shader
     let vs_module = compile_shader(x, ShaderType::Vertex, &device);
 
     let y = stringify_shader(fragment, &program_bindings2, &out_program_bindings2);
 
-    debug_print!(y);
+    //debug_print!(y);
 
     // Our compiled fragment shader
     let fs_module = compile_shader(y, ShaderType::Fragment, &device);

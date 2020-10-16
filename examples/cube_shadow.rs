@@ -29,8 +29,9 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         [[vertex in] vec3] a_position;
         [[vertex in] vec3] a_normal;
 
-        [[out] vec4] v_position;
+        [[out] vec4] v_Position;
         [[out] vec3] v_normal;
+        [[out] vec4] gl_Position;
 
         [[uniform in] mat4] u_viewProj;
         [[uniform in] mat4] u_World;
@@ -40,13 +41,13 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
             void main() {
                 v_normal = mat3(u_World) * a_normal;
                 v_Position = u_World * vec4(a_position, 1.0);
-                gl_Position = u-viewProj * v_Position;
+                gl_Position = u_viewProj * v_Position;
             }
         }}
     };
 
     const FRAGMENT: (GraphicsShader, BindingContext) = graphics_shader! {
-        [[in] vec4] v_position;
+        [[in] vec4] v_Position;
         [[in] vec3] v_normal;
 
         [[out] vec4] color;
@@ -56,8 +57,8 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         [[uniform in] vec4] light_pos;
         [[uniform in] vec4] light_color;
 
-        [[uniform] texture2DArray] t_Shadow;
-        [[uniform] samplerShadow] s_Shadow;
+        [[uniform in] texture2DArray] t_Shadow;
+        [[uniform in] samplerShadow] s_Shadow;
         [[uniform in] mat4] u_World;
         [[uniform in] vec4] u_Color;
         {{
@@ -79,13 +80,12 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 
             void main() {
                 vec3 normal = normalize(v_normal);
-                vec3 ambient = vec3(0.05, 0.05, 0.05);
                 // accumulate color
-                vec3 o_Target = ambient;
+                vec3 o_Target = vec3(0.05, 0.05, 0.05);;
                 // project into the light space
-                float shadow = fetch_shadow(0, light_proj * v_position);
+                float shadow = fetch_shadow(0, light_proj * v_Position);
                 // compute Lambertian diffuse term
-                vec3 light_dir = normalize(light_pos.xyz - v_position.xyz);
+                vec3 light_dir = normalize(light_pos.xyz - v_Position.xyz);
                 float diffuse = max(0.0, dot(normal, light_dir));
                 // add light contribution
                 o_Target += shadow * diffuse * light_color.xyz;
@@ -99,14 +99,14 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     const STARTING_BIND_CONTEXT: BindingContext = VERTEXT.1;
     const S_F: GraphicsShader = FRAGMENT.0;
 
-    std::process::exit(0);
+    //std::process::exit(0);
 
     let (program, template_bindings, template_out_bindings, _) =
         compile_valid_graphics_program!(window, S_V, S_F);
 
     let (positions, normals, index_data) = load_cube();
 
-    let color_data = vec![
+    /* let color_data = vec![
         [0.583, 0.771, 0.014],
         [0.609, 0.115, 0.436],
         [0.327, 0.483, 0.844],
@@ -143,15 +143,16 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         [0.673, 0.211, 0.457],
         [0.820, 0.883, 0.371],
         [0.982, 0.099, 0.879],
-    ];
+    ]; */
 
-    let view_mat = generate_view_matrix();
+    let color_data = vec![0.583, 0.771, 0.014, 1.0];
 
-    let proj_mat = generate_projection_matrix(size.width as f32 / size.height as f32);
+    let view_proj_mat =
+        generate_view_matrix() * generate_projection_matrix(size.width as f32 / size.height as f32);
 
-    let model_mat = generate_identity_matrix();
+    let world_mat = generate_identity_matrix();
 
-    let model_mat2 = translate(model_mat, 2.0, 0.0, 0.0);
+    //let model_mat2 = translate(model_mat, 2.0, 0.0, 0.0);
 
     // A "chain" of buffers that we render on to the display
     let mut swap_chain = generate_swap_chain(&program, &window);
@@ -209,66 +210,51 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                         );
                         {
                             const BIND_CONTEXT_2: BindingContext =
-                                update_bind_context(&BIND_CONTEXT_1, "u_view");
+                                update_bind_context(&BIND_CONTEXT_1, "u_viewProj");
                             let context2 = bind!(
                                 program,
                                 bindings,
                                 out_bindings,
-                                "u_view",
-                                view_mat,
+                                "u_viewProj",
+                                view_proj_mat,
                                 context1,
                                 BIND_CONTEXT_2
                             );
                             {
                                 const BIND_CONTEXT_3: BindingContext =
-                                    update_bind_context(&BIND_CONTEXT_2, "vertexColor");
+                                    update_bind_context(&BIND_CONTEXT_2, "u_Color");
                                 let context3 = bind!(
                                     program,
                                     bindings,
                                     out_bindings,
-                                    "vertexColor",
+                                    "u_Color",
                                     color_data,
                                     context2,
                                     BIND_CONTEXT_3
                                 );
                                 {
                                     const BIND_CONTEXT_4: BindingContext =
-                                        update_bind_context(&BIND_CONTEXT_3, "u_proj");
+                                        update_bind_context(&BIND_CONTEXT_3, "u_World");
                                     let context4 = bind!(
                                         program,
                                         bindings,
                                         out_bindings,
-                                        "u_proj",
-                                        proj_mat,
+                                        "u_World",
+                                        world_mat,
                                         context3,
                                         BIND_CONTEXT_4
                                     );
                                     {
-                                        const BIND_CONTEXT_5: BindingContext =
-                                            update_bind_context(&BIND_CONTEXT_4, "u_model");
-                                        let _ = bind!(
-                                            program,
-                                            bindings,
-                                            out_bindings,
-                                            "u_model",
-                                            model_mat,
-                                            context4,
-                                            BIND_CONTEXT_5
+                                        ready_to_run(BIND_CONTEXT_4);
+                                        bind_prerun =
+                                            BindingPreprocess::bind(&mut bindings, &out_bindings);
+                                        rpass = graphics_run_indicies(
+                                            &program,
+                                            rpass,
+                                            &mut bind_group,
+                                            &mut bind_prerun,
+                                            &index_data,
                                         );
-                                        {
-                                            ready_to_run(BIND_CONTEXT_5);
-                                            bind_prerun = BindingPreprocess::bind(
-                                                &mut bindings,
-                                                &out_bindings,
-                                            );
-                                            rpass = graphics_run_indicies(
-                                                &program,
-                                                rpass,
-                                                &mut bind_group,
-                                                &mut bind_prerun,
-                                                &index_data,
-                                            );
-                                        }
                                     }
                                 }
                             }

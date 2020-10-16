@@ -22,7 +22,7 @@ pub fn compile_shader(contents: String, shader: ShaderType, device: &wgpu::Devic
     /*         print!("{}", contents);
     print!("\n\n"); */
     let x = glsl_to_spirv::compile(&contents, shader);
-    debug!(x);
+    //debug!(x);
     let mut vert_file =
         x.unwrap_or_else(|_| panic!("{}: {}", "You gave a bad shader source", contents));
     let mut vs = Vec::new();
@@ -347,14 +347,15 @@ impl Bindable for cgmath::Matrix4<f32> {
     }
 }
 
-/* impl Bindable for Vec<f32> {
-    fn bind(
+impl Bindable for Vec<f32> {
+    fn bind<R: ProgramBindings, T: OutProgramBindings>(
         &self,
         program: &dyn Program,
-        bindings: &mut dyn ProgramBindings,
-        out_bindings: &mut dyn OutProgramBindings,
+        bindings: &mut R,
+        out_bindings: &mut T,
         name: String,
-    ) {
+        _context: &Context,
+    ) -> Context {
         bind_helper(
             program,
             bindings,
@@ -363,19 +364,29 @@ impl Bindable for cgmath::Matrix4<f32> {
             self.len() as u64,
             vec![GLSLTYPE::Float, GLSLTYPE::ArrayFloat],
             name,
-        )
+        );
+        Context::new()
     }
-    fn bind_consume(
+    fn bind_consume<R: ProgramBindings, T: OutProgramBindings>(
         &self,
         program: &dyn Program,
-        bindings: dyn ProgramBindings,
-        out_bindings: dyn OutProgramBindings,
+        bindings: &mut R,
+        out_bindings: &mut T,
         name: String,
-    ) -> (&mut dyn ProgramBindings, &mut dyn OutProgramBindings) {
-        self.bind(program, &mut bindings, &mut out_bindings, name);
-        (bindings, out_bindings)
+        context: Context,
+    ) -> Context {
+        bind_helper(
+            program,
+            bindings,
+            out_bindings,
+            self.as_slice().as_bytes(),
+            self.len() as u64,
+            vec![GLSLTYPE::Float, GLSLTYPE::ArrayFloat],
+            name,
+        );
+        context
     }
-} */
+}
 
 /* pub fn bind_vec2(
     program: &dyn Program,
@@ -473,8 +484,10 @@ pub enum GLSLTYPE {
     ArrayVec3,
     ArrayVec4,
     Sampler,
+    SamplerShadow,
     TextureCube,
     Texture2D,
+    Texture2DArray,
 }
 
 impl fmt::Display for GLSLTYPE {
@@ -496,8 +509,10 @@ impl fmt::Display for GLSLTYPE {
             GLSLTYPE::ArrayVec3 => write!(f, "vec3[]"),
             GLSLTYPE::ArrayVec4 => write!(f, "vec4[]"),
             GLSLTYPE::Sampler => write!(f, "sampler"),
+            GLSLTYPE::SamplerShadow => write!(f, "samplerShadow"),
             GLSLTYPE::TextureCube => write!(f, "textureCube"),
             GLSLTYPE::Texture2D => write!(f, "texture2D"),
+            GLSLTYPE::Texture2DArray => write!(f, "texture2DArray"),
         }
     }
 }
@@ -520,8 +535,10 @@ pub fn glsl_size(x: &GLSLTYPE) -> usize {
         GLSLTYPE::ArrayVec3 => panic!("TODO: I haven't checked the size of this yet"),
         GLSLTYPE::ArrayVec4 => panic!("TODO: I haven't checked the size of this yet"),
         GLSLTYPE::Sampler => panic!("TODO: I haven't checked the size of this yet"),
+        GLSLTYPE::SamplerShadow => panic!("TODO: I haven't checked the size of this yet"),
         GLSLTYPE::TextureCube => panic!("TODO: I haven't checked the size of this yet"),
         GLSLTYPE::Texture2D => panic!("TODO: I haven't checked the size of this yet"),
+        GLSLTYPE::Texture2DArray => panic!("TODO: I haven't checked the size of this yet"),
     }
 }
 
@@ -557,11 +574,17 @@ macro_rules! typing {
     (sampler) => {
         pipeline::shared::GLSLTYPE::Sampler
     };
+    (samplerShadow) => {
+        pipeline::shared::GLSLTYPE::SamplerShadow
+    };
     (textureCube) => {
         pipeline::shared::GLSLTYPE::TextureCube
     };
     (texture2D) => {
         pipeline::shared::GLSLTYPE::Texture2D
+    };
+    (texture2DArray) => {
+        pipeline::shared::GLSLTYPE::Texture2DArray
     };
 }
 

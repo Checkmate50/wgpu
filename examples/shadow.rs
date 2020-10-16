@@ -23,6 +23,8 @@ pub use pipeline::shared::{
 
 pub use pipeline::helper::load_cube;
 
+pub use pipeline::context::BindingContext;
+
 async fn run(event_loop: EventLoop<()>, window: Window) {
     let size = window.inner_size();
 
@@ -47,7 +49,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         }}
     };
 
-    const FORWARD_FRAGMENT: (GraphicsShader, [&str; 32], [&str; 32]) = graphics_shader! {
+    const FORWARD_FRAGMENT: (GraphicsShader, BindingContext) = graphics_shader! {
         [[in] vec3] v_Normal;
         [[in] vec4] v_Position;
         [[out] vec4] color;
