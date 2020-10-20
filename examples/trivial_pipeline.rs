@@ -1,5 +1,10 @@
+#![recursion_limit = "256"]
+
 #[macro_use]
 extern crate pipeline;
+
+#[macro_use]
+extern crate eager;
 
 pub use pipeline::wgpu_compute_header::{compile, pipe, read_uvec, run, ComputeShader};
 
@@ -19,7 +24,7 @@ async fn execute_gpu() {
 
     init!();
 
-    const ADD_ONE: ComputeShader = compute_shader! {
+    my_shader! {One = {
         [[buffer loop in] uint[]] add_one_in;
         [[buffer out] uint[]] add_two_in;
         //unit ->
@@ -30,10 +35,15 @@ async fn execute_gpu() {
                 add_two_in[index] = add_one_in[index]+1;
             }
         }}
-    };
-    generic_bindings! {context = add_one_in; add_two_in}
+    }}
 
-    const ADD_TWO: ComputeShader = compute_shader! {
+    const ADD_ONE: ComputeShader = eager! { lazy! {compute_shader! { eager!{One!()}}}};
+
+    eager! { lazy! { generic_bindings! { context = eager!{ One!()}}}};
+
+    //generic_bindings! {context = add_one_in; add_two_in}
+
+    my_shader! {Two = {
         [[buffer loop in] uint[]] add_two_in;
         [[buffer out] uint[]] add_two_result;
         {{
@@ -43,8 +53,10 @@ async fn execute_gpu() {
                 add_two_result[index] = add_two_in[index]+2;
             }
         }}
-    };
-    generic_bindings! {next_context = add_two_in; add_two_result}
+    }}
+    const ADD_TWO: ComputeShader = eager! { lazy! {compute_shader! { eager!{Two!()}}}};
+    eager! { lazy! { generic_bindings! { next_context = eager!{ Two!()}}}};
+    //generic_bindings! { = add_two_in; add_two_result}
 
     let (program1, mut bindings1, mut out_bindings1) = compile(&ADD_ONE).await;
 
@@ -56,8 +68,7 @@ async fn execute_gpu() {
         let context1 =
             context.bind_add_one_in(&indices, &program1, &mut bindings1, &mut out_bindings1);
         {
-            context1.runable();
-            let result = run(&program1, &mut bindings1, out_bindings1);
+            let result =  context1.runable(|| run(&program1, &mut bindings1, out_bindings1));
             println!("{:?}", read_uvec(&program1, &result, "add_two_in").await);
 
             context1.can_pipe(&next_context);

@@ -9,6 +9,8 @@ pub use pipeline::wgpu_compute_header::{compile, read_uvec, run, ComputeShader};
 
 pub use wgpu_macros::{generic_bindings, init};
 
+pub use pipeline::compute;
+
 async fn execute_gpu() {
     init!();
 
@@ -23,23 +25,9 @@ async fn execute_gpu() {
     // loop: one or more of these loop annotations are required per program. Atm, the values bound is assumed to be of equal length and this gives the number of iterations(gl_GlobalInvocationID.x)
     //      the size of any out buffers that need to be created
 
-    my_shader! {compute = {
-        [[buffer loop in out] uint[]] indices;
-        [[buffer in] uint[]] indices2;
-        //[[buffer out] uint[]] result;
-        //[... uint] xindex;
-        {{
-            void main() {
-                // uint xindex = gl_GlobalInvocationID.x;
-                uint index = gl_GlobalInvocationID.x;
-                indices[index] = indices[index]+indices2[index];
-            }
-        }}
-    }}
+    const S: ComputeShader = eager_compute_shader! {compute!()};
 
-    const S: ComputeShader = eager_compute_shader!{compute!()};
-
-    eager_binding!{context = compute!()};
+    eager_binding! { context = compute!()};
 
     let (program, mut bindings, mut out_bindings) = compile(&S).await;
 
@@ -48,17 +36,19 @@ async fn execute_gpu() {
     let indices2: Vec<u32> = vec![4, 3, 2, 1];
 
     {
-
         let context1 = context.bind_indices2(&indices2, &program, &mut bindings, &mut out_bindings);
-        let context2 = (&context1).bind_indices(&indices_1, &program, &mut bindings, &mut out_bindings);
-        let result_out_bindings = out_bindings.move_buffers();
+        {
+            let context2 =
+                (&context1).bind_indices(&indices_1, &program, &mut bindings, &mut out_bindings);
+            {
+                let result_out_bindings = out_bindings.move_buffers();
 
-        let result1 =
-            context2.runable(|| run(&program, &mut bindings, result_out_bindings));
+                let result1 =
+                    context2.runable(|| run(&program, &mut bindings, result_out_bindings));
 
-        println!("{:?}", read_uvec(&program, &result1, "indices").await);
-
-
+                println!("{:?}", read_uvec(&program, &result1, "indices").await);
+            }
+        }
         {
             let context3 =
                 context1.bind_indices(&indices_2, &program, &mut bindings, &mut out_bindings);

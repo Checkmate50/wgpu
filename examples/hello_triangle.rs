@@ -52,12 +52,13 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         }}
     }}
 
-    const VERTEXT: GraphicsShader = eager! { lazy! {graphics_shader! { eager!{vertex!()}}}};
+    const VERTEXT: GraphicsShader = eager_graphics_shader! {vertex!()};
 
-    const FRAGMENT: GraphicsShader = eager! { lazy! {graphics_shader! { eager!{fragment!()}}}};
+    const FRAGMENT: GraphicsShader = eager_graphics_shader! {fragment!()};
 
     //generic_bindings! {context = a_position, in_brightness; color, gl_Position}
-    eager! { lazy! { generic_bindings! { context = eager!{ vertex!(), fragment!()}}}};
+    //eager! { lazy! { generic_bindings! { context = eager!{ vertex!(), fragment!()}}}};
+    eager_binding! {context = vertex!(), fragment!()};
 
     const S_V: GraphicsShader = VERTEXT;
     const S_F: GraphicsShader = FRAGMENT;
@@ -105,13 +106,15 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                             &mut out_bindings,
                         );
                         {
-                            context2.runable(|| graphics_run(
-                                &program,
-                                rpass,
-                                &mut bind_group,
-                                &bindings,
-                                &out_bindings,
-                            ));
+                            context2.runable(|| {
+                                graphics_run(
+                                    &program,
+                                    rpass,
+                                    &mut bind_group,
+                                    &bindings,
+                                    &out_bindings,
+                                )
+                            });
                         }
                     }
                 }
