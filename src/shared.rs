@@ -284,6 +284,61 @@ impl Bindable for Vec<[f32; 3]> {
     }
 }
 
+impl Bindable for Vec<[f32; 4]> {
+    fn bind<R: ProgramBindings, T: OutProgramBindings>(
+        &self,
+        program: &dyn Program,
+        bindings: &mut R,
+        out_bindings: &mut T,
+        name: String,
+        _context: &Context,
+    ) -> Context {
+        let numbers: Vec<f32> = self
+            .clone()
+            .into_iter()
+            .map(|x| x.to_vec())
+            .flatten()
+            .collect();
+        bind_helper(
+            program,
+            bindings,
+            out_bindings,
+            numbers.as_slice().as_bytes(),
+            self.len() as u64,
+            vec![GLSLTYPE::Vec4, GLSLTYPE::ArrayVec4],
+            name,
+        );
+        Context::new()
+    }
+
+    fn bind_consume<R: ProgramBindings, T: OutProgramBindings>(
+        &self,
+        program: &dyn Program,
+        bindings: &mut R,
+        out_bindings: &mut T,
+        name: String,
+        context: Context,
+    ) -> Context {
+        let numbers: Vec<f32> = self
+            .clone()
+            .into_iter()
+            .map(|x| x.to_vec())
+            .flatten()
+            .collect();
+        bind_helper(
+            program,
+            bindings,
+            out_bindings,
+            numbers.as_slice().as_bytes(),
+            self.len() as u64,
+            vec![GLSLTYPE::Vec4, GLSLTYPE::ArrayVec4],
+            name,
+        );
+        context
+    }
+}
+
+
 /* pub fn bind_mat4(
     program: &dyn Program,
     bindings: &mut dyn ProgramBindings,

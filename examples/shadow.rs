@@ -189,7 +189,8 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                 let mut bindings: GraphicsBindings = template_bindings.clone();
                 let mut out_bindings: OutGraphicsBindings = template_out_bindings.clone();
 
-                /*                 let sampler = program.device.create_sampler(&wgpu::SamplerDescriptor {
+                /*
+                let sampler = program.device.create_sampler(&wgpu::SamplerDescriptor {
                         address_mode_u: wgpu::AddressMode::ClampToEdge,
                         address_mode_v: wgpu::AddressMode::ClampToEdge,
                         address_mode_w: wgpu::AddressMode::ClampToEdge,
