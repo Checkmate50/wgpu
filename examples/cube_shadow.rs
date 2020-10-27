@@ -11,7 +11,7 @@ pub use pipeline::wgpu_graphics_header::{
     bind_sampler, bind_texture, default_bind_group, generate_swap_chain, graphics_run_indicies,
     graphics_starting_context, setup_render_pass, setup_render_pass_color_depth,
     setup_render_pass_depth, BindingPreprocess, GraphicsBindings, GraphicsShader,
-    OutGraphicsBindings,
+    OutGraphicsBindings, PipelineType,
 };
 
 pub use pipeline::shared::{is_gl_builtin, Bindable, Bindings, Context};
@@ -20,14 +20,14 @@ pub use pipeline::context::{ready_to_run, update_bind_context, BindingContext};
 
 pub use pipeline::helper::{
     create_texels, generate_identity_matrix, generate_projection_matrix, generate_view_matrix,
-    load_cube, translate,
+    load_cube, load_plane, translate,
 };
 
 async fn run(event_loop: EventLoop<()>, window: Window) {
     let size = window.inner_size();
 
     const BAKE_VERTEXT: (GraphicsShader, BindingContext) = graphics_shader! {
-        [[vertex in] vec4] a_position;
+        [[vertex in] vec3] a_position;
 
         [[uniform in] mat4] u_viewProj;
         [[uniform in] mat4] u_World;
@@ -38,7 +38,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 
         {{
             void main() {
-                gl_Position = u_ViewProj * u_World * vec4(a_Pos);
+                gl_Position = u_viewProj * u_World * vec4(a_position, 1.0);
             }
         }}
     };
@@ -54,7 +54,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         [[vertex in] vec3] a_normal;
 
         [[out] vec4] v_Position;
-        [[out] vec3] v_normal;
+        [[out] vec3] v_Normal;
         [[out] vec4] gl_Position;
 
         [[uniform in] mat4] u_viewProj;
@@ -63,7 +63,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 
         {{
             void main() {
-                v_normal = mat3(u_World) * a_normal;
+                v_Normal = mat3(u_World) * a_normal;
                 v_Position = u_World * vec4(a_position, 1.0);
                 gl_Position = u_viewProj * v_Position;
             }
@@ -71,12 +71,14 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     };
 
     const FRAGMENT: (GraphicsShader, BindingContext) = graphics_shader! {
+        [[in] vec3] v_Normal;
         [[in] vec4] v_Position;
-        [[in] vec3] v_normal;
 
-        [[out] vec4] color;
+        [[out] vec4] color; // This is o_Target in the docs
 
         [[uniform in] mat4] u_viewProj;
+
+        // We are starting with just one light
         [[uniform in] mat4] light_proj;
         [[uniform in] vec4] light_pos;
         [[uniform in] vec4] light_color;
@@ -103,9 +105,10 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
             }
 
             void main() {
-                vec3 normal = normalize(v_normal);
+                vec3 normal = normalize(v_Normal);
                 // accumulate color
-                vec3 o_Target = vec3(0.05, 0.05, 0.05);;
+                vec3 ambient = vec3(0.05, 0.05, 0.05);
+                vec3 o_Target = ambient;
                 // project into the light space
                 float shadow = fetch_shadow(0, light_proj * v_Position);
                 // compute Lambertian diffuse term
@@ -119,12 +122,12 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         }}
     };
 
-
     const B_V: GraphicsShader = BAKE_VERTEXT.0;
     const B_F: GraphicsShader = BAKE_FRAGMENT.0;
-    const BAKE_STARTING_BIND_CONTEXT : BindingContext = BAKE_VERTEXT.1;
+    const BAKE_STARTING_BIND_CONTEXT: BindingContext = BAKE_VERTEXT.1;
 
-    let (stencil_program, stencil_template_bindings, stencil_template_out_bindings, _) = compile_valid_stencil_program!(window, S_V, S_F);
+    let (stencil_program, stencil_template_bindings, stencil_template_out_bindings, _) =
+        compile_valid_stencil_program!(window, B_V, B_F, PipelineType::Stencil);
 
     const S_V: GraphicsShader = VERTEXT.0;
     const S_F: GraphicsShader = FRAGMENT.0;
@@ -133,48 +136,13 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         graphics_starting_context(VERTEXT_STARTING_BIND_CONTEXT, S_F);
 
     let (program, template_bindings, template_out_bindings, _) =
-        compile_valid_graphics_program!(window, S_V, S_F);
+        compile_valid_graphics_program!(window, S_V, S_F, PipelineType::ColorWithStencil);
 
     let (positions, normals, index_data) = load_cube();
 
-    /* let color_data = vec![
-        [0.583, 0.771, 0.014],
-        [0.609, 0.115, 0.436],
-        [0.327, 0.483, 0.844],
-        [0.822, 0.569, 0.201],
-        [0.435, 0.602, 0.223],
-        [0.310, 0.747, 0.185],
-        [0.597, 0.770, 0.761],
-        [0.559, 0.436, 0.730],
-        [0.359, 0.583, 0.152],
-        [0.483, 0.596, 0.789],
-        [0.559, 0.861, 0.639],
-        [0.195, 0.548, 0.859],
-        [0.014, 0.184, 0.576],
-        [0.771, 0.328, 0.970],
-        [0.406, 0.615, 0.116],
-        [0.676, 0.977, 0.133],
-        [0.971, 0.572, 0.833],
-        [0.140, 0.616, 0.489],
-        [0.997, 0.513, 0.064],
-        [0.945, 0.719, 0.592],
-        [0.543, 0.021, 0.978],
-        [0.279, 0.317, 0.505],
-        [0.167, 0.620, 0.077],
-        [0.347, 0.857, 0.137],
-        [0.055, 0.953, 0.042],
-        [0.714, 0.505, 0.345],
-        [0.783, 0.290, 0.734],
-        [0.722, 0.645, 0.174],
-        [0.302, 0.455, 0.848],
-        [0.225, 0.587, 0.040],
-        [0.517, 0.713, 0.338],
-        [0.053, 0.959, 0.120],
-        [0.393, 0.621, 0.362],
-        [0.673, 0.211, 0.457],
-        [0.820, 0.883, 0.371],
-        [0.982, 0.099, 0.879],
-    ]; */
+    let (plane_positions, plane_normals, plane_index_data) = load_plane(7);
+
+    //todo should I create a bunch of entity cubes?
 
     let color_data = vec![[0.583, 0.771, 0.014, 1.0]];
 
@@ -187,8 +155,8 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         generate_view_matrix() * generate_projection_matrix(size.width as f32 / size.height as f32);
     let light_proj_mat = translate(light_proj_mat_init, 2.0, 0.5, 0.0);
 
-    let light_pos = vec![[1.0, 1.0, 0.0, 1.0]];
-    let light_color = vec![[0.583, 0.0, 0.714, 1.0]];
+    let light_pos = vec![[7.0, -5.0, 10.0, 1.0]];
+    let light_color = vec![[0.5, 1.0, 0.5, 1.0]];
 
     //let model_mat2 = translate(model_mat, 2.0, 0.0, 0.0);
 
@@ -210,13 +178,16 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                     .expect("Timeout when acquiring next swap chain texture");
                 {
                     let mut bindings: GraphicsBindings = template_bindings.clone();
-
                     let mut out_bindings: OutGraphicsBindings = template_out_bindings.clone();
                     let mut bind_group = default_bind_group(&program);
-                    let mut bind_group2 = default_bind_group(&program);
+
+                    let mut bindings_stencil: GraphicsBindings = stencil_template_bindings.clone();
+                    let mut out_bindings_stencil: OutGraphicsBindings =
+                        stencil_template_out_bindings.clone();
+                    let mut bind_group_stencil = default_bind_group(&stencil_program);
+                    let mut bind_prerun_stencil;
 
                     let mut bind_prerun;
-                    //let mut bind_prerun2;
                     /* let mut rpass = setup_render_pass(&program, &mut init_encoder, &frame); */
 
                     let context = Context::new();
@@ -233,184 +204,293 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                         compare: wgpu::CompareFunction::Undefined,
                     });
 
-                    let tex_size = 256u32;
+                    let tex_size = 1600u32;
                     let texels = create_texels(tex_size as usize);
+
+                    let shadow_size = wgpu::Extent3d {
+                        width: 512,
+                        height: 512,
+                        depth: 1,
+                    };
+                    let shadow_format = wgpu::TextureFormat::Depth32Float;
                     let texture_extent = wgpu::Extent3d {
                         width: tex_size,
                         height: tex_size,
                         depth: 1,
                     };
-                    let texture = program.device.create_texture(&wgpu::TextureDescriptor {
-                        size: texture_extent,
+                    let shadow_texture = program.device.create_texture(&wgpu::TextureDescriptor {
+                        size: shadow_size,
+                        array_layer_count: 1, // One light
+                        mip_level_count: 1,
+                        sample_count: 1,
+                        dimension: wgpu::TextureDimension::D2,
+                        format: shadow_format,
+                        usage: wgpu::TextureUsage::OUTPUT_ATTACHMENT | wgpu::TextureUsage::SAMPLED,
+                        label: None,
+                    });
+                    let shadow_view = shadow_texture.create_default_view();
+                    let light_target_view =
+                        shadow_texture.create_view(&wgpu::TextureViewDescriptor {
+                            format: shadow_format,
+                            dimension: wgpu::TextureViewDimension::D2,
+                            aspect: wgpu::TextureAspect::All,
+                            base_mip_level: 0,
+                            level_count: 1,
+                            base_array_layer: 0,
+                            array_layer_count: 1,
+                        });
+
+                    let depth_texture = program.device.create_texture(&wgpu::TextureDescriptor {
+                        size: wgpu::Extent3d {
+                            width: window.inner_size().width,
+                            height: window.inner_size().height,
+                            depth: 1,
+                        },
                         array_layer_count: 1,
                         mip_level_count: 1,
                         sample_count: 1,
                         dimension: wgpu::TextureDimension::D2,
-                        format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                        usage: wgpu::TextureUsage::SAMPLED | wgpu::TextureUsage::COPY_DST,
+                        format: wgpu::TextureFormat::Depth32Float,
+                        usage: wgpu::TextureUsage::OUTPUT_ATTACHMENT,
                         label: None,
                     });
-                    let texture_view = texture.create_default_view();
+                    let depth_view = depth_texture.create_default_view();
 
-                    /* {
-                        let mut rpass = setup_render_pass_depth(
-                            &program,
-                            &mut init_encoder,
-                            unimplemented!(),
-                        );
-                    } */
                     {
-                        /* let mut rpass = setup_render_pass_color_depth(
-                            &program,
-                            &mut init_encoder,
-                            &frame,
-                            unimplemented!(),
-                        ); */
-                        let mut rpass = setup_render_pass(&program, &mut init_encoder, &frame);
-                        const BIND_CONTEXT_1: BindingContext =
-                            update_bind_context(&STARTING_BIND_CONTEXT, "a_position");
-                        let context1 = bind!(
-                            program,
-                            bindings,
-                            out_bindings,
-                            "a_position",
-                            positions,
-                            context,
-                            BIND_CONTEXT_1
-                        );
                         {
-                            const BIND_CONTEXT_2: BindingContext =
-                                update_bind_context(&BIND_CONTEXT_1, "u_viewProj");
-                            let context2 = bind!(
+                            let mut rpass_stencil = setup_render_pass_depth(
+                                &stencil_program,
+                                &mut init_encoder,
+                                &light_target_view,
+                            );
+
+                            const BAKE_BIND_CONTEXT_1: BindingContext =
+                                update_bind_context(&BAKE_STARTING_BIND_CONTEXT, "a_position");
+                            let context1 = bind!(
+                                stencil_program,
+                                bindings_stencil,
+                                out_bindings_stencil,
+                                "a_position",
+                                positions,
+                                context,
+                                BAKE_BIND_CONTEXT_1
+                            );
+                            {
+                                const BAKE_BIND_CONTEXT_2: BindingContext =
+                                    update_bind_context(&BAKE_BIND_CONTEXT_1, "u_viewProj");
+                                let context2 = bind!(
+                                    stencil_program,
+                                    bindings_stencil,
+                                    out_bindings_stencil,
+                                    "u_viewProj",
+                                    view_proj_mat,
+                                    context1,
+                                    BAKE_BIND_CONTEXT_2
+                                );
+                                {
+                                    const BAKE_BIND_CONTEXT_3: BindingContext =
+                                        update_bind_context(&BAKE_BIND_CONTEXT_2, "u_Color");
+                                    let context3 = bind!(
+                                        stencil_program,
+                                        bindings_stencil,
+                                        out_bindings_stencil,
+                                        "u_Color",
+                                        color_data,
+                                        context2,
+                                        BAKE_BIND_CONTEXT_3
+                                    );
+                                    {
+                                        const BAKE_BIND_CONTEXT_4: BindingContext =
+                                            update_bind_context(&BAKE_BIND_CONTEXT_3, "u_World");
+                                        let context4 = bind!(
+                                            stencil_program,
+                                            bindings_stencil,
+                                            out_bindings_stencil,
+                                            "u_World",
+                                            world_mat,
+                                            context3,
+                                            BAKE_BIND_CONTEXT_4
+                                        );
+                                        {
+                                            const _: () = ready_to_run(BAKE_BIND_CONTEXT_4);
+                                            bind_prerun_stencil = BindingPreprocess::bind(
+                                                &mut bindings_stencil,
+                                                &out_bindings_stencil,
+                                            );
+                                            dbg!();
+                                            rpass_stencil = graphics_run_indicies(
+                                                &stencil_program,
+                                                rpass_stencil,
+                                                &mut bind_group_stencil,
+                                                &mut bind_prerun_stencil,
+                                                &index_data,
+                                            );
+                                            dbg!();
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        {
+                            let mut rpass = setup_render_pass_color_depth(
+                                &program,
+                                &mut init_encoder,
+                                &frame,
+                                &depth_view,
+                            );
+                            const BIND_CONTEXT_1: BindingContext =
+                                update_bind_context(&STARTING_BIND_CONTEXT, "a_position");
+                            let context1 = bind!(
                                 program,
                                 bindings,
                                 out_bindings,
-                                "u_viewProj",
-                                view_proj_mat,
-                                context1,
-                                BIND_CONTEXT_2
+                                "a_position",
+                                positions,
+                                context,
+                                BIND_CONTEXT_1
                             );
                             {
-                                const BIND_CONTEXT_3: BindingContext =
-                                    update_bind_context(&BIND_CONTEXT_2, "u_Color");
-                                let context3 = bind!(
+                                const BIND_CONTEXT_2: BindingContext =
+                                    update_bind_context(&BIND_CONTEXT_1, "u_viewProj");
+                                let context2 = bind!(
                                     program,
                                     bindings,
                                     out_bindings,
-                                    "u_Color",
-                                    color_data,
-                                    context2,
-                                    BIND_CONTEXT_3
+                                    "u_viewProj",
+                                    view_proj_mat,
+                                    context1,
+                                    BIND_CONTEXT_2
                                 );
                                 {
-                                    const BIND_CONTEXT_4: BindingContext =
-                                        update_bind_context(&BIND_CONTEXT_3, "u_World");
-                                    let context4 = bind!(
+                                    const BIND_CONTEXT_3: BindingContext =
+                                        update_bind_context(&BIND_CONTEXT_2, "u_Color");
+                                    let context3 = bind!(
                                         program,
                                         bindings,
                                         out_bindings,
-                                        "u_World",
-                                        world_mat,
-                                        context3,
-                                        BIND_CONTEXT_4
+                                        "u_Color",
+                                        color_data,
+                                        context2,
+                                        BIND_CONTEXT_3
                                     );
-
                                     {
-                                        const BIND_CONTEXT_5: BindingContext =
-                                            update_bind_context(&BIND_CONTEXT_4, "a_normal");
-                                        let context5 = bind!(
+                                        const BIND_CONTEXT_4: BindingContext =
+                                            update_bind_context(&BIND_CONTEXT_3, "u_World");
+                                        let context4 = bind!(
                                             program,
                                             bindings,
                                             out_bindings,
-                                            "a_normal",
-                                            normals,
-                                            context4,
-                                            BIND_CONTEXT_5
+                                            "u_World",
+                                            world_mat,
+                                            context3,
+                                            BIND_CONTEXT_4
                                         );
+
                                         {
-                                            const BIND_CONTEXT_6: BindingContext =
-                                                update_bind_context(&BIND_CONTEXT_5, "light_proj");
-                                            let context6 = bind!(
+                                            const BIND_CONTEXT_5: BindingContext =
+                                                update_bind_context(&BIND_CONTEXT_4, "a_normal");
+                                            let context5 = bind!(
                                                 program,
                                                 bindings,
                                                 out_bindings,
-                                                "light_proj",
-                                                light_proj_mat,
-                                                context5,
-                                                BIND_CONTEXT_6
+                                                "a_normal",
+                                                normals,
+                                                context4,
+                                                BIND_CONTEXT_5
                                             );
-
                                             {
-                                                const BIND_CONTEXT_7: BindingContext =
+                                                const BIND_CONTEXT_6: BindingContext =
                                                     update_bind_context(
-                                                        &BIND_CONTEXT_6,
-                                                        "light_pos",
+                                                        &BIND_CONTEXT_5,
+                                                        "light_proj",
                                                     );
-                                                let context7 = bind!(
+                                                let context6 = bind!(
                                                     program,
                                                     bindings,
                                                     out_bindings,
-                                                    "light_pos",
-                                                    light_pos,
-                                                    context6,
-                                                    BIND_CONTEXT_7
+                                                    "light_proj",
+                                                    light_proj_mat,
+                                                    context5,
+                                                    BIND_CONTEXT_6
                                                 );
+
                                                 {
-                                                    const BIND_CONTEXT_8: BindingContext =
+                                                    const BIND_CONTEXT_7: BindingContext =
                                                         update_bind_context(
-                                                            &BIND_CONTEXT_7,
-                                                            "light_color",
+                                                            &BIND_CONTEXT_6,
+                                                            "light_pos",
                                                         );
-                                                    let context8 = bind!(
+                                                    let context7 = bind!(
                                                         program,
                                                         bindings,
                                                         out_bindings,
-                                                        "light_color",
-                                                        light_color,
-                                                        context7,
-                                                        BIND_CONTEXT_8
+                                                        "light_pos",
+                                                        light_pos,
+                                                        context6,
+                                                        BIND_CONTEXT_7
                                                     );
                                                     {
-                                                        const BIND_CONTEXT_9: BindingContext =
+                                                        const BIND_CONTEXT_8: BindingContext =
                                                             update_bind_context(
-                                                                &BIND_CONTEXT_8,
-                                                                "s_Shadow",
+                                                                &BIND_CONTEXT_7,
+                                                                "light_color",
                                                             );
-                                                        bind_sampler(
-                                                            &program,
-                                                            &mut bindings,
-                                                            &mut out_bindings,
-                                                            sampler,
-                                                            "s_Shadow".to_string(),
+                                                        let context8 = bind!(
+                                                            program,
+                                                            bindings,
+                                                            out_bindings,
+                                                            "light_color",
+                                                            light_color,
+                                                            context7,
+                                                            BIND_CONTEXT_8
                                                         );
                                                         {
-                                                            const BIND_CONTEXT_10: BindingContext =
+                                                            const BIND_CONTEXT_9: BindingContext =
                                                                 update_bind_context(
-                                                                    &BIND_CONTEXT_9,
-                                                                    "t_Shadow",
+                                                                    &BIND_CONTEXT_8,
+                                                                    "s_Shadow",
                                                                 );
-                                                            bind_texture(
+                                                            bind_sampler(
                                                                 &program,
                                                                 &mut bindings,
                                                                 &mut out_bindings,
-                                                                texture_view,
-                                                                "t_Shadow".to_string(),
+                                                                sampler,
+                                                                "s_Shadow".to_string(),
                                                             );
+                                                            dbg!(&bindings);
                                                             {
-                                                                const _: () =
-                                                                    ready_to_run(BIND_CONTEXT_10);
-                                                                bind_prerun =
-                                                                    BindingPreprocess::bind(
-                                                                        &mut bindings,
-                                                                        &out_bindings,
+                                                                const BIND_CONTEXT_10:
+                                                                    BindingContext =
+                                                                    update_bind_context(
+                                                                        &BIND_CONTEXT_9,
+                                                                        "t_Shadow",
                                                                     );
-                                                                rpass = graphics_run_indicies(
+                                                                bind_texture(
                                                                     &program,
-                                                                    rpass,
-                                                                    &mut bind_group,
-                                                                    &mut bind_prerun,
-                                                                    &index_data,
+                                                                    &mut bindings,
+                                                                    &mut out_bindings,
+                                                                    shadow_view,
+                                                                    "t_Shadow".to_string(),
                                                                 );
+                                                                {
+                                                                    const _: () = ready_to_run(
+                                                                        BIND_CONTEXT_10,
+                                                                    );
+                                                                    bind_prerun =
+                                                                        BindingPreprocess::bind(
+                                                                            &mut bindings,
+                                                                            &out_bindings,
+                                                                        );
+                                                                    dbg!();
+                                                                    rpass = graphics_run_indicies(
+                                                                        &program,
+                                                                        rpass,
+                                                                        &mut bind_group,
+                                                                        &mut bind_prerun,
+                                                                        &index_data,
+                                                                    );
+                                                                    dbg!();
+                                                                }
                                                             }
                                                         }
                                                     }
@@ -419,11 +499,15 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                         }
                                     }
                                 }
+                                dbg!();
                             }
                         }
+                        dbg!();
                     }
                 }
+                dbg!();
                 program.queue.submit(&[init_encoder.finish()]);
+                dbg!();
                 /* std::process::exit(0); */
             }
             // When the window closes we are done. Change the status

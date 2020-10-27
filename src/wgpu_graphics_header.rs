@@ -272,7 +272,8 @@ fn create_bindings(
                 });
                 vertex_stage_binding_number += 1;
             // Bindings that are invalidated after a run
-            } else if !i.qual.contains(&QUALIFIER::IN) && i.qual.contains(&QUALIFIER::OUT) {
+            }
+             else if !i.qual.contains(&QUALIFIER::IN) && i.qual.contains(&QUALIFIER::OUT) {
                 vertex_out_binding_struct.push(DefaultBinding {
                     binding_number: vertex_to_fragment_binding_number,
                     name: i.name.to_string(),
@@ -284,7 +285,7 @@ fn create_bindings(
                 vertex_to_fragment_map.insert(i.name, vertex_to_fragment_binding_number);
                 vertex_to_fragment_binding_number += 1;
             } else {
-                println!("{:?}", i);
+                dbg!(&i);
                 panic!("TODO We currently don't support both in and out qualifiers for vertex/fragment shaders")
             }
         }
@@ -360,7 +361,7 @@ fn create_bindings(
                 });
                 fragment_out_binding_number += 1;
             } else {
-                panic!("TODO We currently don't support both in and out qualifiers for vertex/fragment shaders")
+                //panic!("TODO We currently don't support both in and out qualifiers for vertex/fragment shaders")
             }
         }
     }
@@ -389,11 +390,18 @@ fn create_bindings(
     )
 }
 
+pub enum PipelineType {
+    Stencil,
+    ColorWithStencil,
+    Color,
+}
+
 pub async fn graphics_compile(
     vec_buffer: &mut [wgpu::VertexAttributeDescriptor; 32],
     window: &Window,
     vertex: &GraphicsShader,
     fragment: &GraphicsShader,
+    pipe_type: PipelineType,
 ) -> (GraphicsProgram, GraphicsBindings, OutGraphicsBindings) {
     // the adapter is the handler to the physical graphics unit
 
@@ -486,10 +494,6 @@ pub async fn graphics_compile(
         }
     }
 
-    debug!(out_program_bindings1);
-
-    debug!(program_bindings2);
-
     for i in &program_bindings2.samplers[..] {
         bind_entry.insert(
             i.binding_number,
@@ -530,24 +534,17 @@ pub async fn graphics_compile(
         }
     }
 
-    debug!(bind_entry);
     let bind_entry_vec = bind_entry
         .into_iter()
         .map(|(_, v)| v)
         .collect::<Vec<wgpu::BindGroupLayoutEntry>>();
-    debug!(bind_entry_vec);
-    //debug!(vertex_binding_desc);
 
     let x = stringify_shader(vertex, &program_bindings1, &out_program_bindings1);
-
-    debug_print!(x);
 
     // Our compiled vertex shader
     let vs_module = compile_shader(x, ShaderType::Vertex, &device);
 
     let y = stringify_shader(fragment, &program_bindings2, &out_program_bindings2);
-
-    debug_print!(y);
 
     // Our compiled fragment shader
     let fs_module = compile_shader(y, ShaderType::Fragment, &device);
@@ -597,25 +594,51 @@ pub async fn graphics_compile(
             // Alternatives include Front and Back culling
             // We are currently back-facing so CullMode::Front does nothing and Back gets rid of the triangle
             cull_mode: wgpu::CullMode::Back,
-            depth_bias: 0,
+            depth_bias: 0, /// TODO We may want to adjust the depth bias and scaling during stencilling
             depth_bias_slope_scale: 0.0,
             depth_bias_clamp: 0.0,
         }),
         // Use Triangles
         primitive_topology: wgpu::PrimitiveTopology::TriangleList,
-        color_states: &[wgpu::ColorStateDescriptor {
-            // Specify the size of the color data in the buffer
-            // Bgra8UnormSrgb is specifically used since it is guaranteed to work on basically all browsers (32bit)
-            format: wgpu::TextureFormat::Bgra8UnormSrgb,
-            // Here is where you can do some fancy stuff for transitioning colors/brightness between frames. Replace defaults to taking all of the current frame and none of the next frame.
-            // This can be changed by specifying the modifier for either of the values from src/dest frames or changing the operation used to combine them(instead of addition maybe Max/Min)
-            color_blend: wgpu::BlendDescriptor::REPLACE,
-            alpha_blend: wgpu::BlendDescriptor::REPLACE,
-            // We can adjust the mask to only include certain colors if we want to
-            write_mask: wgpu::ColorWrite::ALL,
-        }],
+        color_states: match pipe_type {
+            PipelineType::Stencil => &[],
+            PipelineType::ColorWithStencil | PipelineType::Color => &[wgpu::ColorStateDescriptor {
+                // Specify the size of the color data in the buffer
+                // Bgra8UnormSrgb is specifically used since it is guaranteed to work on basically all browsers (32bit)
+                format: wgpu::TextureFormat::Bgra8UnormSrgb,
+                // Here is where you can do some fancy stuff for transitioning colors/brightness between frames. Replace defaults to taking all of the current frame and none of the next frame.
+                // This can be changed by specifying the modifier for either of the values from src/dest frames or changing the operation used to combine them(instead of addition maybe Max/Min)
+                color_blend: wgpu::BlendDescriptor::REPLACE,
+                alpha_blend: wgpu::BlendDescriptor::REPLACE,
+                // We can adjust the mask to only include certain colors if we want to
+                write_mask: wgpu::ColorWrite::ALL,
+            }],
+        },
+
         // We can add an optional stencil descriptor which allows for effects that you would see in Microsoft Powerpoint like fading/swiping to the next slide
-        depth_stencil_state: None,
+        depth_stencil_state: match pipe_type {
+            // The first two cases are from the shadow example for the shadow pass and forward pass.
+            // The last type is for typical graphics programs with no stencil
+            PipelineType::Stencil => Some(wgpu::DepthStencilStateDescriptor {
+                format: wgpu::TextureFormat::Depth32Float,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::LessEqual,
+                stencil_front: wgpu::StencilStateFaceDescriptor::IGNORE,
+                stencil_back: wgpu::StencilStateFaceDescriptor::IGNORE,
+                stencil_read_mask: 0,
+                stencil_write_mask: 0,
+            }),
+            PipelineType::ColorWithStencil => Some(wgpu::DepthStencilStateDescriptor {
+                format: wgpu::TextureFormat::Depth32Float,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::Less,
+                stencil_front: wgpu::StencilStateFaceDescriptor::IGNORE,
+                stencil_back: wgpu::StencilStateFaceDescriptor::IGNORE,
+                stencil_read_mask: 0,
+                stencil_write_mask: 0,
+            }),
+            PipelineType::Color => None,
+        },
         vertex_state: wgpu::VertexStateDescriptor {
             index_format: wgpu::IndexFormat::Uint16,
             vertex_buffers: &vertex_binding_desc[..],
@@ -630,7 +653,12 @@ pub async fn graphics_compile(
 
     // TODO This is ugly, We should be able to bind across different stages and such
     program_bindings2.bindings.into_iter().for_each(|b| {
-        if b.qual.contains(&QUALIFIER::UNIFORM) && !program_bindings1.bindings.iter().any(|b2| b2.name == b.name) {
+        if b.qual.contains(&QUALIFIER::UNIFORM)
+            && !program_bindings1
+                .bindings
+                .iter()
+                .any(|b2| b2.name == b.name)
+        {
             program_bindings1.bindings.push(b)
         }
     });
@@ -797,6 +825,8 @@ impl<'a> BindingPreprocess {
             .iter()
             .find(|i| i.qual.contains(&QUALIFIER::VERTEX));
 
+        dbg!(bindings);
+
         let num_verts: u32 = if bind.is_none() {
             3
         } else {
@@ -922,8 +952,6 @@ pub fn graphics_run<'a>(
             })
             .collect::<Vec<wgpu::Binding>>(),
     );
-
-    // todo append textures and samplers
 
     let bgd = &wgpu::BindGroupDescriptor {
         layout: &program.bind_group_layout,
@@ -1099,6 +1127,7 @@ pub fn setup_render_pass_depth<'a>(
         }),
     });
 
+
     rpass.set_pipeline(&program.pipeline);
     rpass
 }
@@ -1187,7 +1216,7 @@ macro_rules! graphics_shader {
 
 #[macro_export]
 macro_rules! compile_valid_graphics_program {
-    ($window:tt, $vertex:tt, $fragment:tt) => {{
+    ($window:tt, $vertex:tt, $fragment:tt, $pipe_type:path) => {{
         let mut compile_buffer: [wgpu::VertexAttributeDescriptor; 32] =
             pipeline::wgpu_graphics_header::compile_buffer();
 
@@ -1198,6 +1227,7 @@ macro_rules! compile_valid_graphics_program {
             &$window,
             &$vertex,
             &$fragment,
+            $pipe_type,
         )
         .await;
         (x, y, z, compile_buffer)
@@ -1206,7 +1236,7 @@ macro_rules! compile_valid_graphics_program {
 
 #[macro_export]
 macro_rules! compile_valid_stencil_program {
-    ($window:tt, $vertex:tt, $fragment:tt) => {{
+    ($window:tt, $vertex:tt, $fragment:tt, $pipe_type:path) => {{
         let mut compile_buffer: [wgpu::VertexAttributeDescriptor; 32] =
             pipeline::wgpu_graphics_header::compile_buffer();
 
@@ -1216,6 +1246,7 @@ macro_rules! compile_valid_stencil_program {
             &$window,
             &$vertex,
             &$fragment,
+            $pipe_type,
         )
         .await;
         (x, y, z, compile_buffer)
