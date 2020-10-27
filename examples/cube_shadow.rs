@@ -1,5 +1,9 @@
+#![recursion_limit = "1024"]
 #[macro_use]
 extern crate pipeline;
+
+#[macro_use]
+extern crate eager;
 
 use winit::{
     event::{Event, WindowEvent},
@@ -14,9 +18,9 @@ pub use pipeline::wgpu_graphics_header::{
     OutGraphicsBindings, PipelineType,
 };
 
-pub use pipeline::shared::{is_gl_builtin, Bindable, Bindings, Context};
+pub use pipeline::bind::Bindings;
 
-pub use pipeline::context::{ready_to_run, update_bind_context, BindingContext};
+pub use wgpu_macros::{generic_bindings, init};
 
 pub use pipeline::helper::{
     create_texels, generate_identity_matrix, generate_projection_matrix, generate_view_matrix,
@@ -24,6 +28,8 @@ pub use pipeline::helper::{
 };
 
 async fn run(event_loop: EventLoop<()>, window: Window) {
+    init!();
+
     let size = window.inner_size();
 
     // Create a surface to draw images on
@@ -51,7 +57,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         })
         .await;
 
-    const BAKE_VERTEXT: (GraphicsShader, BindingContext) = graphics_shader! {
+    my_shader! {BAKE_VERTEXT = {
         [[vertex in] vec3] a_position;
 
         [[uniform in] mat4] u_viewProj;
@@ -66,15 +72,15 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                 gl_Position = u_viewProj * u_World * vec4(a_position, 1.0);
             }
         }}
-    };
+    }}
 
-    const BAKE_FRAGMENT: (GraphicsShader, BindingContext) = graphics_shader! {
+    my_shader! {BAKE_FRAGMENT = {
         {{
             void main() {}
         }}
-    };
+    }}
 
-    const VERTEXT: (GraphicsShader, BindingContext) = graphics_shader! {
+    my_shader! {VERTEXT = {
         [[vertex in] vec3] a_position;
         [[vertex in] vec3] a_normal;
 
@@ -93,9 +99,9 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                 gl_Position = u_viewProj * v_Position;
             }
         }}
-    };
+    }}
 
-    const FRAGMENT: (GraphicsShader, BindingContext) = graphics_shader! {
+    my_shader! {FRAGMENT = {
         [[in] vec3] v_Normal;
         [[in] vec4] v_Position;
 
@@ -145,23 +151,21 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                 color = vec4(o_Target, 1.0) * u_Color;
             }
         }}
-    };
+    }}
 
-    const B_V: GraphicsShader = BAKE_VERTEXT.0;
-    const B_F: GraphicsShader = BAKE_FRAGMENT.0;
-    const BAKE_STARTING_BIND_CONTEXT: BindingContext = BAKE_VERTEXT.1;
+    const B_V: GraphicsShader = eager_graphics_shader! {BAKE_VERTEXT!()};
+    const B_F: GraphicsShader = eager_graphics_shader! {BAKE_FRAGMENT!()};
+    eager_binding! {bake_context = BAKE_VERTEXT!(), BAKE_FRAGMENT!()};
 
     let (stencil_program, stencil_template_bindings, stencil_template_out_bindings, _) =
-        compile_valid_stencil_program!(device, B_V, B_F, PipelineType::Stencil);
+        compile_valid_stencil_program!(window, B_V, B_F, PipelineType::Stencil);
 
-    const S_V: GraphicsShader = VERTEXT.0;
-    const S_F: GraphicsShader = FRAGMENT.0;
-    const VERTEXT_STARTING_BIND_CONTEXT: BindingContext = VERTEXT.1;
-    const STARTING_BIND_CONTEXT: BindingContext =
-        graphics_starting_context(VERTEXT_STARTING_BIND_CONTEXT, S_F);
+    const S_V: GraphicsShader = eager_graphics_shader! {VERTEXT!()};
+    const S_F: GraphicsShader = eager_graphics_shader! {FRAGMENT!()};
+    eager_binding! {context = VERTEXT!(), FRAGMENT!()};
 
     let (program, template_bindings, template_out_bindings, _) =
-        compile_valid_graphics_program!(device, S_V, S_F, PipelineType::ColorWithStencil);
+        compile_valid_graphics_program!(window, S_V, S_F, PipelineType::ColorWithStencil);
 
     let (positions, normals, index_data) = load_cube();
 
@@ -213,8 +217,6 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 
                     let mut bind_prerun;
                     /* let mut rpass = setup_render_pass(&program, &mut init_encoder, &frame); */
-
-                    let context = Context::new();
 
                     let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
                         address_mode_u: wgpu::AddressMode::ClampToEdge,
@@ -288,61 +290,41 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                 &light_target_view,
                             );
 
-                            const BAKE_BIND_CONTEXT_1: BindingContext =
-                                update_bind_context(&BAKE_STARTING_BIND_CONTEXT, "a_position");
-                            let context1 = bind!(
+                            let bake_context1 = bake_context.bind_a_position(
+                                positions,
                                 device,
                                 bindings_stencil,
                                 out_bindings_stencil,
-                                "a_position",
-                                positions,
-                                context,
-                                BAKE_BIND_CONTEXT_1
                             );
                             {
-                                const BAKE_BIND_CONTEXT_2: BindingContext =
-                                    update_bind_context(&BAKE_BIND_CONTEXT_1, "u_viewProj");
-                                let context2 = bind!(
+                                let bake_context2 = bake_context1.bind_u_viewProj(
+                                    view_proj_mat,
                                     device,
                                     bindings_stencil,
                                     out_bindings_stencil,
-                                    "u_viewProj",
-                                    view_proj_mat,
-                                    context1,
-                                    BAKE_BIND_CONTEXT_2
                                 );
                                 {
-                                    const BAKE_BIND_CONTEXT_3: BindingContext =
-                                        update_bind_context(&BAKE_BIND_CONTEXT_2, "u_Color");
-                                    let context3 = bind!(
+                                    let bake_context3 = bake_context2.bind_u_Color(
+                                        color_data,
                                         device,
                                         bindings_stencil,
                                         out_bindings_stencil,
-                                        "u_Color",
-                                        color_data,
-                                        context2,
-                                        BAKE_BIND_CONTEXT_3
                                     );
                                     {
-                                        const BAKE_BIND_CONTEXT_4: BindingContext =
-                                            update_bind_context(&BAKE_BIND_CONTEXT_3, "u_World");
-                                        let context4 = bind!(
+                                        let bake_context4 = bake_context3.bind_u_World(
+                                            world_mat,
                                             device,
                                             bindings_stencil,
                                             out_bindings_stencil,
-                                            "u_World",
-                                            world_mat,
-                                            context3,
-                                            BAKE_BIND_CONTEXT_4
                                         );
                                         {
-                                            const _: () = ready_to_run(BAKE_BIND_CONTEXT_4);
                                             bind_prerun_stencil = BindingPreprocess::bind(
                                                 &mut bindings_stencil,
                                                 &out_bindings_stencil,
                                             );
                                             dbg!();
-                                            rpass_stencil = graphics_run_indicies(
+                                            rpass_stencil =bake_context4
+                                            graphics_run_indicies(
                                                 &stencil_program,
                                                 &device,
                                                 rpass_stencil,
