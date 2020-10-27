@@ -88,6 +88,25 @@ pub fn load_cube() -> (Vec<[f32; 3]>, Vec<[f32; 3]>, Vec<u16>) {
     (positions, normals, index_data)
 }
 
+pub fn load_plane(size: i8) -> (Vec<[f32; 3]>, Vec<[f32; 3]>, Vec<u16>) {
+    let positions = vec![
+        [size as f32, -size as f32, 0.0],
+        [size as f32, size as f32, 0.0],
+        [-size as f32, -size as f32, 0.0],
+        [-size as f32, size as f32, 0.0],
+    ];
+
+    let normals = vec![
+        [0.0, 0.0, 1.0],
+        [0.0, 0.0, 1.0],
+        [0.0, 0.0, 1.0],
+        [0.0, 0.0, 1.0],
+    ];
+
+    let index_data: Vec<u16> = vec![0, 1, 2, 2, 1, 3];
+    (positions, normals, index_data)
+}
+
 #[rustfmt::skip]
 macro_rules! mx_correction {
     () => {

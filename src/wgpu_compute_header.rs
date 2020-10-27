@@ -3,10 +3,9 @@ use glsl_to_spirv::ShaderType;
 use std::collections::HashMap;
 
 use std::convert::TryInto;
+use std::rc::Rc;
 
-use crate::shared::{
-    check_gl_builtin_type, compile_shader, process_body, Program, PARAMETER, QUALIFIER,
-};
+use crate::shared::{check_gl_builtin_type, compile_shader, process_body, PARAMETER, QUALIFIER};
 
 use crate::bind::{new_bindings, Bindings, DefaultBinding, OutProgramBindings, ProgramBindings};
 
@@ -74,18 +73,6 @@ pub struct ComputeProgram {
     queue: wgpu::Queue,
     pipeline: wgpu::ComputePipeline,
     bind_group_layout: wgpu::BindGroupLayout,
-}
-
-impl Program for ComputeProgram {
-    fn get_device(&self) -> &wgpu::Device {
-        &self.device
-    }
-}
-
-impl Program for &ComputeProgram {
-    fn get_device(&self) -> &wgpu::Device {
-        &self.device
-    }
 }
 
 fn stringify_shader(s: &ComputeShader, b: &ComputeBindings, b_out: &OutComputeBindings) -> String {
@@ -321,8 +308,8 @@ pub fn run(
 
     for i in 0..(out_bindings.bindings.len()) {
         if !(out_bindings.bindings[i].qual.contains(&QUALIFIER::IN)) {
-            out_bindings.bindings[i].data =
-                Some(program.device.create_buffer(&wgpu::BufferDescriptor {
+            out_bindings.bindings[i].data = Some(Rc::new(program.device.create_buffer(
+                &wgpu::BufferDescriptor {
                     label: None,
                     size: (length * 3 * std::mem::size_of::<u32>() as u64) as u64,
                     usage: wgpu::BufferUsage::STORAGE
@@ -330,7 +317,8 @@ pub fn run(
                         | wgpu::BufferUsage::COPY_DST
                         | wgpu::BufferUsage::COPY_SRC
                         | wgpu::BufferUsage::VERTEX,
-                }));
+                },
+            )));
             out_bindings.bindings[i].length = Some(length);
         }
     }

@@ -1,12 +1,192 @@
 use zerocopy::AsBytes as _;
 
-use crate::shared::{Program, GLSLTYPE, QUALIFIER};
+use crate::shared::{GLSLTYPE, QUALIFIER};
+
+use std::rc::Rc;
+
+
+#[macro_export]
+macro_rules! bind {
+    ($device:tt, $bindings:tt, $out_bindings:tt, $name:tt, $data:tt, $context:tt, $bind_context:tt) => {{
+        if $bind_context.do_consume {
+            panic!("You need to use bind_consume here")
+        }
+        Bindable::bind(
+            &$data,
+            &$device,
+            &mut $bindings,
+            &mut $out_bindings,
+            $name.to_string(),
+            &$context,
+        )
+    }};
+}
+
+#[macro_export]
+macro_rules! bind_consume {
+    ($device:tt, $bindings:tt, $out_bindings:tt, $name:tt, $data:tt, $context:tt, $bind_context:tt) => {{
+        if !$bind_context.do_consume {
+            panic!("You should be using bind here")
+        }
+        Bindable::bind_consume(
+            &$data,
+            &$device,
+            &mut $bindings,
+            &mut $out_bindings,
+            $name.to_string(),
+            $context,
+        )
+    }};
+}
+
+impl Bindable for Vec<[f32; 4]> {
+    fn bind<R: ProgramBindings, T: OutProgramBindings>(
+        &self,
+        device: &wgpu::Device,
+        bindings: &mut R,
+        out_bindings: &mut T,
+        name: String,
+    ) {
+        let numbers: Vec<f32> = self
+            .clone()
+            .into_iter()
+            .map(|x| x.to_vec())
+            .flatten()
+            .collect();
+        bind_helper(
+            device,
+            bindings,
+            out_bindings,
+            numbers.as_slice().as_bytes(),
+            self.len() as u64,
+            vec![GLSLTYPE::Vec4, GLSLTYPE::ArrayVec4],
+            name,
+        );
+    }
+}
+
+
+/* pub fn bind_mat4(
+    device: wgpu::Device,
+    bindings: &mut dyn ProgramBindings,
+    out_bindings: &mut dyn OutProgramBindings,
+    mat: cgmath::Matrix4<f32>,
+    name: String,
+) {
+    let mat_slice: &[f32; 16] = mat.as_ref();
+    bind_helper(
+        program,
+        bindings,
+        out_bindings,
+        bytemuck::cast_slice(mat_slice.as_bytes()),
+        64 as u64,
+        vec![GLSLTYPE::Mat4],
+        name,
+    )
+} */
+
+impl Bindable for cgmath::Matrix4<f32> {
+    fn bind<R: ProgramBindings, T: OutProgramBindings>(
+        &self,
+        device: &wgpu::Device,
+        bindings: &mut R,
+        out_bindings: &mut T,
+        name: String,
+    ) {
+        let mat_slice: &[f32; 16] = self.as_ref();
+        bind_helper(
+            device,
+            bindings,
+            out_bindings,
+            bytemuck::cast_slice(mat_slice.as_bytes()),
+            64 as u64,
+            vec![GLSLTYPE::Mat4],
+            name,
+        );
+    }
+}
+
+/* pub fn bind_vec2(
+    device: wgpu::Device,
+    bindings: &mut dyn ProgramBindings,
+    out_bindings: &mut dyn OutProgramBindings,
+    vecs: &Vec<[f32; 2]>,
+    name: String,
+) {
+    let numbers: Vec<f32> = vecs
+        .clone()
+        .into_iter()
+        .map(|x| x.to_vec())
+        .flatten()
+        .collect();
+    bind_helper(
+        program,
+        bindings,
+        out_bindings,
+        numbers.as_slice().as_bytes(),
+        vecs.len() as u64,
+        if numbers.len() == 2 {
+            vec![GLSLTYPE::Vec2, GLSLTYPE::ArrayVec2]
+        } else {
+            //todo only ArrayVec
+            vec![GLSLTYPE::Vec2, GLSLTYPE::ArrayVec2]
+        },
+        name,
+    )
+} */
+
+/* pub fn bind_fvec2(
+    device: wgpu::Device,
+    bindings: &mut dyn ProgramBindings,
+    out_bindings: &mut dyn OutProgramBindings,
+    numbers: &Vec<f32>,
+    name: String,
+) {
+    if numbers.len() % 2 != 0 {
+        panic!(
+            "Your trying to bind to vec to but your not giving a vector that can be split into 2's"
+        )
+    }
+    bind_helper(
+        program,
+        bindings,
+        out_bindings,
+        numbers.as_slice().as_bytes(),
+        (numbers.len() / 2) as u64,
+        if numbers.len() == 2 {
+            vec![GLSLTYPE::Vec2, GLSLTYPE::ArrayVec2]
+        } else {
+            //todo only ArrayVec
+            vec![GLSLTYPE::Vec2, GLSLTYPE::ArrayVec2]
+        },
+        name,
+    )
+} */
+
+/* pub fn bind_float(
+    device: wgpu::Device,
+    bindings: &mut dyn ProgramBindings,
+    out_bindings: &mut dyn OutProgramBindings,
+    numbers: &f32,
+    name: String,
+) {
+    bind_helper(
+        program,
+        bindings,
+        out_bindings,
+        numbers.as_bytes(),
+        1 as u64,
+        vec![GLSLTYPE::Float],
+        name,
+    )
+} */
+
 
 #[derive(Debug)]
 pub struct DefaultBinding {
     pub binding_number: u32,
     pub name: String,
-    pub data: Option<wgpu::Buffer>,
+    pub data: Option<Rc<wgpu::Buffer>>,
     pub length: Option<u64>,
     pub gtype: GLSLTYPE,
     pub qual: Vec<QUALIFIER>,
@@ -43,7 +223,7 @@ pub trait Bindings {
 }
 
 fn bind_helper<R: ProgramBindings, T: OutProgramBindings>(
-    program: &dyn Program,
+    device: &wgpu::Device,
     bindings: &mut R,
     out_bindings: &mut T,
     data: &[u8],
@@ -58,7 +238,7 @@ fn bind_helper<R: ProgramBindings, T: OutProgramBindings>(
                 .get_bindings()
                 .iter()
                 .position(|x| x.name == name)
-                .unwrap_or_else(|| panic!("We couldn't find the binding for {}", name));
+                .expect(&format!("We couldn't find the binding for {}", name));
             out_bindings.index_binding(x)
         }
     };
@@ -72,7 +252,7 @@ fn bind_helper<R: ProgramBindings, T: OutProgramBindings>(
         );
     }
 
-    let buffer = program.get_device().create_buffer_with_data(
+    let buffer = device.create_buffer_with_data(
         data,
         if binding.qual.contains(&QUALIFIER::VERTEX) {
             wgpu::BufferUsage::VERTEX | wgpu::BufferUsage::COPY_DST
@@ -87,14 +267,14 @@ fn bind_helper<R: ProgramBindings, T: OutProgramBindings>(
         },
     );
 
-    binding.data = Some(buffer);
+    binding.data = Some(Rc::new(buffer));
     binding.length = Some(length);
 }
 
 pub trait Bindable {
     fn bind<R: ProgramBindings, T: OutProgramBindings>(
         &self,
-        program: &dyn Program,
+        device: &wgpu::Device,
         bindings: &mut R,
         out_bindings: &mut T,
         name: String,
@@ -104,13 +284,13 @@ pub trait Bindable {
 impl Bindable for Vec<u32> {
     fn bind<R: ProgramBindings, T: OutProgramBindings>(
         &self,
-        program: &dyn Program,
+        device: &wgpu::Device,
         bindings: &mut R,
         out_bindings: &mut T,
         name: String,
     ) {
         bind_helper(
-            program,
+            device,
             bindings,
             out_bindings,
             self.as_slice().as_bytes(),
@@ -124,13 +304,13 @@ impl Bindable for Vec<u32> {
 impl Bindable for Vec<f32> {
     fn bind<R: ProgramBindings, T: OutProgramBindings>(
         &self,
-        program: &dyn Program,
+        device: &wgpu::Device,
         bindings: &mut R,
         out_bindings: &mut T,
         name: String,
     ) {
         bind_helper(
-            program,
+            device,
             bindings,
             out_bindings,
             self.as_slice().as_bytes(),
@@ -144,7 +324,7 @@ impl Bindable for Vec<f32> {
 impl Bindable for Vec<[f32; 3]> {
     fn bind<R: ProgramBindings, T: OutProgramBindings>(
         &self,
-        program: &dyn Program,
+        device: &wgpu::Device,
         bindings: &mut R,
         out_bindings: &mut T,
         name: String,
@@ -156,7 +336,7 @@ impl Bindable for Vec<[f32; 3]> {
             .flatten()
             .collect();
         bind_helper(
-            program,
+            device,
             bindings,
             out_bindings,
             numbers.as_slice().as_bytes(),
@@ -168,7 +348,7 @@ impl Bindable for Vec<[f32; 3]> {
 }
 
 /* pub fn bind_vec2(
-    program: &dyn Program,
+    device: wgpu::Device,
     bindings: &mut dyn ProgramBindings,
     out_bindings: &mut dyn OutProgramBindings,
     vecs: &Vec<[f32; 2]>,
@@ -197,7 +377,7 @@ impl Bindable for Vec<[f32; 3]> {
 } */
 
 /* pub fn bind_fvec2(
-    program: &dyn Program,
+    device: wgpu::Device,
     bindings: &mut dyn ProgramBindings,
     out_bindings: &mut dyn OutProgramBindings,
     numbers: &Vec<f32>,
@@ -225,7 +405,7 @@ impl Bindable for Vec<[f32; 3]> {
 } */
 
 /* pub fn bind_mat4(
-    program: &dyn Program,
+    device: wgpu::Device,
     bindings: &mut dyn ProgramBindings,
     out_bindings: &mut dyn OutProgramBindings,
     mat: cgmath::Matrix4<f32>,
@@ -244,7 +424,7 @@ impl Bindable for Vec<[f32; 3]> {
 } */
 
 /* pub fn bind_float(
-    program: &dyn Program,
+    device: wgpu::Device,
     bindings: &mut dyn ProgramBindings,
     out_bindings: &mut dyn OutProgramBindings,
     numbers: &f32,

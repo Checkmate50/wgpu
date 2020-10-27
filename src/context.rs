@@ -2,7 +2,7 @@ use crate::shared::string_compare;
 
 #[derive(Debug)]
 pub struct BindingContext {
-    starting_context: [&'static str; 32],
+    pub starting_context: [&'static str; 32],
     result_context: [&'static str; 32],
     pub has_out_bound: bool,
     pub do_consume: bool,

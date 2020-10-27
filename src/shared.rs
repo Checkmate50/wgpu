@@ -20,7 +20,7 @@ pub fn compile_shader(contents: String, shader: ShaderType, device: &wgpu::Devic
     /*         print!("{}", contents);
     print!("\n\n"); */
     let x = glsl_to_spirv::compile(&contents, shader);
-    debug!(x);
+    //debug!(x);
     let mut vert_file =
         x.unwrap_or_else(|_| panic!("{}: {}", "You gave a bad shader source", contents));
     let mut vs = Vec::new();
@@ -30,12 +30,6 @@ pub fn compile_shader(contents: String, shader: ShaderType, device: &wgpu::Devic
     // Take the shader, ...,  and return
     device.create_shader_module(&wgpu::read_spirv(std::io::Cursor::new(&vs[..])).unwrap())
 }
-
-pub trait Program {
-    fn get_device(&self) -> &wgpu::Device;
-}
-
-// TODO functions to get the rust size and typing
 
 #[derive(Debug, Clone, PartialEq)]
 #[allow(dead_code)]
@@ -56,8 +50,10 @@ pub enum GLSLTYPE {
     ArrayVec3,
     ArrayVec4,
     Sampler,
+    SamplerShadow,
     TextureCube,
     Texture2D,
+    Texture2DArray,
 }
 
 impl GLSLTYPE {
@@ -79,8 +75,10 @@ impl GLSLTYPE {
             GLSLTYPE::ArrayVec3 => panic!("TODO: I haven't checked the size of this yet"),
             GLSLTYPE::ArrayVec4 => panic!("TODO: I haven't checked the size of this yet"),
             GLSLTYPE::Sampler => panic!("TODO: I haven't checked the size of this yet"),
+            GLSLTYPE::SamplerShadow => panic!("TODO: I haven't checked the size of this yet"),
             GLSLTYPE::TextureCube => panic!("TODO: I haven't checked the size of this yet"),
             GLSLTYPE::Texture2D => panic!("TODO: I haven't checked the size of this yet"),
+            GLSLTYPE::Texture2DArray => panic!("TODO: I haven't checked the size of this yet"),
         }
     }
 }
@@ -104,8 +102,10 @@ impl fmt::Display for GLSLTYPE {
             GLSLTYPE::ArrayVec3 => write!(f, "vec3[]"),
             GLSLTYPE::ArrayVec4 => write!(f, "vec4[]"),
             GLSLTYPE::Sampler => write!(f, "sampler"),
+            GLSLTYPE::SamplerShadow => write!(f, "samplerShadow"),
             GLSLTYPE::TextureCube => write!(f, "textureCube"),
             GLSLTYPE::Texture2D => write!(f, "texture2D"),
+            GLSLTYPE::Texture2DArray => write!(f, "texture2DArray"),
         }
     }
 }
@@ -142,11 +142,17 @@ macro_rules! typing {
     (sampler) => {
         pipeline::shared::GLSLTYPE::Sampler
     };
+    (samplerShadow) => {
+        pipeline::shared::GLSLTYPE::SamplerShadow
+    };
     (textureCube) => {
         pipeline::shared::GLSLTYPE::TextureCube
     };
     (texture2D) => {
         pipeline::shared::GLSLTYPE::Texture2D
+    };
+    (texture2DArray) => {
+        pipeline::shared::GLSLTYPE::Texture2DArray
     };
 }
 
