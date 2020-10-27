@@ -5,6 +5,7 @@
 pub mod debug;
 pub mod context;
 pub mod helper;
+pub mod bind;
 pub mod shared;
 
 pub mod wgpu_compute_header;
@@ -26,7 +27,7 @@ macro_rules! eager_binding {
 }
 
 // hi
-pub mod bind;
+/* pub mod bind;
 
 #[macro_use]
 extern crate eager;
@@ -43,4 +44,4 @@ my_shader! {compute = {
             indices[index] = indices[index]+indices2[index];
         }
     }}
-}}
+}} */

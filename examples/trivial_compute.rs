@@ -37,9 +37,9 @@ async fn execute_gpu() {
         }}
     }}
 
-    const S: ComputeShader = eager_compute_shader!{compute!()};
+    const S: ComputeShader = eager_compute_shader! {compute!()};
 
-    eager_binding!{context = compute!()};
+    eager_binding! {context = compute!()};
 
     let (program, mut bindings, mut out_bindings) = compile(&S).await;
 
@@ -48,16 +48,14 @@ async fn execute_gpu() {
     let indices2: Vec<u32> = vec![4, 3, 2, 1];
 
     {
-
         let context1 = context.bind_indices2(&indices2, &program, &mut bindings, &mut out_bindings);
-        let context2 = (&context1).bind_indices(&indices_1, &program, &mut bindings, &mut out_bindings);
+        let context2 =
+            (&context1).bind_indices(&indices_1, &program, &mut bindings, &mut out_bindings);
         let result_out_bindings = out_bindings.move_buffers();
 
-        let result1 =
-            context2.runable(|| run(&program, &mut bindings, result_out_bindings));
+        let result1 = context2.runable(|| run(&program, &mut bindings, result_out_bindings));
 
         println!("{:?}", read_uvec(&program, &result1, "indices").await);
-
 
         {
             let context3 =
