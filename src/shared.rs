@@ -73,12 +73,8 @@ pub fn new_bindings(bindings: &Vec<DefaultBinding>) -> Vec<DefaultBinding> {
     new
 }
 
-pub trait Program {
-    fn get_device(&self) -> &wgpu::Device;
-}
-
 fn bind_helper<R: ProgramBindings, T: OutProgramBindings>(
-    program: &dyn Program,
+    device: &wgpu::Device,
     bindings: &mut R,
     out_bindings: &mut T,
     data: &[u8],
@@ -107,7 +103,7 @@ fn bind_helper<R: ProgramBindings, T: OutProgramBindings>(
         );
     }
 
-    let buffer = program.get_device().create_buffer_with_data(
+    let buffer = device.create_buffer_with_data(
         data,
         if binding.qual.contains(&QUALIFIER::VERTEX) {
             wgpu::BufferUsage::VERTEX | wgpu::BufferUsage::COPY_DST
@@ -137,7 +133,7 @@ impl Context {
 pub trait Bindable {
     fn bind<R: ProgramBindings, T: OutProgramBindings>(
         &self,
-        program: &dyn Program,
+        device: &wgpu::Device,
         bindings: &mut R,
         out_bindings: &mut T,
         name: String,
@@ -146,7 +142,7 @@ pub trait Bindable {
 
     fn bind_consume<R: ProgramBindings, T: OutProgramBindings>(
         &self,
-        program: &dyn Program,
+        device: &wgpu::Device,
         bindings: &mut R,
         out_bindings: &mut T,
         name: String,
@@ -156,13 +152,13 @@ pub trait Bindable {
 
 #[macro_export]
 macro_rules! bind {
-    ($program:tt, $bindings:tt, $out_bindings:tt, $name:tt, $data:tt, $context:tt, $bind_context:tt) => {{
+    ($device:tt, $bindings:tt, $out_bindings:tt, $name:tt, $data:tt, $context:tt, $bind_context:tt) => {{
         if $bind_context.do_consume {
             panic!("You need to use bind_consume here")
         }
         Bindable::bind(
             &$data,
-            &$program,
+            &$device,
             &mut $bindings,
             &mut $out_bindings,
             $name.to_string(),
@@ -173,13 +169,13 @@ macro_rules! bind {
 
 #[macro_export]
 macro_rules! bind_consume {
-    ($program:tt, $bindings:tt, $out_bindings:tt, $name:tt, $data:tt, $context:tt, $bind_context:tt) => {{
+    ($device:tt, $bindings:tt, $out_bindings:tt, $name:tt, $data:tt, $context:tt, $bind_context:tt) => {{
         if !$bind_context.do_consume {
             panic!("You should be using bind here")
         }
         Bindable::bind_consume(
             &$data,
-            &$program,
+            &$device,
             &mut $bindings,
             &mut $out_bindings,
             $name.to_string(),
@@ -191,14 +187,14 @@ macro_rules! bind_consume {
 impl Bindable for Vec<u32> {
     fn bind<R: ProgramBindings, T: OutProgramBindings>(
         &self,
-        program: &dyn Program,
+        device: &wgpu::Device,
         bindings: &mut R,
         out_bindings: &mut T,
         name: String,
         _context: &Context,
     ) -> Context {
         bind_helper(
-            program,
+            device,
             bindings,
             out_bindings,
             self.as_slice().as_bytes(),
@@ -211,14 +207,14 @@ impl Bindable for Vec<u32> {
 
     fn bind_consume<R: ProgramBindings, T: OutProgramBindings>(
         &self,
-        program: &dyn Program,
+        device: &wgpu::Device,
         bindings: &mut R,
         out_bindings: &mut T,
         name: String,
         context: Context,
     ) -> Context {
         bind_helper(
-            program,
+            device,
             bindings,
             out_bindings,
             self.as_slice().as_bytes(),
@@ -233,7 +229,7 @@ impl Bindable for Vec<u32> {
 impl Bindable for Vec<[f32; 3]> {
     fn bind<R: ProgramBindings, T: OutProgramBindings>(
         &self,
-        program: &dyn Program,
+        device: &wgpu::Device,
         bindings: &mut R,
         out_bindings: &mut T,
         name: String,
@@ -246,7 +242,7 @@ impl Bindable for Vec<[f32; 3]> {
             .flatten()
             .collect();
         bind_helper(
-            program,
+            device,
             bindings,
             out_bindings,
             numbers.as_slice().as_bytes(),
@@ -259,7 +255,7 @@ impl Bindable for Vec<[f32; 3]> {
 
     fn bind_consume<R: ProgramBindings, T: OutProgramBindings>(
         &self,
-        program: &dyn Program,
+        device: &wgpu::Device,
         bindings: &mut R,
         out_bindings: &mut T,
         name: String,
@@ -272,7 +268,7 @@ impl Bindable for Vec<[f32; 3]> {
             .flatten()
             .collect();
         bind_helper(
-            program,
+            device,
             bindings,
             out_bindings,
             numbers.as_slice().as_bytes(),
@@ -287,7 +283,7 @@ impl Bindable for Vec<[f32; 3]> {
 impl Bindable for Vec<[f32; 4]> {
     fn bind<R: ProgramBindings, T: OutProgramBindings>(
         &self,
-        program: &dyn Program,
+        device: &wgpu::Device,
         bindings: &mut R,
         out_bindings: &mut T,
         name: String,
@@ -300,7 +296,7 @@ impl Bindable for Vec<[f32; 4]> {
             .flatten()
             .collect();
         bind_helper(
-            program,
+            device,
             bindings,
             out_bindings,
             numbers.as_slice().as_bytes(),
@@ -313,7 +309,7 @@ impl Bindable for Vec<[f32; 4]> {
 
     fn bind_consume<R: ProgramBindings, T: OutProgramBindings>(
         &self,
-        program: &dyn Program,
+        device: &wgpu::Device,
         bindings: &mut R,
         out_bindings: &mut T,
         name: String,
@@ -326,7 +322,7 @@ impl Bindable for Vec<[f32; 4]> {
             .flatten()
             .collect();
         bind_helper(
-            program,
+            device,
             bindings,
             out_bindings,
             numbers.as_slice().as_bytes(),
@@ -361,7 +357,7 @@ impl Bindable for Vec<[f32; 4]> {
 impl Bindable for cgmath::Matrix4<f32> {
     fn bind<R: ProgramBindings, T: OutProgramBindings>(
         &self,
-        program: &dyn Program,
+        device: &wgpu::Device,
         bindings: &mut R,
         out_bindings: &mut T,
         name: String,
@@ -369,7 +365,7 @@ impl Bindable for cgmath::Matrix4<f32> {
     ) -> Context {
         let mat_slice: &[f32; 16] = self.as_ref();
         bind_helper(
-            program,
+            device,
             bindings,
             out_bindings,
             bytemuck::cast_slice(mat_slice.as_bytes()),
@@ -382,7 +378,7 @@ impl Bindable for cgmath::Matrix4<f32> {
 
     fn bind_consume<R: ProgramBindings, T: OutProgramBindings>(
         &self,
-        program: &dyn Program,
+        device: &wgpu::Device,
         bindings: &mut R,
         out_bindings: &mut T,
         name: String,
@@ -390,7 +386,7 @@ impl Bindable for cgmath::Matrix4<f32> {
     ) -> Context {
         let mat_slice: &[f32; 16] = self.as_ref();
         bind_helper(
-            program,
+            device,
             bindings,
             out_bindings,
             bytemuck::cast_slice(mat_slice.as_bytes()),
@@ -405,14 +401,14 @@ impl Bindable for cgmath::Matrix4<f32> {
 impl Bindable for Vec<f32> {
     fn bind<R: ProgramBindings, T: OutProgramBindings>(
         &self,
-        program: &dyn Program,
+        device: &wgpu::Device,
         bindings: &mut R,
         out_bindings: &mut T,
         name: String,
         _context: &Context,
     ) -> Context {
         bind_helper(
-            program,
+            device,
             bindings,
             out_bindings,
             self.as_slice().as_bytes(),
@@ -424,14 +420,14 @@ impl Bindable for Vec<f32> {
     }
     fn bind_consume<R: ProgramBindings, T: OutProgramBindings>(
         &self,
-        program: &dyn Program,
+        device: &wgpu::Device,
         bindings: &mut R,
         out_bindings: &mut T,
         name: String,
         context: Context,
     ) -> Context {
         bind_helper(
-            program,
+            device,
             bindings,
             out_bindings,
             self.as_slice().as_bytes(),

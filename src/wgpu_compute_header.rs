@@ -7,7 +7,7 @@ use std::rc::Rc;
 
 use crate::shared::{
     check_gl_builtin_type, compile_shader, new_bindings, process_body, Bindings, DefaultBinding,
-    OutProgramBindings, Program, ProgramBindings, PARAMETER, QUALIFIER,
+    OutProgramBindings, ProgramBindings, PARAMETER, QUALIFIER,
 };
 
 #[derive(Debug)]
@@ -74,18 +74,6 @@ pub struct ComputeProgram {
     queue: wgpu::Queue,
     pipeline: wgpu::ComputePipeline,
     bind_group_layout: wgpu::BindGroupLayout,
-}
-
-impl Program for ComputeProgram {
-    fn get_device(&self) -> &wgpu::Device {
-        &self.device
-    }
-}
-
-impl Program for &ComputeProgram {
-    fn get_device(&self) -> &wgpu::Device {
-        &self.device
-    }
 }
 
 fn stringify_shader(s: &ComputeShader, b: &ComputeBindings, b_out: &OutComputeBindings) -> String {

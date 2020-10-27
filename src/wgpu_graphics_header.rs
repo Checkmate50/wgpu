@@ -9,23 +9,14 @@ use winit::window::Window;
 use crate::shared::{
     check_gl_builtin_type, compile_shader, glsl_size, has_in_qual, has_out_qual, has_uniform_qual,
     new_bindings, process_body, string_compare, Bindable, Bindings, Context, DefaultBinding,
-    OutProgramBindings, Program, ProgramBindings, GLSLTYPE, PARAMETER, QUALIFIER,
+    OutProgramBindings, ProgramBindings, GLSLTYPE, PARAMETER, QUALIFIER,
 };
 
 use crate::context::BindingContext;
 
 pub struct GraphicsProgram {
-    pub surface: wgpu::Surface,
-    pub device: wgpu::Device,
     bind_group_layout: wgpu::BindGroupLayout,
-    pub queue: wgpu::Queue,
     pub pipeline: wgpu::RenderPipeline,
-}
-
-impl Program for GraphicsProgram {
-    fn get_device(&self) -> &wgpu::Device {
-        &self.device
-    }
 }
 
 #[derive(Debug)]
@@ -198,8 +189,9 @@ fn stringify_shader(
 }
 
 pub fn generate_swap_chain(
-    program: &GraphicsProgram,
+    surface: &wgpu::Surface,
     window: &winit::window::Window,
+    device: &wgpu::Device,
 ) -> wgpu::SwapChain {
     let size = window.inner_size();
     // For drawing to window
@@ -213,7 +205,7 @@ pub fn generate_swap_chain(
         // As opposed to Immediate where it is possible to see visual tearing(where multiple frames are visible at once)
         present_mode: wgpu::PresentMode::Mailbox,
     };
-    program.device.create_swap_chain(&program.surface, &sc_desc)
+    device.create_swap_chain(&surface, &sc_desc)
 }
 
 fn create_bindings(
@@ -398,37 +390,12 @@ pub enum PipelineType {
 
 pub async fn graphics_compile(
     vec_buffer: &mut [wgpu::VertexAttributeDescriptor; 32],
-    window: &Window,
+    device: &wgpu::Device,
     vertex: &GraphicsShader,
     fragment: &GraphicsShader,
     pipe_type: PipelineType,
 ) -> (GraphicsProgram, GraphicsBindings, OutGraphicsBindings) {
     // the adapter is the handler to the physical graphics unit
-
-    // Create a surface to draw images on
-    let surface = wgpu::Surface::create(window);
-    let adapter = wgpu::Adapter::request(
-        &wgpu::RequestAdapterOptions {
-            // Can specify Low/High power usage
-            power_preference: wgpu::PowerPreference::Default,
-            compatible_surface: Some(&surface),
-        },
-        // Map to Vulkan/Metal/Direct3D 12
-        wgpu::BackendBit::PRIMARY,
-    )
-    .await
-    .unwrap();
-
-    // The device manages the connection and resources of the adapter
-    // The queue is a literal queue of tasks for the gpu
-    let (device, queue) = adapter
-        .request_device(&wgpu::DeviceDescriptor {
-            extensions: wgpu::Extensions {
-                anisotropic_filtering: false,
-            },
-            limits: wgpu::Limits::default(),
-        })
-        .await;
 
     let (mut program_bindings1, out_program_bindings1, program_bindings2, out_program_bindings2) =
         create_bindings(&vertex, &fragment);
@@ -594,8 +561,14 @@ pub async fn graphics_compile(
             // Alternatives include Front and Back culling
             // We are currently back-facing so CullMode::Front does nothing and Back gets rid of the triangle
             cull_mode: wgpu::CullMode::Back,
-            depth_bias: 0, /// TODO We may want to adjust the depth bias and scaling during stencilling
-            depth_bias_slope_scale: 0.0,
+            depth_bias: match pipe_type {
+                PipelineType::Stencil => 2,
+                PipelineType::ColorWithStencil | PipelineType::Color => 1,
+            }, /// TODO We may want to adjust the depth bias and scaling during stencilling
+            depth_bias_slope_scale: match pipe_type {
+                PipelineType::Stencil => 2.0,
+                PipelineType::ColorWithStencil | PipelineType::Color => 0.0,
+            },
             depth_bias_clamp: 0.0,
         }),
         // Use Triangles
@@ -668,9 +641,6 @@ pub async fn graphics_compile(
         GraphicsProgram {
             pipeline: render_pipeline,
             bind_group_layout,
-            device,
-            queue,
-            surface,
         },
         program_bindings1,
         out_program_bindings1,
@@ -678,7 +648,6 @@ pub async fn graphics_compile(
 }
 
 pub fn bind_sampler(
-    program: &dyn Program,
     bindings: &mut GraphicsBindings,
     out_bindings: &mut OutGraphicsBindings,
     sample: wgpu::Sampler,
@@ -750,7 +719,6 @@ pub fn bind_sampler(
 }
  */
 pub fn bind_texture(
-    program: &dyn Program,
     bindings: &mut GraphicsBindings,
     out_bindings: &mut OutGraphicsBindings,
     texture: wgpu::TextureView,
@@ -911,6 +879,7 @@ impl<'a> BindingPreprocess {
 
 pub fn graphics_run<'a>(
     program: &GraphicsProgram,
+    device: &wgpu::Device,
     mut rpass: wgpu::RenderPass<'a>,
     bind_group: &'a mut wgpu::BindGroup,
     bind_preprocess: &'a BindingPreprocess,
@@ -959,7 +928,7 @@ pub fn graphics_run<'a>(
         label: None,
     };
 
-    *bind_group = program.device.create_bind_group(bgd);
+    *bind_group = device.create_bind_group(bgd);
     {
         // The order must be set_pipeline -> set a bind_group if needed -> set a vertex buffer -> set an index buffer -> do draw
         // Otherwise we crash out
@@ -1013,18 +982,18 @@ pub fn graphics_run<'a>(
 
 pub fn graphics_run_indicies<'a>(
     program: &'a GraphicsProgram,
+    device: &wgpu::Device,
     pass: wgpu::RenderPass<'a>,
     bind_group: &'a mut wgpu::BindGroup,
     bind_preprocess: &'a mut BindingPreprocess,
     indicies: &Vec<u16>,
 ) -> wgpu::RenderPass<'a> {
     bind_preprocess.indicies = Some(Rc::new(
-        program
-            .get_device()
+        device
             .create_buffer_with_data(indicies.as_slice().as_bytes(), wgpu::BufferUsage::INDEX),
     ));
     bind_preprocess.index_len = Some(indicies.len() as u32);
-    graphics_run(program, pass, bind_group, bind_preprocess)
+    graphics_run(program, device, pass, bind_group, bind_preprocess)
 }
 /* todo
 pub fn graphics_pipe(
@@ -1063,10 +1032,9 @@ pub fn graphics_pipe(
     graphics_run(program, rpass, bind_group, &in_bindings, out_bindings);
 } */
 
-pub fn default_bind_group(program: &GraphicsProgram) -> wgpu::BindGroup {
+pub fn default_bind_group(device: &wgpu::Device) -> wgpu::BindGroup {
     let bind_group_layout =
-        program
-            .device
+        device
             .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 // The layout of for each binding specify a number to connect with the bind_group, a visibility to specify for which stage it's for and a type
                 bindings: &[],
@@ -1079,7 +1047,7 @@ pub fn default_bind_group(program: &GraphicsProgram) -> wgpu::BindGroup {
         label: None,
     };
 
-    let bind_group = program.device.create_bind_group(bgd);
+    let bind_group = device.create_bind_group(bgd);
     bind_group
 }
 
@@ -1216,7 +1184,7 @@ macro_rules! graphics_shader {
 
 #[macro_export]
 macro_rules! compile_valid_graphics_program {
-    ($window:tt, $vertex:tt, $fragment:tt, $pipe_type:path) => {{
+    ($device:tt, $vertex:tt, $fragment:tt, $pipe_type:path) => {{
         let mut compile_buffer: [wgpu::VertexAttributeDescriptor; 32] =
             pipeline::wgpu_graphics_header::compile_buffer();
 
@@ -1224,7 +1192,7 @@ macro_rules! compile_valid_graphics_program {
         const _: () = pipeline::wgpu_graphics_header::valid_fragment_shader(&$fragment);
         let (x, y, z) = pipeline::wgpu_graphics_header::graphics_compile(
             &mut compile_buffer,
-            &$window,
+            &$device,
             &$vertex,
             &$fragment,
             $pipe_type,
@@ -1236,14 +1204,14 @@ macro_rules! compile_valid_graphics_program {
 
 #[macro_export]
 macro_rules! compile_valid_stencil_program {
-    ($window:tt, $vertex:tt, $fragment:tt, $pipe_type:path) => {{
+    ($device:tt, $vertex:tt, $fragment:tt, $pipe_type:path) => {{
         let mut compile_buffer: [wgpu::VertexAttributeDescriptor; 32] =
             pipeline::wgpu_graphics_header::compile_buffer();
 
         const _: () = pipeline::wgpu_graphics_header::valid_vertex_shader(&$vertex);
         let (x, y, z) = pipeline::wgpu_graphics_header::graphics_compile(
             &mut compile_buffer,
-            &$window,
+            &$device,
             &$vertex,
             &$fragment,
             $pipe_type,

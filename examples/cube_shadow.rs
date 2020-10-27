@@ -26,6 +26,31 @@ pub use pipeline::helper::{
 async fn run(event_loop: EventLoop<()>, window: Window) {
     let size = window.inner_size();
 
+    // Create a surface to draw images on
+    let surface = wgpu::Surface::create(&window);
+    let adapter = wgpu::Adapter::request(
+        &wgpu::RequestAdapterOptions {
+            // Can specify Low/High power usage
+            power_preference: wgpu::PowerPreference::Default,
+            compatible_surface: Some(&surface),
+        },
+        // Map to Vulkan/Metal/Direct3D 12
+        wgpu::BackendBit::PRIMARY,
+    )
+    .await
+    .unwrap();
+
+    // The device manages the connection and resources of the adapter
+    // The queue is a literal queue of tasks for the gpu
+    let (device, queue) = adapter
+        .request_device(&wgpu::DeviceDescriptor {
+            extensions: wgpu::Extensions {
+                anisotropic_filtering: false,
+            },
+            limits: wgpu::Limits::default(),
+        })
+        .await;
+
     const BAKE_VERTEXT: (GraphicsShader, BindingContext) = graphics_shader! {
         [[vertex in] vec3] a_position;
 
@@ -127,7 +152,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     const BAKE_STARTING_BIND_CONTEXT: BindingContext = BAKE_VERTEXT.1;
 
     let (stencil_program, stencil_template_bindings, stencil_template_out_bindings, _) =
-        compile_valid_stencil_program!(window, B_V, B_F, PipelineType::Stencil);
+        compile_valid_stencil_program!(device, B_V, B_F, PipelineType::Stencil);
 
     const S_V: GraphicsShader = VERTEXT.0;
     const S_F: GraphicsShader = FRAGMENT.0;
@@ -136,7 +161,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         graphics_starting_context(VERTEXT_STARTING_BIND_CONTEXT, S_F);
 
     let (program, template_bindings, template_out_bindings, _) =
-        compile_valid_graphics_program!(window, S_V, S_F, PipelineType::ColorWithStencil);
+        compile_valid_graphics_program!(device, S_V, S_F, PipelineType::ColorWithStencil);
 
     let (positions, normals, index_data) = load_cube();
 
@@ -161,7 +186,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     //let model_mat2 = translate(model_mat, 2.0, 0.0, 0.0);
 
     // A "chain" of buffers that we render on to the display
-    let mut swap_chain = generate_swap_chain(&program, &window);
+    let mut swap_chain = generate_swap_chain(&surface, &window, &device);
 
     event_loop.run(move |event, _, control_flow: &mut ControlFlow| {
         *control_flow = ControlFlow::Poll;
@@ -169,9 +194,8 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
             // Everything that can be processed has been so we can now redraw the image on our window
             Event::MainEventsCleared => window.request_redraw(),
             Event::RedrawRequested(_) => {
-                let mut init_encoder = program
-                    .device
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+                let mut init_encoder =
+                    device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
                 let frame = swap_chain
                     .get_next_texture()
@@ -179,12 +203,12 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                 {
                     let mut bindings: GraphicsBindings = template_bindings.clone();
                     let mut out_bindings: OutGraphicsBindings = template_out_bindings.clone();
-                    let mut bind_group = default_bind_group(&program);
+                    let mut bind_group = default_bind_group(&device);
 
                     let mut bindings_stencil: GraphicsBindings = stencil_template_bindings.clone();
                     let mut out_bindings_stencil: OutGraphicsBindings =
                         stencil_template_out_bindings.clone();
-                    let mut bind_group_stencil = default_bind_group(&stencil_program);
+                    let mut bind_group_stencil = default_bind_group(&device);
                     let mut bind_prerun_stencil;
 
                     let mut bind_prerun;
@@ -192,7 +216,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 
                     let context = Context::new();
 
-                    let sampler = program.device.create_sampler(&wgpu::SamplerDescriptor {
+                    let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
                         address_mode_u: wgpu::AddressMode::ClampToEdge,
                         address_mode_v: wgpu::AddressMode::ClampToEdge,
                         address_mode_w: wgpu::AddressMode::ClampToEdge,
@@ -218,7 +242,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                         height: tex_size,
                         depth: 1,
                     };
-                    let shadow_texture = program.device.create_texture(&wgpu::TextureDescriptor {
+                    let shadow_texture = device.create_texture(&wgpu::TextureDescriptor {
                         size: shadow_size,
                         array_layer_count: 1, // One light
                         mip_level_count: 1,
@@ -240,7 +264,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                             array_layer_count: 1,
                         });
 
-                    let depth_texture = program.device.create_texture(&wgpu::TextureDescriptor {
+                    let depth_texture = device.create_texture(&wgpu::TextureDescriptor {
                         size: wgpu::Extent3d {
                             width: window.inner_size().width,
                             height: window.inner_size().height,
@@ -267,7 +291,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                             const BAKE_BIND_CONTEXT_1: BindingContext =
                                 update_bind_context(&BAKE_STARTING_BIND_CONTEXT, "a_position");
                             let context1 = bind!(
-                                stencil_program,
+                                device,
                                 bindings_stencil,
                                 out_bindings_stencil,
                                 "a_position",
@@ -279,7 +303,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                 const BAKE_BIND_CONTEXT_2: BindingContext =
                                     update_bind_context(&BAKE_BIND_CONTEXT_1, "u_viewProj");
                                 let context2 = bind!(
-                                    stencil_program,
+                                    device,
                                     bindings_stencil,
                                     out_bindings_stencil,
                                     "u_viewProj",
@@ -291,7 +315,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                     const BAKE_BIND_CONTEXT_3: BindingContext =
                                         update_bind_context(&BAKE_BIND_CONTEXT_2, "u_Color");
                                     let context3 = bind!(
-                                        stencil_program,
+                                        device,
                                         bindings_stencil,
                                         out_bindings_stencil,
                                         "u_Color",
@@ -303,7 +327,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                         const BAKE_BIND_CONTEXT_4: BindingContext =
                                             update_bind_context(&BAKE_BIND_CONTEXT_3, "u_World");
                                         let context4 = bind!(
-                                            stencil_program,
+                                            device,
                                             bindings_stencil,
                                             out_bindings_stencil,
                                             "u_World",
@@ -320,6 +344,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                             dbg!();
                                             rpass_stencil = graphics_run_indicies(
                                                 &stencil_program,
+                                                &device,
                                                 rpass_stencil,
                                                 &mut bind_group_stencil,
                                                 &mut bind_prerun_stencil,
@@ -341,7 +366,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                             const BIND_CONTEXT_1: BindingContext =
                                 update_bind_context(&STARTING_BIND_CONTEXT, "a_position");
                             let context1 = bind!(
-                                program,
+                                device,
                                 bindings,
                                 out_bindings,
                                 "a_position",
@@ -353,7 +378,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                 const BIND_CONTEXT_2: BindingContext =
                                     update_bind_context(&BIND_CONTEXT_1, "u_viewProj");
                                 let context2 = bind!(
-                                    program,
+                                    device,
                                     bindings,
                                     out_bindings,
                                     "u_viewProj",
@@ -365,7 +390,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                     const BIND_CONTEXT_3: BindingContext =
                                         update_bind_context(&BIND_CONTEXT_2, "u_Color");
                                     let context3 = bind!(
-                                        program,
+                                        device,
                                         bindings,
                                         out_bindings,
                                         "u_Color",
@@ -377,7 +402,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                         const BIND_CONTEXT_4: BindingContext =
                                             update_bind_context(&BIND_CONTEXT_3, "u_World");
                                         let context4 = bind!(
-                                            program,
+                                            device,
                                             bindings,
                                             out_bindings,
                                             "u_World",
@@ -390,7 +415,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                             const BIND_CONTEXT_5: BindingContext =
                                                 update_bind_context(&BIND_CONTEXT_4, "a_normal");
                                             let context5 = bind!(
-                                                program,
+                                                device,
                                                 bindings,
                                                 out_bindings,
                                                 "a_normal",
@@ -405,7 +430,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                                         "light_proj",
                                                     );
                                                 let context6 = bind!(
-                                                    program,
+                                                    device,
                                                     bindings,
                                                     out_bindings,
                                                     "light_proj",
@@ -421,7 +446,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                                             "light_pos",
                                                         );
                                                     let context7 = bind!(
-                                                        program,
+                                                        device,
                                                         bindings,
                                                         out_bindings,
                                                         "light_pos",
@@ -436,7 +461,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                                                 "light_color",
                                                             );
                                                         let context8 = bind!(
-                                                            program,
+                                                            device,
                                                             bindings,
                                                             out_bindings,
                                                             "light_color",
@@ -451,7 +476,6 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                                                     "s_Shadow",
                                                                 );
                                                             bind_sampler(
-                                                                &program,
                                                                 &mut bindings,
                                                                 &mut out_bindings,
                                                                 sampler,
@@ -466,7 +490,6 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                                                         "t_Shadow",
                                                                     );
                                                                 bind_texture(
-                                                                    &program,
                                                                     &mut bindings,
                                                                     &mut out_bindings,
                                                                     shadow_view,
@@ -484,6 +507,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                                                     dbg!();
                                                                     rpass = graphics_run_indicies(
                                                                         &program,
+                                                                        &device,
                                                                         rpass,
                                                                         &mut bind_group,
                                                                         &mut bind_prerun,
@@ -506,7 +530,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                     }
                 }
                 dbg!();
-                program.queue.submit(&[init_encoder.finish()]);
+                queue.submit(&[init_encoder.finish()]);
                 dbg!();
                 /* std::process::exit(0); */
             }
