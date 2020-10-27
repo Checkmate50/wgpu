@@ -8,6 +8,11 @@ trivial2:
 	#export RUST_BACKTRACE=1 && cargo +nightly run --example trivial_compute_invalid
 	cargo +nightly run --example trivial_compute_invalid
 
+.PHONY: trivial3
+trivial3:
+	#export RUST_BACKTRACE=1 && cargo +nightly run --example trivial_compute
+	cargo +nightly run --example trivial_compute_external
+
 .PHONY: pipeline
 pipeline:
 	#export RUST_BACKTRACE=1 && cargo +nightly run --example trivial_pipeline

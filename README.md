@@ -22,15 +22,18 @@ An execution of a program within a binding context is valid if:
 
 ### Managing the binding conditions
 
-At the moment, the following structures enforce these conditions: a binding context, a usage context and two sets of bindings.
+At the moment, the following structures enforce these conditions: a binding context, and two sets of bindings.
 
+todo update binding context to talk about param_types
+The ([binding context](wgpu_macros/lib.rs)) is a series of macro generated structs roughly of the form ```Context<AbstractBind, ...>``` 
+
+todo remove old binding_context description
 The ([binding context](src/context.rs)) maintains a list of ```in``` parameters that need to be bound before the program is run and a list of ```out``` parameters that will be produced as a result of the program. When a parameter is bound, its name is removed from the list of ```in``` parameters. When the list is empty, the program is ready to be run. When a parameter is bound that is also a member of the ```out``` parameter list, the usability(as tracked by the usage context) has been affected and a flag is flipped.
-
-The ([usage context](src/shared.rs)) tracks whether the current set of bindings can be used once or for multiple executions by it's type. When the context is typed as ```Context```, all of the buffers currently in the set of bindings will not be mutated during a run of the program so they can be reused. When the previously mentioned flag is flipped, the bind for that parameter must transition the type of the context to ```MutContext``` which signifies that a parameter bound in this context will be modified by the program's execution and this context can not be reused. To do so would expose that the data bound on the cpu and the data currently on the gpu differ.
 
 Finally, there are two sets of ([bindings](src/shared.rs)) which collect the buffers as they are generated. Currently there are two, ```ProgramBindings``` to collect ```in``` qualified parameters and ```OutProgramBindings``` to collect ```out``` parameters. They also handle the metadata of the parameter and check that the data being bound is of the right type.
 
 ### Typing
+todo update this to talk about param types
 The usage context has two types(```Context``` and ```MutContext```) to linearly track the usability of the context. This means we need three functions to bind: ```bind: Context -> Context```, ```bind_mutate: Context -> MutContext```, and ```bind_consume: MutContext -> MutContext```. The interesting function here is ```bind_mutate``` since that function converts the multi-use ```Context``` into a single-use ```MutContext```. This must be used the first time a parameter annotated with ``in out`` qualifiers is bound since the data within the context will change after the program has been run.
 
 Most data is bound as an array of bytes. Common types of data have implementations of the ```Bindable``` trait which handles the context type and conversion of data to ```&[u8]```. Binding samplers and textures require different bind functions.
