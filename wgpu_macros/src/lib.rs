@@ -157,7 +157,6 @@ impl Parse for Context {
 #[proc_macro]
 pub fn init(_: TokenStream) -> TokenStream {
     TokenStream::from(quote! {
-        use pipeline::shared::{Program};
         use pipeline::bind::{ProgramBindings, OutProgramBindings, Bindable};
 
         trait AbstractBind {
@@ -237,7 +236,7 @@ pub fn generic_bindings(input: TokenStream) -> TokenStream {
         }
 
         impl #context<#(#run),*> {
-            fn runable<P, B>(&self, f: P) -> B where P: FnOnce() -> B{
+            fn runnable<P, B>(&self, f: P) -> B where P: FnOnce() -> B{
                 f()
             }
             fn can_pipe(&self, b : &dyn ContextInputs) {
@@ -301,14 +300,14 @@ pub fn generic_bindings(input: TokenStream) -> TokenStream {
 
         all_expanded.push(quote!{
             trait #trait_name<#(#trait_params: AbstractBind,)* B: Bindable, R: ProgramBindings, T: OutProgramBindings>{
-                fn #bind_name(self, data : &B, program: &dyn Program, bindings: &mut R, out_bindings: &mut T) -> #context<#(#type_params),*>;
+                fn #bind_name(self, data : &B, device: &wgpu::Device, bindings: &mut R, out_bindings: &mut T) -> #context<#(#type_params),*>;
             }
 
             impl<#(#restricted_abstract: AbstractBind,)* B: Bindable, R: ProgramBindings, T: OutProgramBindings> #trait_name<#(#restricted_trait,)* B, R, T> for &#context<#(#restricted_impl),*> {
-                fn #bind_name(self, data : &B, program: &dyn Program, bindings: &mut R, out_bindings: &mut T) -> #context<#(#restricted_type),*> {
+                fn #bind_name(self, data : &B, device: &wgpu::Device, bindings: &mut R, out_bindings: &mut T) -> #context<#(#restricted_type),*> {
                     Bindable::bind(
                         data,
-                        program,
+                        device,
                         bindings,
                         out_bindings,
                         stringify!(#name).to_string(),
@@ -320,10 +319,10 @@ pub fn generic_bindings(input: TokenStream) -> TokenStream {
             }
 
             impl<#(#trait_params: AbstractBind,)* B: Bindable, R: ProgramBindings, T: OutProgramBindings> #trait_name<#(#trait_params,)* B, R, T> for #context<#(#impl_params),*> {
-                fn #bind_name(self, data : &B, program: &dyn Program, bindings: &mut R, out_bindings: &mut T) -> #context<#(#type_params),*>{
+                fn #bind_name(self, data : &B, device: &wgpu::Device, bindings: &mut R, out_bindings: &mut T) -> #context<#(#type_params),*>{
                     Bindable::bind(
                         data,
-                        program,
+                        device,
                         bindings,
                         out_bindings,
                         stringify!(#name).to_string(),

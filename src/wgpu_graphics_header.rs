@@ -5,38 +5,21 @@ use std::collections::HashMap;
 use std::convert::TryInto;
 use std::rc::Rc;
 
-
 use crate::shared::{
     check_gl_builtin_type, compile_shader, has_in_qual, has_out_qual, has_uniform_qual,
     process_body, string_compare, GLSLTYPE, PARAMETER, QUALIFIER,
-
 };
 
-use crate::bind::{new_bindings, Bindings, DefaultBinding, OutProgramBindings, ProgramBindings};
+use crate::bind::{
+    new_bindings, Bindings, DefaultBinding, OutProgramBindings, ProgramBindings, SamplerBinding,
+    TextureBinding,
+};
 
 use crate::context::BindingContext;
 
 pub struct GraphicsProgram {
     bind_group_layout: wgpu::BindGroupLayout,
     pub pipeline: wgpu::RenderPipeline,
-}
-
-#[derive(Debug)]
-pub struct TextureBinding {
-    pub binding_number: u32,
-    pub name: String,
-    pub data: Option<Rc<wgpu::TextureView>>,
-    pub gtype: GLSLTYPE,
-    pub qual: Vec<QUALIFIER>,
-}
-
-#[derive(Debug)]
-pub struct SamplerBinding {
-    pub binding_number: u32,
-    pub name: String,
-    pub data: Option<Rc<wgpu::Sampler>>,
-    pub gtype: GLSLTYPE,
-    pub qual: Vec<QUALIFIER>,
 }
 
 #[derive(Debug)]
@@ -54,6 +37,12 @@ impl ProgramBindings for GraphicsBindings {
     }
     fn index_binding(&mut self, index: usize) -> &mut DefaultBinding {
         &mut self.bindings[index]
+    }
+    fn get_samplers(&mut self) -> Option<&mut Vec<SamplerBinding>> {
+        Some(&mut self.samplers)
+    }
+    fn get_textures(&mut self) -> Option<&mut Vec<TextureBinding>> {
+        Some(&mut self.textures)
     }
 }
 
@@ -649,77 +638,6 @@ pub async fn graphics_compile(
     )
 }
 
-pub fn bind_sampler(
-    bindings: &mut GraphicsBindings,
-    out_bindings: &mut OutGraphicsBindings,
-    sample: wgpu::Sampler,
-    name: String,
-) {
-    let mut binding = match bindings.samplers.iter().position(|x| x.name == name) {
-        Some(x) => &mut bindings.samplers[x],
-        None => {
-            panic!("I haven't considered that you would output a sampler yet")
-            /* let x = out_bindings
-                .getBindings()
-                .iter()
-                .position(|x| x.name == name)
-                .expect("We couldn't find the binding");
-            out_bindings.samplers[x] */
-        }
-    };
-    binding.data = Some(Rc::new(sample));
-}
-
-/* impl Bindable for wgpu::Sampler {
-    fn bind(
-        &self,
-        program: &dyn Program,
-        bindings: &mut GraphicsBindings,
-        out_bindings: &mut OutGraphicsBindings,
-        name: String,
-        _context: &Context,
-    ) -> Context {
-        let mut binding = match bindings.samplers.iter().position(|x| x.name == name) {
-            Some(x) => &mut bindings.samplers[x],
-            None => {
-                panic!("I haven't considered that you would output a sampler yet")
-                /* let x = out_bindings
-                    .getBindings()
-                    .iter()
-                    .position(|x| x.name == name)
-                    .expect("We couldn't find the binding");
-                out_bindings.samplers[x] */
-            }
-        };
-        binding.data = Some(Rc::new(self));
-        Context::new()
-    }
-
-    fn bind_consume<R: ProgramBindings, T: OutProgramBindings>(
-        &self,
-        program: &dyn Program,
-        bindings: &mut R,
-        out_bindings: &mut T,
-        name: String,
-        context: Context,
-    ) -> Context {
-        let mut binding = match bindings.samplers.iter().position(|x| x.name == name) {
-            Some(x) => &mut bindings.samplers[x],
-            None => {
-                panic!("I haven't considered that you would output a sampler yet")
-                /* let x = out_bindings
-                    .getBindings()
-                    .iter()
-                    .position(|x| x.name == name)
-                    .expect("We couldn't find the binding");
-                out_bindings.samplers[x] */
-            }
-        };
-        binding.data = Some(Rc::new(self));
-        context
-    }
-}
- */
 pub fn bind_texture(
     bindings: &mut GraphicsBindings,
     out_bindings: &mut OutGraphicsBindings,

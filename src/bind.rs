@@ -4,7 +4,6 @@ use crate::shared::{GLSLTYPE, QUALIFIER};
 
 use std::rc::Rc;
 
-
 #[macro_export]
 macro_rules! bind {
     ($device:tt, $bindings:tt, $out_bindings:tt, $name:tt, $data:tt, $context:tt, $bind_context:tt) => {{
@@ -37,73 +36,6 @@ macro_rules! bind_consume {
             $context,
         )
     }};
-}
-
-impl Bindable for Vec<[f32; 4]> {
-    fn bind<R: ProgramBindings, T: OutProgramBindings>(
-        &self,
-        device: &wgpu::Device,
-        bindings: &mut R,
-        out_bindings: &mut T,
-        name: String,
-    ) {
-        let numbers: Vec<f32> = self
-            .clone()
-            .into_iter()
-            .map(|x| x.to_vec())
-            .flatten()
-            .collect();
-        bind_helper(
-            device,
-            bindings,
-            out_bindings,
-            numbers.as_slice().as_bytes(),
-            self.len() as u64,
-            vec![GLSLTYPE::Vec4, GLSLTYPE::ArrayVec4],
-            name,
-        );
-    }
-}
-
-
-/* pub fn bind_mat4(
-    device: wgpu::Device,
-    bindings: &mut dyn ProgramBindings,
-    out_bindings: &mut dyn OutProgramBindings,
-    mat: cgmath::Matrix4<f32>,
-    name: String,
-) {
-    let mat_slice: &[f32; 16] = mat.as_ref();
-    bind_helper(
-        program,
-        bindings,
-        out_bindings,
-        bytemuck::cast_slice(mat_slice.as_bytes()),
-        64 as u64,
-        vec![GLSLTYPE::Mat4],
-        name,
-    )
-} */
-
-impl Bindable for cgmath::Matrix4<f32> {
-    fn bind<R: ProgramBindings, T: OutProgramBindings>(
-        &self,
-        device: &wgpu::Device,
-        bindings: &mut R,
-        out_bindings: &mut T,
-        name: String,
-    ) {
-        let mat_slice: &[f32; 16] = self.as_ref();
-        bind_helper(
-            device,
-            bindings,
-            out_bindings,
-            bytemuck::cast_slice(mat_slice.as_bytes()),
-            64 as u64,
-            vec![GLSLTYPE::Mat4],
-            name,
-        );
-    }
 }
 
 /* pub fn bind_vec2(
@@ -181,6 +113,23 @@ impl Bindable for cgmath::Matrix4<f32> {
     )
 } */
 
+#[derive(Debug)]
+pub struct TextureBinding {
+    pub binding_number: u32,
+    pub name: String,
+    pub data: Option<Rc<wgpu::TextureView>>,
+    pub gtype: GLSLTYPE,
+    pub qual: Vec<QUALIFIER>,
+}
+
+#[derive(Debug)]
+pub struct SamplerBinding {
+    pub binding_number: u32,
+    pub name: String,
+    pub data: Option<Rc<wgpu::Sampler>>,
+    pub gtype: GLSLTYPE,
+    pub qual: Vec<QUALIFIER>,
+}
 
 #[derive(Debug)]
 pub struct DefaultBinding {
@@ -210,6 +159,8 @@ pub fn new_bindings(bindings: &Vec<DefaultBinding>) -> Vec<DefaultBinding> {
 
 pub trait ProgramBindings {
     fn get_bindings(&mut self) -> &mut Vec<DefaultBinding>;
+    fn get_samplers(&mut self) -> Option<&mut Vec<SamplerBinding>>;
+    fn get_textures(&mut self) -> Option<&mut Vec<TextureBinding>>;
     fn index_binding(&mut self, index: usize) -> &mut DefaultBinding;
 }
 
@@ -344,6 +295,110 @@ impl Bindable for Vec<[f32; 3]> {
             vec![GLSLTYPE::Vec3, GLSLTYPE::ArrayVec3],
             name,
         )
+    }
+}
+impl Bindable for Vec<[f32; 4]> {
+    fn bind<R: ProgramBindings, T: OutProgramBindings>(
+        &self,
+        device: &wgpu::Device,
+        bindings: &mut R,
+        out_bindings: &mut T,
+        name: String,
+    ) {
+        let numbers: Vec<f32> = self
+            .clone()
+            .into_iter()
+            .map(|x| x.to_vec())
+            .flatten()
+            .collect();
+        bind_helper(
+            device,
+            bindings,
+            out_bindings,
+            numbers.as_slice().as_bytes(),
+            self.len() as u64,
+            vec![GLSLTYPE::Vec4, GLSLTYPE::ArrayVec4],
+            name,
+        );
+    }
+}
+
+impl Bindable for wgpu::SamplerDescriptor {
+    fn bind<R: ProgramBindings, T: OutProgramBindings>(
+        &self,
+        device: &wgpu::Device,
+        bindings: &mut R,
+        out_bindings: &mut T,
+        name: String,
+    ) {
+        let mut binding = match bindings
+            .get_samplers()
+            .unwrap()
+            .iter()
+            .position(|x| x.name == name)
+        {
+            Some(x) => &mut bindings.get_samplers().unwrap()[x],
+            None => {
+                panic!("I haven't considered that you would output a sampler yet")
+                /* let x = out_bindings
+                    .getBindings()
+                    .iter()
+                    .position(|x| x.name == name)
+                    .expect("We couldn't find the binding");
+                out_bindings.samplers[x] */
+            }
+        };
+        binding.data = Some(Rc::new(device.create_sampler(self)));
+    }
+}
+
+impl Bindable for wgpu::Texture {
+    fn bind<R: ProgramBindings, T: OutProgramBindings>(
+        &self,
+        device: &wgpu::Device,
+        bindings: &mut R,
+        out_bindings: &mut T,
+        name: String,
+    ) {
+        let mut binding = match bindings
+            .get_textures()
+            .unwrap()
+            .iter()
+            .position(|x| x.name == name)
+        {
+            Some(x) => &mut bindings.get_textures().unwrap()[x],
+            None => {
+                panic!("I haven't considered that you would output a texture yet")
+                /* let x = out_bindings
+                    .getBindings()
+                    .iter()
+                    .position(|x| x.name == name)
+                    .expect("We couldn't find the binding");
+                out_bindings.samplers[x] */
+            }
+        };
+        binding.data = Some(Rc::new(self.create_default_view()));
+    }
+}
+
+impl Bindable for cgmath::Matrix4<f32> {
+    fn bind<R: ProgramBindings, T: OutProgramBindings>(
+        &self,
+        device: &wgpu::Device,
+        bindings: &mut R,
+        out_bindings: &mut T,
+        name: String,
+    ) {
+        let mat_slice: &[f32; 16] = self.as_ref();
+        bind_helper(
+            device,
+            bindings,
+            out_bindings,
+            bytemuck::cast_slice(mat_slice.as_bytes()),
+            64 as u64,
+            vec![GLSLTYPE::Mat4],
+            name,
+        );
     }
 }
 

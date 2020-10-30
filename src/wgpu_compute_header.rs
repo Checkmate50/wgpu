@@ -7,7 +7,10 @@ use std::rc::Rc;
 
 use crate::shared::{check_gl_builtin_type, compile_shader, process_body, PARAMETER, QUALIFIER};
 
-use crate::bind::{new_bindings, Bindings, DefaultBinding, OutProgramBindings, ProgramBindings};
+use crate::bind::{
+    new_bindings, Bindings, DefaultBinding, OutProgramBindings, ProgramBindings, SamplerBinding,
+    TextureBinding,
+};
 
 #[derive(Debug)]
 pub struct ComputeBindings {
@@ -48,6 +51,12 @@ impl ProgramBindings for ComputeBindings {
     }
     fn index_binding(&mut self, index: usize) -> &mut DefaultBinding {
         &mut self.bindings[index]
+    }
+    fn get_samplers(&mut self) -> Option<&mut Vec<SamplerBinding>> {
+        None
+    }
+    fn get_textures(&mut self) -> Option<&mut Vec<TextureBinding>> {
+        None
     }
 }
 

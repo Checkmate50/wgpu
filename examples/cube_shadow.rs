@@ -12,10 +12,9 @@ use winit::{
 };
 
 pub use pipeline::wgpu_graphics_header::{
-    bind_sampler, bind_texture, default_bind_group, generate_swap_chain, graphics_run_indicies,
-    graphics_starting_context, setup_render_pass, setup_render_pass_color_depth,
-    setup_render_pass_depth, BindingPreprocess, GraphicsBindings, GraphicsShader,
-    OutGraphicsBindings, PipelineType,
+    default_bind_group, generate_swap_chain, graphics_run_indicies, graphics_starting_context,
+    setup_render_pass, setup_render_pass_color_depth, setup_render_pass_depth, BindingPreprocess,
+    GraphicsBindings, GraphicsShader, OutGraphicsBindings, PipelineType,
 };
 
 pub use pipeline::bind::Bindings;
@@ -23,8 +22,9 @@ pub use pipeline::bind::Bindings;
 pub use wgpu_macros::{generic_bindings, init};
 
 pub use pipeline::helper::{
-    create_texels, generate_identity_matrix, generate_projection_matrix, generate_view_matrix,
-    load_cube, load_model, load_plane, rotation, scale, translate, generate_light_projection, rotate_vec4
+    create_texels, generate_identity_matrix, generate_light_projection, generate_projection_matrix,
+    generate_view_matrix, load_cube, load_model, load_plane, rotate_vec4, rotation, scale,
+    translate,
 };
 
 async fn run(event_loop: EventLoop<()>, window: Window) {
@@ -96,7 +96,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
             void main() {
                 v_Normal = mat3(u_World) * a_normal;
                 v_Position = u_World * vec4(a_position, 1.0);
-                gl_Position = /* u_proj * u_view */ u_viewProj * v_Position;
+                gl_Position = u_viewProj * v_Position;
             }
         }}
     }}
@@ -149,7 +149,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                 vec3 light_dir = normalize(light_pos.xyz - v_Position.xyz);
                 float diffuse = max(0.0, dot(normal, light_dir));
                 // add light contribution
-                o_Target += shadow * diffuse * light_color.xyz;
+                o_Target += shadow /* * diffuse */ * light_color.xyz;
                 // multiply the light by material color
                 color = vec4(o_Target, 1.0) * u_Color;
             }
@@ -161,33 +161,49 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     eager_binding! {bake_context = BAKE_VERTEXT!(), BAKE_FRAGMENT!()};
 
     let (stencil_program, stencil_template_bindings, stencil_template_out_bindings, _) =
-        compile_valid_stencil_program!(window, B_V, B_F, PipelineType::Stencil);
+        compile_valid_stencil_program!(device, B_V, B_F, PipelineType::Stencil);
 
     const S_V: GraphicsShader = eager_graphics_shader! {VERTEXT!()};
     const S_F: GraphicsShader = eager_graphics_shader! {FRAGMENT!()};
     eager_binding! {context = VERTEXT!(), FRAGMENT!()};
 
     let (program, template_bindings, template_out_bindings, _) =
-        compile_valid_graphics_program!(window, S_V, S_F, PipelineType::ColorWithStencil);
+        compile_valid_graphics_program!(device, S_V, S_F, PipelineType::ColorWithStencil);
 
-    let view_proj_mat = generate_projection_matrix(size.width as f32 / size.height as f32) * generate_view_matrix();
+    let view_proj_mat =
+        generate_projection_matrix(size.width as f32 / size.height as f32) * generate_view_matrix();
 
-    /* let view_mat = generate_view_matrix();
-    let proj_mat = generate_projection_matrix(size.width as f32 / size.height as f32);
- */
-    let (mut positions, mut normals, mut index_data) = load_model("src/models/sphere.obj");
+    let (positions, normals, index_data) = load_model("src/models/sphere.obj");
     //let (mut positions, mut normals, mut index_data) = load_cube();
     let color_data = vec![[0.583, 0.771, 0.014, 1.0]];
     let world_mat = scale(translate(generate_identity_matrix(), 0.0, 3.0, -1.0), 0.5);
 
-    let (mut plane_positions, mut plane_normals, mut plane_index_data) = load_plane(7);
+    let (plane_positions, plane_normals, plane_index_data) = load_plane(7);
     let plane_color_data = vec![[1.0, 1.0, 1.0, 1.0]];
     let plane_world_mat = generate_identity_matrix();
-
 
     let mut light_pos = vec![[20.0, -30.0, 2.0, 1.0]];
     let mut light_proj_mat = generate_light_projection(light_pos[0], 60.0);
     let light_color = vec![[1.0, 0.5, 0.5, 0.5]];
+
+    let shadow_sampler = wgpu::SamplerDescriptor {
+        address_mode_u: wgpu::AddressMode::ClampToEdge,
+        address_mode_v: wgpu::AddressMode::ClampToEdge,
+        address_mode_w: wgpu::AddressMode::ClampToEdge,
+        mag_filter: wgpu::FilterMode::Linear,
+        min_filter: wgpu::FilterMode::Linear,
+        mipmap_filter: wgpu::FilterMode::Nearest,
+        lod_min_clamp: -100.0,
+        lod_max_clamp: 100.0,
+        compare: wgpu::CompareFunction::LessEqual,
+    };
+
+    let shadow_size = wgpu::Extent3d {
+        width: 512,
+        height: 512,
+        depth: 1,
+    };
+    let shadow_format = wgpu::TextureFormat::Depth32Float;
 
     // A "chain" of buffers that we render on to the display
     let mut swap_chain = generate_swap_chain(&surface, &window, &device);
@@ -220,31 +236,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                     let mut bind_group_stencil = default_bind_group(&device);
                     let mut bind_group_stencil_p1 = default_bind_group(&device);
 
-                    let shadow_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-                        address_mode_u: wgpu::AddressMode::ClampToEdge,
-                        address_mode_v: wgpu::AddressMode::ClampToEdge,
-                        address_mode_w: wgpu::AddressMode::ClampToEdge,
-                        mag_filter: wgpu::FilterMode::Linear,
-                        min_filter: wgpu::FilterMode::Linear,
-                        mipmap_filter: wgpu::FilterMode::Nearest,
-                        lod_min_clamp: -100.0,
-                        lod_max_clamp: 100.0,
-                        compare: wgpu::CompareFunction::LessEqual,
-                    });
-
-                    let tex_size = 1600u32;
-
-                    let shadow_size = wgpu::Extent3d {
-                        width: 512,
-                        height: 512,
-                        depth: 1,
-                    };
-                    let shadow_format = wgpu::TextureFormat::Depth32Float;
-                    let texture_extent = wgpu::Extent3d {
-                        width: tex_size,
-                        height: tex_size,
-                        depth: 1,
-                    };
+                    //todo factor this out?
                     let shadow_texture = device.create_texture(&wgpu::TextureDescriptor {
                         size: shadow_size,
                         array_layer_count: 1, // One light (max lights)
@@ -255,7 +247,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                         usage: wgpu::TextureUsage::OUTPUT_ATTACHMENT | wgpu::TextureUsage::SAMPLED,
                         label: None,
                     });
-                    let shadow_view = shadow_texture.create_default_view();
+                    //let shadow_view = shadow_texture.create_default_view();
 
                     let light_target_view =
                         shadow_texture.create_view(&wgpu::TextureViewDescriptor {
@@ -297,26 +289,26 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                 &light_target_view,
                             );
                             {
-                            let bake_context1 = bake_context.bind_u_viewProj(
-                                light_proj_mat,
-                                device,
-                                bindings_stencil,
-                                out_bindings_stencil,
+                            let bake_context1 = (&bake_context).bind_u_viewProj(
+                                &light_proj_mat,
+                                &device,
+                                &mut bindings_stencil,
+                                &mut out_bindings_stencil,);
 
                                 {
 
-                                let bake_context2 = bake_context1.bind_a_position(
-                                    plane_positions,
-                                    device,
-                                    bindings_stencil,
-                                    out_bindings_stencil,
+                                let bake_context2 = (&bake_context1).bind_a_position(
+                                    &plane_positions,
+                                    &device,
+                                    &mut bindings_stencil,
+                                    &mut out_bindings_stencil,
                                 );
                                     {
-                                        let bake_context3 = bake_context2.bind_u_World(
-                                            plane_world_mat,
-                                            device,
-                                            bindings_stencil,
-                                            out_bindings_stencil,
+                                        let bake_context3 = (&bake_context2).bind_u_World(
+                                            &plane_world_mat,
+                                            &device,
+                                            &mut bindings_stencil,
+                                            &mut out_bindings_stencil,
                                         );
                                         {
 
@@ -331,26 +323,24 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                                 &mut bind_group_stencil_p1,
                                                 &mut bind_prerun_stencil_p1,
                                                 &plane_index_data,
-                                            )
-                                            )
-                                            ;
+                                            ));
                                         }
                                     }
                                 }
 
                                 {
                                 let bake_context2 = bake_context1.bind_a_position(
-                                    positions,
-                                    device,
-                                    bindings_stencil,
-                                    out_bindings_stencil,
+                                    &positions,
+                                    &device,
+                                    &mut bindings_stencil,
+                                    &mut out_bindings_stencil,
                                 );
                                     {
                                         let bake_context3 = bake_context2.bind_u_World(
-                                            world_mat,
-                                            device,
-                                            bindings_stencil,
-                                            out_bindings_stencil,
+                                            &world_mat,
+                                            &device,
+                                            &mut bindings_stencil,
+                                            &mut out_bindings_stencil,
                                         );
                                         {
                                             bind_prerun_stencil = BindingPreprocess::bind(
@@ -373,7 +363,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                             }
                         }
 
-                        {
+                        {{
                             let mut rpass = setup_render_pass_color_depth(
                                 &program,
                                 &mut init_encoder,
@@ -382,74 +372,74 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                             );
                             /* let mut rpass = setup_render_pass(&program, &mut init_encoder, &frame); */
 
-                            {let context1 = context.bind_u_viewProj(
-                                view_proj_mat,
-                                device,
-                                bindings,
-                                out_bindings,);
+                            {let context1 = (&context).bind_u_viewProj(
+                                &view_proj_mat,
+                                &device,
+                                &mut bindings,
+                                &mut out_bindings,);
                             {
 
                             {let context2 = context1.bind_light_proj(
-                                light_proj_mat,
-                                device,
-                                bindings,
-                                out_bindings,);
+                                &light_proj_mat,
+                                &device,
+                                &mut bindings,
+                                &mut out_bindings,);
 
                             {let context3 = context2.bind_light_pos(
-                                light_pos,
-                                device,
-                                bindings,
-                                out_bindings,);
+                                &light_pos,
+                                &device,
+                                &mut bindings,
+                                &mut out_bindings,);
 
                             {let context4 = context3.bind_light_color(
-                            light_color,
-                            device,
-                            bindings,
-                            out_bindings,);
+                            &light_color,
+                            &device,
+                            &mut bindings,
+                            &mut out_bindings,);
 
                            { let context5 = context4.bind_s_Shadow(
-                            shadow_sampler,
-                            device,
-                            bindings,
-                            out_bindings,);
+                            &shadow_sampler,
+                            &device,
+                            &mut bindings,
+                            &mut out_bindings,);
 
 {                            let context6 = context5.bind_t_Shadow(
-                                shadow_view,
-                                device,
-                                bindings,
-                                out_bindings,
+                                &shadow_texture,
+                                &device,
+                                &mut bindings,
+                                &mut out_bindings,
                             );
 
                             {
-                                let context7 = context6.bind_a_position(
-                                    plane_positions,
-                                    device,
-                                    bindings,
-                                    out_bindings,
+                                let context7 = (&context6).bind_a_position(
+                                    &plane_positions,
+                                    &device,
+                                    &mut bindings,
+                                    &mut out_bindings,
                                 );
 
                                 {
-                                    let context7 = context6.bind_u_Color(
-                                        plane_color_data,
-                                        device,
-                                        bindings,
-                                        out_bindings,
+                                    let context8 = context7.bind_u_Color(
+                                        &plane_color_data,
+                                        &device,
+                                        &mut bindings,
+                                        &mut out_bindings,
                                     );
 
                                     {
-                                        let context8 = context7.bind_u_World(
-                                            plane_world_mat,
-                                            device,
-                                            bindings,
-                                            out_bindings,
+                                        let context9 = context8.bind_u_World(
+                                            &plane_world_mat,
+                                            &device,
+                                            &mut bindings,
+                                            &mut out_bindings,
                                         );
 
                                         {
-                                            let context8 = context7.bind_a_normal(
-                                                plane_normals,
-                                                device,
-                                                bindings,
-                                                out_bindings,
+                                            let context10 = context9.bind_a_normal(
+                                                &plane_normals,
+                                                &device,
+                                                &mut bindings,
+                                                &mut out_bindings,
                                             );
 
                                             {
@@ -458,7 +448,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                                     &mut bindings,
                                                     &out_bindings,
                                                 );
-                                                rpass = context8.runnable(||
+                                                rpass = context10.runnable(||
                                                 graphics_run_indicies(
                                                     &program,
                                                     &device,
@@ -474,34 +464,34 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                             }
                             {
                                 let context7 = context6.bind_a_position(
-                                    positions,
-                                    device,
-                                    bindings,
-                                    out_bindings,
+                                    &positions,
+                                    &device,
+                                    &mut bindings,
+                                    &mut out_bindings,
                                 );
 
                                 {
-                                    let context7 = context6.bind_u_Color(
-                                        color_data,
-                                        device,
-                                        bindings,
-                                        out_bindings,
+                                    let context8 = context7.bind_u_Color(
+                                        &color_data,
+                                        &device,
+                                        &mut bindings,
+                                        &mut out_bindings,
                                     );
 
                                     {
-                                        let context8 = context7.bind_u_World(
-                                            world_mat,
-                                            device,
-                                            bindings,
-                                            out_bindings,
+                                        let context9 = context8.bind_u_World(
+                                            &world_mat,
+                                            &device,
+                                            &mut bindings,
+                                            &mut out_bindings,
                                         );
 
                                         {
-                                            let context8 = context7.bind_a_normal(
-                                                normals,
-                                                device,
-                                                bindings,
-                                                out_bindings,
+                                            let context10 = context9.bind_a_normal(
+                                                &normals,
+                                                &device,
+                                                &mut bindings,
+                                                &mut out_bindings,
                                             );
 
                                             {
@@ -510,14 +500,14 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                                     &mut bindings,
                                                     &out_bindings,
                                                 );
-                                                rpass = context8.runnable(||
+                                                rpass = context10.runnable(||
                                                 graphics_run_indicies(
                                                     &program,
                                                     &device,
                                                     rpass,
                                                     &mut bind_group,
                                                     &mut bind_prerun,
-                                                    &plane_index_data,
+                                                    &index_data,
                                                 ));
                                             }
                                         }
@@ -525,13 +515,12 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                 }
                             }
 }
-                        }}}}}}
+                        }}}}}}}
 
                         queue.submit(&[init_encoder.finish()]);
-                    }
+                        }
                     }
                 }
-                /* std::process::exit(0); */
             }
             // When the window closes we are done. Change the status
             Event::WindowEvent {
