@@ -81,8 +81,8 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         [[out] vec3] v_Normal;
         [[out] vec4] gl_Position;
 
-        [[uniform in] mat4] u_view;
-        [[uniform in] mat4] u_proj;
+        [[uniform in] mat4] u_viewProj;
+        //[[uniform in] mat4] u_proj;
         [[uniform in] mat4] u_World;
         [[uniform in] vec4] u_Color;
 
@@ -90,7 +90,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
             void main() {
                 v_Normal = mat3(u_World) * a_normal;
                 v_Position = u_World * vec4(a_position, 1.0);
-                gl_Position = u_proj * u_view * v_Position;
+                gl_Position = /* u_proj * u_view */ u_viewProj * v_Position;
             }
         }}
     };
@@ -101,8 +101,8 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 
         [[out] vec4] color; // This is o_Target in the docs
 
-        [[uniform in] mat4] u_view;
-        [[uniform in] mat4] u_proj;
+        [[uniform in] mat4] u_viewProj;
+        //[[uniform in] mat4] u_proj;
 
         // We are starting with just one light
         [[uniform in] mat4] light_proj;
@@ -166,9 +166,11 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     let (program, template_bindings, template_out_bindings, _) =
         compile_valid_graphics_program!(device, S_V, S_F, PipelineType::ColorWithStencil);
 
-    let view_mat = generate_view_matrix();
-    let proj_mat = generate_projection_matrix(size.width as f32 / size.height as f32);
+    let view_proj_mat = generate_projection_matrix(size.width as f32 / size.height as f32) * generate_view_matrix();
 
+    /* let view_mat = generate_view_matrix();
+    let proj_mat = generate_projection_matrix(size.width as f32 / size.height as f32);
+ */
     let (mut positions, mut normals, mut index_data) = load_model("src/models/sphere.obj");
     //let (mut positions, mut normals, mut index_data) = load_cube();
     let color_data = vec![[0.583, 0.771, 0.014, 1.0]];
@@ -411,17 +413,17 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                             /* let mut rpass = setup_render_pass(&program, &mut init_encoder, &frame); */
 
                             const BIND_CONTEXT_1: BindingContext =
-                                update_bind_context(&STARTING_BIND_CONTEXT, "u_view");
+                                update_bind_context(&STARTING_BIND_CONTEXT, "u_viewProj");
                             let context1 = bind!(
                                 device,
                                 bindings,
                                 out_bindings,
-                                "u_view",
-                                view_mat,
+                                "u_viewProj",
+                                view_proj_mat,
                                 context,
                                 BIND_CONTEXT_1
                             );
-                            const BIND_CONTEXT_2: BindingContext =
+                            /* const BIND_CONTEXT_2: BindingContext =
                                 update_bind_context(&BIND_CONTEXT_1, "u_proj");
                             let context2 = bind!(
                                 device,
@@ -431,16 +433,16 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                 proj_mat,
                                 context1,
                                 BIND_CONTEXT_2
-                            );
+                            ); */
                             const BIND_CONTEXT_3: BindingContext =
-                                update_bind_context(&BIND_CONTEXT_2, "light_proj");
+                                update_bind_context(&BIND_CONTEXT_1, "light_proj");
                             let context3 = bind!(
                                 device,
                                 bindings,
                                 out_bindings,
                                 "light_proj",
                                 light_proj_mat,
-                                context2,
+                                context1,
                                 BIND_CONTEXT_3
                             );
 
