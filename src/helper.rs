@@ -88,18 +88,18 @@ pub fn load_cube() -> (Vec<[f32; 3]>, Vec<[f32; 3]>, Vec<u16>) {
 }
 
 pub fn load_plane(size: i8) -> (Vec<[f32; 3]>, Vec<[f32; 3]>, Vec<u16>) {
-    /* let positions = vec![
-        [size as f32, -size as f32, 0.0],
-        [size as f32, size as f32, 0.0],
-        [-size as f32, -size as f32, 0.0],
-        [-size as f32, size as f32, 0.0],
-    ]; */
     let positions = vec![
-        [-size as f32, -size as f32, 0.0],
         [size as f32, -size as f32, 0.0],
         [size as f32, size as f32, 0.0],
+        [-size as f32, -size as f32, 0.0],
         [-size as f32, size as f32, 0.0],
     ];
+    /* let positions = vec![
+        [-size as f32, -size as f32, 0.0],
+        [size as f32, -size as f32, 0.0],
+        [size as f32, size as f32, 0.0],
+        [-size as f32, size as f32, 0.0],
+    ]; */
 
     let normals = vec![
         [0.0, 0.0, 1.0],
@@ -108,8 +108,8 @@ pub fn load_plane(size: i8) -> (Vec<[f32; 3]>, Vec<[f32; 3]>, Vec<u16>) {
         [0.0, 0.0, 1.0],
     ];
 
-    /* let index_data: Vec<u16> = vec![0, 1, 2, 2, 3, 1]; */
-    let index_data: Vec<u16> = vec![0, 1, 2, 3];
+    let index_data: Vec<u16> = vec![0, 1, 2, 2, 3, 1];
+    /* let index_data: Vec<u16> = vec![0, 1, 2, 3]; */
     (positions, normals, index_data)
 }
 
@@ -125,6 +125,23 @@ macro_rules! mx_correction {
     };
 }
 
+pub fn generate_light_projection(pos: [f32; 4], fov: f32) -> cgmath::Matrix4<f32> {
+    use cgmath::{Deg, EuclideanSpace, Matrix4, PerspectiveFov, Point3, Vector3};
+    let mx_view = Matrix4::look_at(
+        Point3::new(pos[0], pos[1], pos[2]),
+        Point3::origin(),
+        Vector3::unit_z(),
+    );
+    let projection = PerspectiveFov {
+        fovy: Deg(fov).into(),
+        aspect: 1.0,
+        near: 1.0,
+        far: 100.0,
+    };
+    let mx_view_proj = mx_correction!() * Matrix4::from(projection.to_perspective()) * mx_view;
+    mx_view_proj
+}
+
 pub fn generate_view_matrix() -> cgmath::Matrix4<f32> {
     let mx_view = cgmath::Matrix4::look_at(
         // From this spot
@@ -133,7 +150,11 @@ pub fn generate_view_matrix() -> cgmath::Matrix4<f32> {
         cgmath::Point3::new(0f32, 0.0, 0.0),
         cgmath::Vector3::unit_z(),
     );
-    /* mx_correction!() * */
+    /* let mx_view = cgmath::Matrix4::look_at(
+            cgmath::Point3::new(3.0f32, -10.0, 6.0),
+            cgmath::Point3::new(0f32, 0.0, 0.0),
+            cgmath::Vector3::unit_z(),
+        ); */
     mx_view
 }
 

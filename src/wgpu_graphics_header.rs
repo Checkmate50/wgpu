@@ -562,7 +562,7 @@ pub async fn graphics_compile(
             cull_mode: wgpu::CullMode::Back,
             depth_bias: match pipe_type {
                 PipelineType::Stencil => 2,
-                PipelineType::ColorWithStencil | PipelineType::Color => 1,
+                PipelineType::ColorWithStencil | PipelineType::Color => 0,
             },
             /// TODO We may want to adjust the depth bias and scaling during stencilling
             depth_bias_slope_scale: match pipe_type {
