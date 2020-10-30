@@ -334,7 +334,6 @@ impl Bindable for Vec<[f32; 4]> {
     }
 }
 
-
 /* pub fn bind_mat4(
     program: &dyn Program,
     bindings: &mut dyn ProgramBindings,

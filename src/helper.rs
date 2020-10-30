@@ -88,10 +88,16 @@ pub fn load_cube() -> (Vec<[f32; 3]>, Vec<[f32; 3]>, Vec<u16>) {
 }
 
 pub fn load_plane(size: i8) -> (Vec<[f32; 3]>, Vec<[f32; 3]>, Vec<u16>) {
-    let positions = vec![
+    /* let positions = vec![
         [size as f32, -size as f32, 0.0],
         [size as f32, size as f32, 0.0],
         [-size as f32, -size as f32, 0.0],
+        [-size as f32, size as f32, 0.0],
+    ]; */
+    let positions = vec![
+        [-size as f32, -size as f32, 0.0],
+        [size as f32, -size as f32, 0.0],
+        [size as f32, size as f32, 0.0],
         [-size as f32, size as f32, 0.0],
     ];
 
@@ -102,7 +108,8 @@ pub fn load_plane(size: i8) -> (Vec<[f32; 3]>, Vec<[f32; 3]>, Vec<u16>) {
         [0.0, 0.0, 1.0],
     ];
 
-    let index_data: Vec<u16> = vec![0, 1, 2, 2, 1, 3];
+    /* let index_data: Vec<u16> = vec![0, 1, 2, 2, 3, 1]; */
+    let index_data: Vec<u16> = vec![0, 1, 2, 3];
     (positions, normals, index_data)
 }
 
@@ -159,6 +166,18 @@ pub fn rotation_y(matrix: cgmath::Matrix4<f32>, rotate_y: f32) -> cgmath::Matrix
 
 pub fn rotation_z(matrix: cgmath::Matrix4<f32>, rotate_z: f32) -> cgmath::Matrix4<f32> {
     cgmath::Matrix4::from_angle_z(cgmath::Rad(rotate_z)) * matrix
+}
+
+pub fn rotation(
+    matrix: cgmath::Matrix4<f32>,
+    rotate_x: f32,
+    rotate_y: f32,
+    rotate_z: f32,
+) -> cgmath::Matrix4<f32> {
+    cgmath::Matrix4::from_angle_x(cgmath::Rad(rotate_x))
+        * cgmath::Matrix4::from_angle_y(cgmath::Rad(rotate_y))
+        * cgmath::Matrix4::from_angle_z(cgmath::Rad(rotate_z))
+        * matrix
 }
 
 pub fn scale(matrix: cgmath::Matrix4<f32>, scale: f32) -> cgmath::Matrix4<f32> {

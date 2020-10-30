@@ -5,7 +5,7 @@ pub struct BindingContext {
     pub starting_context: [&'static str; 32],
     result_context: [&'static str; 32],
     has_out_bound: bool,
-    pub do_consume : bool,
+    pub do_consume: bool,
 }
 
 impl BindingContext {
@@ -17,7 +17,7 @@ impl BindingContext {
             starting_context,
             result_context,
             has_out_bound: false,
-            do_consume : false,
+            do_consume: false,
         }
     }
 }
@@ -53,7 +53,7 @@ pub const fn update_bind_context(
         starting_context: new_bind_context,
         result_context: bind_context.result_context,
         has_out_bound,
-        do_consume
+        do_consume,
     }
 }
 
