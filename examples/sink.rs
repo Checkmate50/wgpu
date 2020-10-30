@@ -276,12 +276,6 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 
                 model_mat = rotation_y(model_mat, 0.05);
 
-                fn rotate_vec3(start: &Vec<[f32; 3]>, delta_y: f32) -> Vec<[f32; 3]> {
-                    let mut temp_vec3 = cgmath::Vector3::new(start[0][0], start[0][1], start[0][2]);
-                    temp_vec3 = cgmath::Matrix3::from_angle_y(cgmath::Rad(delta_y)) * temp_vec3;
-                    vec![[temp_vec3.x, temp_vec3.y, temp_vec3.z]]
-                };
-
                 light_direction = rotate_vec3(&light_direction, 0.05);
 
                 const BIND_CONTEXT_1: [&str; 32] =

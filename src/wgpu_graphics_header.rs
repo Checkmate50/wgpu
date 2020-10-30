@@ -266,8 +266,7 @@ fn create_bindings(
                 });
                 vertex_stage_binding_number += 1;
             // Bindings that are invalidated after a run
-            }
-             else if !i.qual.contains(&QUALIFIER::IN) && i.qual.contains(&QUALIFIER::OUT) {
+            } else if !i.qual.contains(&QUALIFIER::IN) && i.qual.contains(&QUALIFIER::OUT) {
                 vertex_out_binding_struct.push(DefaultBinding {
                     binding_number: vertex_to_fragment_binding_number,
                     name: i.name.to_string(),
@@ -495,7 +494,7 @@ pub async fn graphics_compile(
                 i.binding_number,
                 wgpu::BindGroupLayoutEntry {
                     binding: i.binding_number,
-                    visibility: wgpu::ShaderStage::FRAGMENT,
+                    visibility: wgpu::ShaderStage::VERTEX | wgpu::ShaderStage::FRAGMENT, // TODO I've made uniforms visible to both stages even if they are only used in one. Find out if this is a bad thing
                     ty: wgpu::BindingType::UniformBuffer { dynamic: false },
                 },
             );
@@ -565,8 +564,9 @@ pub async fn graphics_compile(
             cull_mode: wgpu::CullMode::Back,
             depth_bias: match pipe_type {
                 PipelineType::Stencil => 2,
-                PipelineType::ColorWithStencil | PipelineType::Color => 1,
-            }, /// TODO We may want to adjust the depth bias and scaling during stencilling
+                PipelineType::ColorWithStencil | PipelineType::Color => 0,
+            },
+            /// TODO We may want to adjust the depth bias and scaling during stencilling
             depth_bias_slope_scale: match pipe_type {
                 PipelineType::Stencil => 2.0,
                 PipelineType::ColorWithStencil | PipelineType::Color => 0.0,
@@ -795,8 +795,6 @@ impl<'a> BindingPreprocess {
             .iter()
             .find(|i| i.qual.contains(&QUALIFIER::VERTEX));
 
-        dbg!(bindings);
-
         let num_verts: u32 = if bind.is_none() {
             3
         } else {
@@ -991,8 +989,7 @@ pub fn graphics_run_indicies<'a>(
     indicies: &Vec<u16>,
 ) -> wgpu::RenderPass<'a> {
     bind_preprocess.indicies = Some(Rc::new(
-        device
-            .create_buffer_with_data(indicies.as_slice().as_bytes(), wgpu::BufferUsage::INDEX),
+        device.create_buffer_with_data(indicies.as_slice().as_bytes(), wgpu::BufferUsage::INDEX),
     ));
     bind_preprocess.index_len = Some(indicies.len() as u32);
     graphics_run(program, device, pass, bind_group, bind_preprocess)
@@ -1035,13 +1032,11 @@ pub fn graphics_pipe(
 } */
 
 pub fn default_bind_group(device: &wgpu::Device) -> wgpu::BindGroup {
-    let bind_group_layout =
-        device
-            .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                // The layout of for each binding specify a number to connect with the bind_group, a visibility to specify for which stage it's for and a type
-                bindings: &[],
-                label: None,
-            });
+    let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        // The layout of for each binding specify a number to connect with the bind_group, a visibility to specify for which stage it's for and a type
+        bindings: &[],
+        label: None,
+    });
 
     let bgd = &wgpu::BindGroupDescriptor {
         layout: &bind_group_layout,
@@ -1095,7 +1090,6 @@ pub fn setup_render_pass_depth<'a>(
             clear_stencil: 0,
         }),
     });
-
 
     rpass.set_pipeline(&program.pipeline);
     rpass

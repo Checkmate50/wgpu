@@ -95,6 +95,12 @@ pub fn load_plane(size: i8) -> (Vec<[f32; 3]>, Vec<[f32; 3]>, Vec<u16>) {
         [-size as f32, -size as f32, 0.0],
         [-size as f32, size as f32, 0.0],
     ];
+    /* let positions = vec![
+        [-size as f32, -size as f32, 0.0],
+        [size as f32, -size as f32, 0.0],
+        [size as f32, size as f32, 0.0],
+        [-size as f32, size as f32, 0.0],
+    ]; */
 
     let normals = vec![
         [0.0, 0.0, 1.0],
@@ -103,7 +109,8 @@ pub fn load_plane(size: i8) -> (Vec<[f32; 3]>, Vec<[f32; 3]>, Vec<u16>) {
         [0.0, 0.0, 1.0],
     ];
 
-    let index_data: Vec<u16> = vec![0, 1, 2, 2, 1, 3];
+    let index_data: Vec<u16> = vec![0, 1, 2, 2, 3, 1];
+    /* let index_data: Vec<u16> = vec![0, 1, 2, 3]; */
     (positions, normals, index_data)
 }
 
@@ -119,6 +126,23 @@ macro_rules! mx_correction {
     };
 }
 
+pub fn generate_light_projection(pos: [f32; 4], fov: f32) -> cgmath::Matrix4<f32> {
+    use cgmath::{Deg, EuclideanSpace, Matrix4, PerspectiveFov, Point3, Vector3};
+    let mx_view = Matrix4::look_at(
+        Point3::new(pos[0], pos[1], pos[2]),
+        Point3::origin(),
+        Vector3::unit_z(),
+    );
+    let projection = PerspectiveFov {
+        fovy: Deg(fov).into(),
+        aspect: 1.0,
+        near: 1.0,
+        far: 100.0,
+    };
+    let mx_view_proj = mx_correction!() * Matrix4::from(projection.to_perspective()) * mx_view;
+    mx_view_proj
+}
+
 pub fn generate_view_matrix() -> cgmath::Matrix4<f32> {
     let mx_view = cgmath::Matrix4::look_at(
         // From this spot
@@ -127,7 +151,11 @@ pub fn generate_view_matrix() -> cgmath::Matrix4<f32> {
         cgmath::Point3::new(0f32, 0.0, 0.0),
         cgmath::Vector3::unit_z(),
     );
-    /* mx_correction!() * */
+    /* let mx_view = cgmath::Matrix4::look_at(
+        cgmath::Point3::new(3.0f32, -10.0, 6.0),
+        cgmath::Point3::new(0f32, 0.0, 0.0),
+        cgmath::Vector3::unit_z(),
+    ); */
     mx_view
 }
 
@@ -162,8 +190,31 @@ pub fn rotation_z(matrix: cgmath::Matrix4<f32>, rotate_z: f32) -> cgmath::Matrix
     cgmath::Matrix4::from_angle_z(cgmath::Rad(rotate_z)) * matrix
 }
 
+pub fn rotation(
+    matrix: cgmath::Matrix4<f32>,
+    rotate_x: f32,
+    rotate_y: f32,
+    rotate_z: f32,
+) -> cgmath::Matrix4<f32> {
+    cgmath::Matrix4::from_angle_x(cgmath::Rad(rotate_x))
+        * cgmath::Matrix4::from_angle_y(cgmath::Rad(rotate_y))
+        * cgmath::Matrix4::from_angle_z(cgmath::Rad(rotate_z))
+        * matrix
+}
+
 pub fn scale(matrix: cgmath::Matrix4<f32>, scale: f32) -> cgmath::Matrix4<f32> {
     cgmath::Matrix4::from_scale(scale) * matrix
+}
+
+pub fn rotate_vec3(start: &Vec<[f32; 3]>, delta_y: f32) -> Vec<[f32; 3]> {
+    let mut temp_vec3 = cgmath::Vector3::new(start[0][0], start[0][1], start[0][2]);
+    temp_vec3 = cgmath::Matrix3::from_angle_y(cgmath::Rad(delta_y)) * temp_vec3;
+    vec![[temp_vec3.x, temp_vec3.y, temp_vec3.z]]
+}
+pub fn rotate_vec4(start: &Vec<[f32; 4]>, delta_y: f32) -> Vec<[f32; 4]> {
+    let mut temp_vec3 = cgmath::Vector4::new(start[0][0], start[0][1], start[0][2], start[0][3]);
+    temp_vec3 = cgmath::Matrix4::from_angle_x(cgmath::Rad(delta_y)) * temp_vec3;
+    vec![[temp_vec3.x, temp_vec3.y, temp_vec3.z, temp_vec3.w]]
 }
 
 pub fn create_texels(size: usize) -> Vec<u8> {

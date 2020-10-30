@@ -43,7 +43,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 
                 fragmentNormal = worldNormal.xyz;
 
-                gl_Position = u_proj * u_view * u_model * vec4(0.7 * a_position, 1.0);
+                gl_Position = u_proj * u_view * u_model * vec4(a_position, 1.0);
             }
         }}
     };
@@ -78,7 +78,8 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 
     let proj_mat = generate_projection_matrix(size.width as f32 / size.height as f32);
 
-    let mut model_mat = generate_identity_matrix();
+    let mut model_mat_init = generate_identity_matrix();
+    let mut model_mat = scale(model_mat_init, 0.7);
 
     // A "chain" of buffers that we render on to the display
     let mut swap_chain = generate_swap_chain(&program, &window);
