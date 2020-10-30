@@ -20,7 +20,7 @@ pub use pipeline::context::{ready_to_run, update_bind_context, BindingContext};
 
 pub use pipeline::helper::{
     create_texels, generate_identity_matrix, generate_projection_matrix, generate_view_matrix,
-    load_cube, load_model, load_plane, rotation, scale, translate, generate_light_projection
+    load_cube, load_model, load_plane, rotation, scale, translate, generate_light_projection, rotate_vec4
 };
 
 async fn run(event_loop: EventLoop<()>, window: Window) {
@@ -54,15 +54,14 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     const BAKE_VERTEXT: (GraphicsShader, BindingContext) = graphics_shader! {
         [[vertex in] vec3] a_position;
 
-        [[uniform in] mat4] u_view;
-        [[uniform in] mat4] u_proj;
+        [[uniform in] mat4] u_viewProj;
         [[uniform in] mat4] u_World;
 
         [[out] vec4] gl_Position;
 
         {{
             void main() {
-                gl_Position = u_proj * u_view * u_World * vec4(a_position, 1.0);;
+                gl_Position = u_viewProj * u_World * vec4(a_position, 1.0);;
             }
         }}
     };
@@ -170,33 +169,18 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     let view_mat = generate_view_matrix();
     let proj_mat = generate_projection_matrix(size.width as f32 / size.height as f32);
 
-    //let (mut positions, mut normals, mut index_data) = load_model("src/models/sphere.obj");
-let (mut positions, mut normals, mut index_data) = load_cube();
+    let (mut positions, mut normals, mut index_data) = load_model("src/models/sphere.obj");
+    //let (mut positions, mut normals, mut index_data) = load_cube();
     let color_data = vec![[0.583, 0.771, 0.014, 1.0]];
     let world_mat = scale(translate(generate_identity_matrix(), 0.0, 3.0, -1.0), 0.5);
 
     let (mut plane_positions, mut plane_normals, mut plane_index_data) = load_plane(7);
     let plane_color_data = vec![[1.0, 1.0, 1.0, 1.0]];
-    use cgmath::{InnerSpace, Rotation3};
-    /*     let plane_world_mat = rotation(
-        translate(generate_identity_matrix(), 0.0, -1.0, 0.0),
-        0.0,
-        0.0,
-        2.0,
-    ); */
     let plane_world_mat = generate_identity_matrix();
-    /* let plane_world_mat = cgmath::Matrix4::from(cgmath::Decomposed {
-        disp: cgmath::vec3(0.0, -1.0, 0.0),
-        rot: cgmath::Quaternion::from_axis_angle(
-            cgmath::vec3(1.0, 1.0, 1.0).normalize(),
-            cgmath::Deg(140.0),
-        ),
-        scale: 1.1,
-    }); */
 
 
-    let mut light_pos = vec![[0.5, -1.0, 10.0, 1.0]];
-    let light_proj_mat = generate_light_projection(light_pos[0], 60.0);
+    let mut light_pos = vec![[20.0, -30.0, 2.0, 1.0]];
+    let mut light_proj_mat = generate_light_projection(light_pos[0], 60.0);
     let light_color = vec![[1.0, 0.5, 0.5, 0.5]];
 
     // A "chain" of buffers that we render on to the display
@@ -219,11 +203,8 @@ let (mut positions, mut normals, mut index_data) = load_cube();
                     let mut bind_group = default_bind_group(&device);
                     let mut bind_group_p1 = default_bind_group(&device);
 
-                    /* light_pos = light_pos
-                        .clone()
-                        .into_iter()
-                        .map(|v| [v[0], v[1] , (if v[2] == 1.5 {-1.5} else {v[2] + 0.25}), v[3]])
-                        .collect(); */
+                    light_pos = rotate_vec4(&light_pos, -0.05);
+                    light_proj_mat = generate_light_projection(light_pos[0], 60.0);
 
                     dbg!(&light_pos);
 
@@ -246,7 +227,6 @@ let (mut positions, mut normals, mut index_data) = load_cube();
                     });
 
                     let tex_size = 1600u32;
-                    let texels = create_texels(tex_size as usize);
 
                     let shadow_size = wgpu::Extent3d {
                         width: 512,
@@ -313,18 +293,18 @@ let (mut positions, mut normals, mut index_data) = load_cube();
                             );
 
                             {
-                                const BAKE_BIND_CONTEXT_1: BindingContext =
-                                update_bind_context(&BAKE_STARTING_BIND_CONTEXT, "u_view");
+                            const BAKE_BIND_CONTEXT_1: BindingContext =
+                                update_bind_context(&BAKE_STARTING_BIND_CONTEXT, "u_viewProj");
                             let context1 = bind!(
                                 device,
                                 bindings_stencil,
                                 out_bindings_stencil,
-                                "u_view",
-                                view_mat,
+                                "u_viewProj",
+                                light_proj_mat,
                                 context,
                                 BAKE_BIND_CONTEXT_1
                             );
-                            const BAKE_BIND_CONTEXT_2: BindingContext =
+                            /* const BAKE_BIND_CONTEXT_2: BindingContext =
                                 update_bind_context(&BAKE_BIND_CONTEXT_1, "u_proj");
                             let context2 = bind!(
                                 device,
@@ -334,17 +314,17 @@ let (mut positions, mut normals, mut index_data) = load_cube();
                                 proj_mat,
                                 context1,
                                 BAKE_BIND_CONTEXT_2
-                            );
+                            ); */
                                 {
                                 const BAKE_BIND_CONTEXT_3: BindingContext =
-                                    update_bind_context(&BAKE_BIND_CONTEXT_2, "a_position");
+                                    update_bind_context(&BAKE_BIND_CONTEXT_1, "a_position");
                                 let context3 = bind!(
                                     device,
                                     bindings_stencil,
                                     out_bindings_stencil,
                                     "a_position",
                                     plane_positions,
-                                    context2,
+                                    context1,
                                     BAKE_BIND_CONTEXT_3
                                 );
                                     {
@@ -379,14 +359,14 @@ let (mut positions, mut normals, mut index_data) = load_cube();
 
                             {
                                 const BAKE_BIND_CONTEXT_3: BindingContext =
-                                    update_bind_context(&BAKE_BIND_CONTEXT_2, "a_position");
+                                    update_bind_context(&BAKE_BIND_CONTEXT_1, "a_position");
                                 let context3 = bind!(
                                     device,
                                     bindings_stencil,
                                     out_bindings_stencil,
                                     "a_position",
                                     positions,
-                                    context2,
+                                    context1,
                                     BAKE_BIND_CONTEXT_3
                                 );
                                     {
