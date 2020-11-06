@@ -22,7 +22,7 @@ pub struct GraphicsProgram {
     pub pipeline: wgpu::RenderPipeline,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct GraphicsBindings {
     pub bindings: Vec<DefaultBinding>,
     pub indicies: Option<Rc<wgpu::Buffer>>,
@@ -46,7 +46,7 @@ impl ProgramBindings for GraphicsBindings {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct OutGraphicsBindings {
     pub bindings: Vec<DefaultBinding>,
 }
@@ -61,7 +61,7 @@ impl OutProgramBindings for OutGraphicsBindings {
 }
 
 impl Bindings for GraphicsBindings {
-    fn clone(&self) -> GraphicsBindings {
+    fn new(&self) -> GraphicsBindings {
         GraphicsBindings {
             bindings: new_bindings(&self.bindings),
             indicies: None,
@@ -73,7 +73,7 @@ impl Bindings for GraphicsBindings {
 }
 
 impl Bindings for OutGraphicsBindings {
-    fn clone(&self) -> OutGraphicsBindings {
+    fn new(&self) -> OutGraphicsBindings {
         OutGraphicsBindings {
             bindings: new_bindings(&self.bindings),
         }
@@ -638,7 +638,7 @@ pub async fn graphics_compile(
     )
 }
 
-pub fn bind_texture(
+/* pub fn bind_texture(
     bindings: &mut GraphicsBindings,
     out_bindings: &mut OutGraphicsBindings,
     texture: wgpu::TextureView,
@@ -657,7 +657,7 @@ pub fn bind_texture(
         }
     };
     binding.data = Some(Rc::new(texture));
-}
+} */
 
 fn draw(
     rpass: &mut wgpu::RenderPass,
@@ -706,7 +706,7 @@ impl<'a> Default for BindingPreprocess {
 impl<'a> BindingPreprocess {
     pub fn bind(
         bindings: &GraphicsBindings,
-        out_bindings: &OutGraphicsBindings,
+        _out_bindings: &OutGraphicsBindings, // There are not out vars that I know of for graphics pipelines so these bindings are ignored
     ) -> BindingPreprocess {
         let bind = bindings
             .bindings

@@ -113,7 +113,7 @@ macro_rules! bind_consume {
     )
 } */
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TextureBinding {
     pub binding_number: u32,
     pub name: String,
@@ -122,7 +122,7 @@ pub struct TextureBinding {
     pub qual: Vec<QUALIFIER>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SamplerBinding {
     pub binding_number: u32,
     pub name: String,
@@ -131,7 +131,7 @@ pub struct SamplerBinding {
     pub qual: Vec<QUALIFIER>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct DefaultBinding {
     pub binding_number: u32,
     pub name: String,
@@ -170,7 +170,7 @@ pub trait OutProgramBindings {
 }
 
 pub trait Bindings {
-    fn clone(&self) -> Self;
+    fn new(&self) -> Self;
 }
 
 fn bind_helper<R: ProgramBindings, T: OutProgramBindings>(
@@ -328,7 +328,7 @@ impl Bindable for wgpu::SamplerDescriptor {
         &self,
         device: &wgpu::Device,
         bindings: &mut R,
-        out_bindings: &mut T,
+        _out_bindings: &mut T,
         name: String,
     ) {
         let mut binding = match bindings
@@ -357,7 +357,7 @@ impl Bindable for wgpu::Texture {
         &self,
         device: &wgpu::Device,
         bindings: &mut R,
-        out_bindings: &mut T,
+        _out_bindings: &mut T,
         name: String,
     ) {
         let mut binding = match bindings

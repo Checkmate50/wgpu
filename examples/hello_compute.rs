@@ -60,7 +60,6 @@ async fn execute_gpu() {
     {
         let context1 = context.bind_indices(&indices, &program, &mut bindings, &mut out_bindings);
         {
-
             let result = context1.runable(|| run(&program, &mut bindings, out_bindings));
             println!("{:?}", read_uvec(&program, &result, "indices").await);
         }

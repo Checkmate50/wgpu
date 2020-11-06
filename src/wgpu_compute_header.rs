@@ -38,7 +38,7 @@ impl OutComputeBindings {
 }
 
 impl Bindings for ComputeBindings {
-    fn clone(&self) -> ComputeBindings {
+    fn new(&self) -> ComputeBindings {
         ComputeBindings {
             bindings: new_bindings(&self.bindings),
         }
@@ -61,7 +61,7 @@ impl ProgramBindings for ComputeBindings {
 }
 
 impl Bindings for OutComputeBindings {
-    fn clone(&self) -> OutComputeBindings {
+    fn new(&self) -> OutComputeBindings {
         OutComputeBindings {
             bindings: new_bindings(&self.bindings),
         }

@@ -1,10 +1,9 @@
 extern crate proc_macro;
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
-use syn::ext::IdentExt;
 use syn::parse::{Parse, ParseStream, Result};
 use syn::punctuated::Punctuated;
-use syn::{braced, bracketed, parenthesized, parse_macro_input, Error, Ident, Token};
+use syn::{braced, bracketed, parse_macro_input, Ident, Token};
 
 use std::collections::HashSet;
 use std::iter;
@@ -27,7 +26,7 @@ impl Parse for Parameters {
         while !qual_lst.is_empty() {
             // loop and in tokens are not Ident's so they need to be handled differently
             if qual_lst.peek(Token!(loop)) {
-                qual_lst.parse::<Token!(loop)>();
+                qual_lst.parse::<Token!(loop)>()?;
                 quals.push(format_ident!("loop"));
             } else if qual_lst.peek(Token!(in)) {
                 qual_lst.parse::<Token!(in)>()?;
@@ -37,10 +36,10 @@ impl Parse for Parameters {
             }
         }
 
-        qual_and_type.parse::<Ident>();
+        qual_and_type.parse::<Ident>()?;
         while !qual_and_type.is_empty() {
-            let x;
-            bracketed!(x in qual_and_type);
+            let _x;
+            bracketed!(_x in qual_and_type);
         }
 
         let name = input.parse::<Ident>()?;
@@ -49,47 +48,6 @@ impl Parse for Parameters {
             name,
         })
     }
-}
-
-fn parse_any(input: ParseStream) -> Result<()> {
-    if input.peek(Ident::peek_any) {
-        Ident::parse_any(input)?;
-    } else if input.peek(Token!(=)) {
-        input.parse::<Token!(=)>()?;
-    } else if input.peek(syn::token::Paren) {
-        let x;
-        parenthesized!(x in input);
-        while !x.is_empty() {
-            parse_any(&x)?;
-        }
-    } else if input.peek(syn::token::Brace) {
-        let x;
-        braced!(x in input);
-        while !x.is_empty() {
-            parse_any(&x)?;
-        }
-    } else if input.peek(syn::token::Bracket) {
-        let x;
-        bracketed!(x in input);
-        while !x.is_empty() {
-            parse_any(&x)?;
-        }
-    } else if input.peek(Token!(.)) {
-        input.parse::<Token!(.)>()?;
-    } else if input.peek(Token!(;)) {
-        input.parse::<Token!(;)>()?;
-    } else if input.peek(Token!(+)) {
-        input.parse::<Token!(+)>()?;
-    } else if input.peek(Token!(,)) {
-        input.parse::<Token!(,)>()?;
-    }
-    /* else if input.peek(syn::Expr) {
-        input.parse::<syn::Expr>()?;
-    } */
-    else {
-        return Err(Error::new(input.span(), "found a token I couldn't parse"));
-    }
-    return Ok(());
 }
 
 struct Shader {
@@ -112,7 +70,7 @@ impl Parse for Shader {
             y.step(|cursor| {
                 (*cursor).token_stream();
                 Ok(((), syn::buffer::Cursor::empty()))
-            });
+            })?;
             //parse_any(&y)?;
         }
         Ok(Shader {
@@ -343,7 +301,7 @@ pub fn generic_bindings(input: TokenStream) -> TokenStream {
         }
     }
 
-    println!("{}", collapsed_expanded);
+    //println!("{}", collapsed_expanded);
 
     // Hand the output tokens back to the compiler
     TokenStream::from(collapsed_expanded)

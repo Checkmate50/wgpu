@@ -208,6 +208,270 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     // A "chain" of buffers that we render on to the display
     let mut swap_chain = generate_swap_chain(&surface, &window, &device);
 
+    let shadow_texture = device.create_texture(&wgpu::TextureDescriptor {
+        size: shadow_size,
+        array_layer_count: 1, // One light (max lights)
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: shadow_format,
+        usage: wgpu::TextureUsage::OUTPUT_ATTACHMENT | wgpu::TextureUsage::SAMPLED,
+        label: None,
+    });
+
+    let light_target_view = shadow_texture.create_view(&wgpu::TextureViewDescriptor {
+        format: shadow_format,
+        dimension: wgpu::TextureViewDimension::D2,
+        aspect: wgpu::TextureAspect::All,
+        base_mip_level: 0,
+        level_count: 1,
+        base_array_layer: 0, // The first light is at index 0
+        array_layer_count: 1,
+    });
+
+    let depth_texture = device.create_texture(&wgpu::TextureDescriptor {
+        size: wgpu::Extent3d {
+            width: window.inner_size().width,
+            height: window.inner_size().height,
+            depth: 1,
+        },
+        array_layer_count: 1,
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Depth32Float,
+        usage: wgpu::TextureUsage::OUTPUT_ATTACHMENT,
+        label: None,
+    });
+    let depth_view = depth_texture.create_default_view();
+
+    /*
+    param1 : in
+    param2 : in
+
+
+
+    // todo go with this
+    // todo fix examples
+    // todo fix run
+    //
+    context2
+    context3
+    {
+        context1 = bind a to param1 in context
+        {
+            context2 = bind b to param2 in context1
+        }
+        {
+            context3 = bind c to param2 in context1
+        }
+    }
+
+    render_loop {
+        run(context2)
+        run(context3)
+    }
+
+    ///////
+
+    {
+        bind a to param1
+        {
+            bind b to param2@1
+            {
+                bind c to param2@2
+                render_loop {
+                    run(context@1)
+                    run(context@2)
+                }
+            }
+        }
+    }
+
+
+
+
+
+    bind a to param1 { // bindgroup = {a}
+        render_loop {
+            bind b to param2 {
+                // bindgroup = {b}
+                run()
+            }
+            bind c to param2 {
+                // bindgroup = {c}
+                run()
+            }
+        }
+    }
+     */
+
+    let mut bind_group = default_bind_group(&device);
+    let mut bind_group_p1 = default_bind_group(&device);
+    let mut bind_group_stencil = default_bind_group(&device);
+    let mut bind_group_stencil_p1 = default_bind_group(&device);
+
+    let mut bindings: GraphicsBindings = template_bindings.new();
+    let mut out_bindings: OutGraphicsBindings = template_out_bindings.new();
+    let mut bindings_stencil: GraphicsBindings = stencil_template_bindings.new();
+    let mut out_bindings_stencil: OutGraphicsBindings = stencil_template_out_bindings.new();
+
+    let bake_context_plane;
+    let mut bindings_stencil_plane;
+    let mut out_bindings_stencil_plane;
+
+    let bake_context_sphere;
+    let mut bindings_stencil_sphere;
+    let mut out_bindings_stencil_sphere;
+
+    let context_plane;
+    let mut bindings_plane;
+    let mut out_bindings_plane;
+
+    let context_sphere;
+    let mut bindings_sphere;
+    let mut out_bindings_sphere;
+
+    {
+        let bake_context1 = (&bake_context).bind_a_position(
+            &plane_positions,
+            &device,
+            &mut bindings_stencil,
+            &mut out_bindings_stencil,
+        );
+        {
+            bake_context_plane = (&bake_context1).bind_u_World(
+                &plane_world_mat,
+                &device,
+                &mut bindings_stencil,
+                &mut out_bindings_stencil,
+            );
+            bindings_stencil_plane = bindings_stencil.clone();
+            out_bindings_stencil_plane = out_bindings_stencil.clone();
+        }
+    }
+
+    {
+        let bake_context1 = (&bake_context).bind_a_position(
+            &positions,
+            &device,
+            &mut bindings_stencil,
+            &mut out_bindings_stencil,
+        );
+        {
+            bake_context_sphere = bake_context1.bind_u_World(
+                &world_mat,
+                &device,
+                &mut bindings_stencil,
+                &mut out_bindings_stencil,
+            );
+            bindings_stencil_sphere = bindings_stencil.clone();
+            out_bindings_stencil_sphere = out_bindings_stencil.clone();
+        }
+    }
+
+    {
+        let context1 =
+            (&context).bind_u_viewProj(&view_proj_mat, &device, &mut bindings, &mut out_bindings);
+
+        {
+            let context2 =
+                context1.bind_light_color(&light_color, &device, &mut bindings, &mut out_bindings);
+
+            {
+                let context3 = context2.bind_s_Shadow(
+                    &shadow_sampler,
+                    &device,
+                    &mut bindings,
+                    &mut out_bindings,
+                );
+
+                {
+                    let context4 = context3.bind_t_Shadow(
+                        &shadow_texture,
+                        &device,
+                        &mut bindings,
+                        &mut out_bindings,
+                    );
+
+                    {
+                        let context5 = (&context4).bind_a_position(
+                            &plane_positions,
+                            &device,
+                            &mut bindings,
+                            &mut out_bindings,
+                        );
+
+                        {
+                            let context6 = context5.bind_u_Color(
+                                &plane_color_data,
+                                &device,
+                                &mut bindings,
+                                &mut out_bindings,
+                            );
+
+                            {
+                                let context7 = context6.bind_u_World(
+                                    &plane_world_mat,
+                                    &device,
+                                    &mut bindings,
+                                    &mut out_bindings,
+                                );
+
+                                {
+                                    context_plane = context7.bind_a_normal(
+                                        &plane_normals,
+                                        &device,
+                                        &mut bindings,
+                                        &mut out_bindings,
+                                    );
+                                    bindings_plane = bindings.clone();
+                                    out_bindings_plane = out_bindings.clone();
+                                }
+                            }
+                        }
+                    }
+                    {
+                        let context5 = (&context4).bind_a_position(
+                            &positions,
+                            &device,
+                            &mut bindings,
+                            &mut out_bindings,
+                        );
+                        {
+                            let context6 = context5.bind_u_Color(
+                                &color_data,
+                                &device,
+                                &mut bindings,
+                                &mut out_bindings,
+                            );
+
+                            {
+                                let context7 = context6.bind_u_World(
+                                    &world_mat,
+                                    &device,
+                                    &mut bindings,
+                                    &mut out_bindings,
+                                );
+
+                                {
+                                    context_sphere = context7.bind_a_normal(
+                                        &normals,
+                                        &device,
+                                        &mut bindings,
+                                        &mut out_bindings,
+                                    );
+                                    bindings_sphere = bindings.clone();
+                                    out_bindings_sphere = out_bindings.clone();
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     event_loop.run(move |event, _, control_flow: &mut ControlFlow| {
         *control_flow = ControlFlow::Poll;
         match event {
@@ -220,61 +484,10 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                     .get_next_texture()
                     .expect("Timeout when acquiring next swap chain texture");
                 {
-                    let mut bindings: GraphicsBindings = template_bindings.clone();
-                    let mut out_bindings: OutGraphicsBindings = template_out_bindings.clone();
-                    let mut bind_group = default_bind_group(&device);
-                    let mut bind_group_p1 = default_bind_group(&device);
-
                     light_pos = rotate_vec4(&light_pos, -0.05);
                     light_proj_mat = generate_light_projection(light_pos[0], 60.0);
 
                     dbg!(&light_pos);
-
-                    let mut bindings_stencil: GraphicsBindings = stencil_template_bindings.clone();
-                    let mut out_bindings_stencil: OutGraphicsBindings =
-                        stencil_template_out_bindings.clone();
-                    let mut bind_group_stencil = default_bind_group(&device);
-                    let mut bind_group_stencil_p1 = default_bind_group(&device);
-
-                    //todo factor this out?
-                    let shadow_texture = device.create_texture(&wgpu::TextureDescriptor {
-                        size: shadow_size,
-                        array_layer_count: 1, // One light (max lights)
-                        mip_level_count: 1,
-                        sample_count: 1,
-                        dimension: wgpu::TextureDimension::D2,
-                        format: shadow_format,
-                        usage: wgpu::TextureUsage::OUTPUT_ATTACHMENT | wgpu::TextureUsage::SAMPLED,
-                        label: None,
-                    });
-                    //let shadow_view = shadow_texture.create_default_view();
-
-                    let light_target_view =
-                        shadow_texture.create_view(&wgpu::TextureViewDescriptor {
-                            format: shadow_format,
-                            dimension: wgpu::TextureViewDimension::D2,
-                            aspect: wgpu::TextureAspect::All,
-                            base_mip_level: 0,
-                            level_count: 1,
-                            base_array_layer: 0, // The first light is at index 0
-                            array_layer_count: 1,
-                        });
-
-                    let depth_texture = device.create_texture(&wgpu::TextureDescriptor {
-                        size: wgpu::Extent3d {
-                            width: window.inner_size().width,
-                            height: window.inner_size().height,
-                            depth: 1,
-                        },
-                        array_layer_count: 1,
-                        mip_level_count: 1,
-                        sample_count: 1,
-                        dimension: wgpu::TextureDimension::D2,
-                        format: wgpu::TextureFormat::Depth32Float,
-                        usage: wgpu::TextureUsage::OUTPUT_ATTACHMENT,
-                        label: None,
-                    });
-                    let depth_view = depth_texture.create_default_view();
 
                     let mut bind_prerun_stencil_p1;
                     let mut bind_prerun_stencil;
@@ -288,237 +501,136 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                 &mut init_encoder,
                                 &light_target_view,
                             );
+
                             {
-                            let bake_context1 = (&bake_context).bind_u_viewProj(
-                                &light_proj_mat,
-                                &device,
-                                &mut bindings_stencil,
-                                &mut out_bindings_stencil,);
+                                let bake_context3 = (&bake_context_plane).bind_u_viewProj(
+                                    &light_proj_mat,
+                                    &device,
+                                    &mut bindings_stencil_plane,
+                                    &mut out_bindings_stencil_plane,
+                                );
 
                                 {
-
-                                let bake_context2 = (&bake_context1).bind_a_position(
-                                    &plane_positions,
-                                    &device,
-                                    &mut bindings_stencil,
-                                    &mut out_bindings_stencil,
-                                );
-                                    {
-                                        let bake_context3 = (&bake_context2).bind_u_World(
-                                            &plane_world_mat,
+                                    bind_prerun_stencil_p1 = BindingPreprocess::bind(
+                                        &mut bindings_stencil_plane,
+                                        &out_bindings_stencil_plane,
+                                    );
+                                    rpass_stencil = bake_context3.runnable(|| {
+                                        graphics_run_indicies(
+                                            &stencil_program,
                                             &device,
-                                            &mut bindings_stencil,
-                                            &mut out_bindings_stencil,
-                                        );
-                                        {
-
-                                            bind_prerun_stencil_p1 = BindingPreprocess::bind(
-                                                &mut bindings_stencil,
-                                                &out_bindings_stencil,
-                                            );
-                                            rpass_stencil = bake_context3.runnable(||graphics_run_indicies(
-                                                &stencil_program,
-                                                &device,
-                                                rpass_stencil,
-                                                &mut bind_group_stencil_p1,
-                                                &mut bind_prerun_stencil_p1,
-                                                &plane_index_data,
-                                            ));
-                                        }
-                                    }
+                                            rpass_stencil,
+                                            &mut bind_group_stencil_p1,
+                                            &mut bind_prerun_stencil_p1,
+                                            &plane_index_data,
+                                        )
+                                    });
                                 }
-
-                                {
-                                let bake_context2 = bake_context1.bind_a_position(
-                                    &positions,
+                            }
+                            {
+                                let bake_context3 = (&bake_context_sphere).bind_u_viewProj(
+                                    &light_proj_mat,
                                     &device,
-                                    &mut bindings_stencil,
-                                    &mut out_bindings_stencil,
+                                    &mut bindings_stencil_sphere,
+                                    &mut out_bindings_stencil_sphere,
                                 );
-                                    {
-                                        let bake_context3 = bake_context2.bind_u_World(
-                                            &world_mat,
+                                {
+                                    bind_prerun_stencil = BindingPreprocess::bind(
+                                        &mut bindings_stencil_sphere,
+                                        &out_bindings_stencil_sphere,
+                                    );
+                                    rpass_stencil = bake_context3.runnable(|| {
+                                        graphics_run_indicies(
+                                            &stencil_program,
                                             &device,
-                                            &mut bindings_stencil,
-                                            &mut out_bindings_stencil,
-                                        );
-                                        {
-                                            bind_prerun_stencil = BindingPreprocess::bind(
-                                                &mut bindings_stencil,
-                                                &out_bindings_stencil,
-                                            );
-                                            dbg!();
-                                            rpass_stencil =bake_context3.runnable(||
-                                            graphics_run_indicies(
-                                                &stencil_program,
-                                                &device,
-                                                rpass_stencil,
-                                                &mut bind_group_stencil,
-                                                &mut bind_prerun_stencil,
-                                                &index_data,
-                                            ));
-                                        }
-                                    }
+                                            rpass_stencil,
+                                            &mut bind_group_stencil,
+                                            &mut bind_prerun_stencil,
+                                            &index_data,
+                                        )
+                                    });
                                 }
                             }
                         }
 
-                        {{
+                        {
                             let mut rpass = setup_render_pass_color_depth(
                                 &program,
                                 &mut init_encoder,
                                 &frame,
                                 &depth_view,
                             );
-                            /* let mut rpass = setup_render_pass(&program, &mut init_encoder, &frame); */
-
-                            {let context1 = (&context).bind_u_viewProj(
-                                &view_proj_mat,
-                                &device,
-                                &mut bindings,
-                                &mut out_bindings,);
-                            {
-
-                            {let context2 = context1.bind_light_proj(
-                                &light_proj_mat,
-                                &device,
-                                &mut bindings,
-                                &mut out_bindings,);
-
-                            {let context3 = context2.bind_light_pos(
-                                &light_pos,
-                                &device,
-                                &mut bindings,
-                                &mut out_bindings,);
-
-                            {let context4 = context3.bind_light_color(
-                            &light_color,
-                            &device,
-                            &mut bindings,
-                            &mut out_bindings,);
-
-                           { let context5 = context4.bind_s_Shadow(
-                            &shadow_sampler,
-                            &device,
-                            &mut bindings,
-                            &mut out_bindings,);
-
-{                            let context6 = context5.bind_t_Shadow(
-                                &shadow_texture,
-                                &device,
-                                &mut bindings,
-                                &mut out_bindings,
-                            );
 
                             {
-                                let context7 = (&context6).bind_a_position(
-                                    &plane_positions,
+                                let context9 = (&context_plane).bind_light_proj(
+                                    &light_proj_mat,
                                     &device,
-                                    &mut bindings,
-                                    &mut out_bindings,
+                                    &mut bindings_plane,
+                                    &mut out_bindings_plane,
                                 );
 
                                 {
-                                    let context8 = context7.bind_u_Color(
-                                        &plane_color_data,
+                                    let context10 = context9.bind_light_pos(
+                                        &light_pos,
                                         &device,
-                                        &mut bindings,
-                                        &mut out_bindings,
+                                        &mut bindings_plane,
+                                        &mut out_bindings_plane,
                                     );
-
                                     {
-                                        let context9 = context8.bind_u_World(
-                                            &plane_world_mat,
-                                            &device,
-                                            &mut bindings,
-                                            &mut out_bindings,
+                                        bind_prerun_p1 = BindingPreprocess::bind(
+                                            &mut bindings_plane,
+                                            &out_bindings_plane,
                                         );
-
-                                        {
-                                            let context10 = context9.bind_a_normal(
-                                                &plane_normals,
+                                        rpass = context10.runnable(|| {
+                                            graphics_run_indicies(
+                                                &program,
                                                 &device,
-                                                &mut bindings,
-                                                &mut out_bindings,
-                                            );
-
-                                            {
-
-                                                bind_prerun_p1 = BindingPreprocess::bind(
-                                                    &mut bindings,
-                                                    &out_bindings,
-                                                );
-                                                rpass = context10.runnable(||
-                                                graphics_run_indicies(
-                                                    &program,
-                                                    &device,
-                                                    rpass,
-                                                    &mut bind_group_p1,
-                                                    &mut bind_prerun_p1,
-                                                    &plane_index_data,
-                                                ));
-                                            }
-                                        }
+                                                rpass,
+                                                &mut bind_group_p1,
+                                                &mut bind_prerun_p1,
+                                                &plane_index_data,
+                                            )
+                                        });
                                     }
                                 }
                             }
+
                             {
-                                let context7 = context6.bind_a_position(
-                                    &positions,
+                                let context9 = (&context_sphere).bind_light_proj(
+                                    &light_proj_mat,
                                     &device,
-                                    &mut bindings,
-                                    &mut out_bindings,
+                                    &mut bindings_sphere,
+                                    &mut out_bindings_sphere,
                                 );
 
                                 {
-                                    let context8 = context7.bind_u_Color(
-                                        &color_data,
+                                    let context10 = context9.bind_light_pos(
+                                        &light_pos,
                                         &device,
-                                        &mut bindings,
-                                        &mut out_bindings,
+                                        &mut bindings_sphere,
+                                        &mut out_bindings_sphere,
                                     );
-
                                     {
-                                        let context9 = context8.bind_u_World(
-                                            &world_mat,
-                                            &device,
-                                            &mut bindings,
-                                            &mut out_bindings,
+                                        bind_prerun = BindingPreprocess::bind(
+                                            &mut bindings_sphere,
+                                            &out_bindings_sphere,
                                         );
-
-                                        {
-                                            let context10 = context9.bind_a_normal(
-                                                &normals,
+                                        rpass = context10.runnable(|| {
+                                            graphics_run_indicies(
+                                                &program,
                                                 &device,
-                                                &mut bindings,
-                                                &mut out_bindings,
-                                            );
-
-                                            {
-
-                                                bind_prerun = BindingPreprocess::bind(
-                                                    &mut bindings,
-                                                    &out_bindings,
-                                                );
-                                                rpass = context10.runnable(||
-                                                graphics_run_indicies(
-                                                    &program,
-                                                    &device,
-                                                    rpass,
-                                                    &mut bind_group,
-                                                    &mut bind_prerun,
-                                                    &index_data,
-                                                ));
-                                            }
-                                        }
+                                                rpass,
+                                                &mut bind_group,
+                                                &mut bind_prerun,
+                                                &index_data,
+                                            )
+                                        });
                                     }
                                 }
                             }
-}
-                        }}}}}}}
+                        }
 
                         queue.submit(&[init_encoder.finish()]);
-                        }
                     }
                 }
             }

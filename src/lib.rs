@@ -3,9 +3,9 @@
 #![feature(const_mut_refs, unsized_locals)]
 #[macro_use]
 pub mod debug;
+pub mod bind;
 pub mod context;
 pub mod helper;
-pub mod bind;
 pub mod shared;
 
 pub mod wgpu_compute_header;
@@ -13,12 +13,16 @@ pub mod wgpu_graphics_header;
 
 #[macro_export]
 macro_rules! eager_compute_shader {
-    ($name:tt!()) => {eager! { lazy! {compute_shader! { eager!{$name!()}}}}}
+    ($name:tt!()) => {
+        eager! { lazy! {compute_shader! { eager!{$name!()}}}}
+    };
 }
 
 #[macro_export]
 macro_rules! eager_graphics_shader {
-    ($name:tt!()) => {eager! { lazy! {graphics_shader! { eager!{$name!()}}}}}
+    ($name:tt!()) => {
+        eager! { lazy! {graphics_shader! { eager!{$name!()}}}}
+    };
 }
 
 #[macro_export]

@@ -68,7 +68,7 @@ async fn execute_gpu() {
         let context1 =
             context.bind_add_one_in(&indices, &program1, &mut bindings1, &mut out_bindings1);
         {
-            let result =  context1.runable(|| run(&program1, &mut bindings1, out_bindings1));
+            let result = context1.runable(|| run(&program1, &mut bindings1, out_bindings1));
             println!("{:?}", read_uvec(&program1, &result, "add_two_in").await);
 
             context1.can_pipe(&next_context);
