@@ -245,11 +245,9 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     });
     let depth_view = depth_texture.create_default_view();
 
-    /*
+/*
     param1 : in
     param2 : in
-
-
 
     // todo go with this
     // todo fix examples
@@ -268,28 +266,40 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     }
 
     render_loop {
+        bind light in context2
+        bind light in context3
+
         run(context2)
         run(context3)
     }
 
     ///////
 
+    program 1
+    program 2
+
+    context<Bound, Unbound, ...>
+    context<[Bound, Unbound], [Unbound, Unbound], ...>
+
+    bind_param1(data,...)
+
+    bind_param1([Update, Don't Update, ...], data, ...)
+
     {
-        bind a to param1
+        bind a to param1@1@2
         {
             bind b to param2@1
             {
                 bind c to param2@2
                 render_loop {
-                    run(context@1)
-                    run(context@2)
+                    bind light to paramlight@1@2 {
+                        run(context@1)
+                        run(context@2)
+                    }
                 }
             }
         }
     }
-
-
-
 
 
     bind a to param1 { // bindgroup = {a}
@@ -304,7 +314,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
             }
         }
     }
-     */
+*/
 
     let mut bind_group = default_bind_group(&device);
     let mut bind_group_p1 = default_bind_group(&device);
@@ -472,6 +482,25 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         }
     }
 
+
+    {bind param2
+        render_loop {
+        bind param1
+    run()}
+        }
+
+    bind param2 {
+        bind param1 {
+            run()
+        }
+    }
+
+    most common -> least common
+
+
+    non-changing -> changing
+
+
     event_loop.run(move |event, _, control_flow: &mut ControlFlow| {
         *control_flow = ControlFlow::Poll;
         match event {
@@ -484,154 +513,152 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                     .get_next_texture()
                     .expect("Timeout when acquiring next swap chain texture");
                 {
-                    light_pos = rotate_vec4(&light_pos, -0.05);
-                    light_proj_mat = generate_light_projection(light_pos[0], 60.0);
-
-                    dbg!(&light_pos);
-
                     let mut bind_prerun_stencil_p1;
                     let mut bind_prerun_stencil;
                     let mut bind_prerun;
                     let mut bind_prerun_p1;
 
+                    light_pos = rotate_vec4(&light_pos, -0.05);
+                    light_proj_mat = generate_light_projection(light_pos[0], 60.0);
+
+                    dbg!(&light_pos);
+
                     {
+                        let mut rpass_stencil = setup_render_pass_depth(
+                            &stencil_program,
+                            &mut init_encoder,
+                            &light_target_view,
+                        );
+
                         {
-                            let mut rpass_stencil = setup_render_pass_depth(
-                                &stencil_program,
-                                &mut init_encoder,
-                                &light_target_view,
+                            let bake_context3 = (&bake_context_plane).bind_u_viewProj(
+                                &light_proj_mat,
+                                &device,
+                                &mut bindings_stencil_plane,
+                                &mut out_bindings_stencil_plane,
                             );
 
                             {
-                                let bake_context3 = (&bake_context_plane).bind_u_viewProj(
-                                    &light_proj_mat,
-                                    &device,
+                                bind_prerun_stencil_p1 = BindingPreprocess::bind(
                                     &mut bindings_stencil_plane,
-                                    &mut out_bindings_stencil_plane,
+                                    &out_bindings_stencil_plane,
                                 );
+                                rpass_stencil = bake_context3.runnable(|| {
+                                    graphics_run_indicies(
+                                        &stencil_program,
+                                        &device,
+                                        rpass_stencil,
+                                        &mut bind_group_stencil_p1,
+                                        &mut bind_prerun_stencil_p1,
+                                        &plane_index_data,
+                                    )
+                                });
+                            }
+                        }
+                        {
+                            let bake_context3 = (&bake_context_sphere).bind_u_viewProj(
+                                &light_proj_mat,
+                                &device,
+                                &mut bindings_stencil_sphere,
+                                &mut out_bindings_stencil_sphere,
+                            );
+                            {
+                                bind_prerun_stencil = BindingPreprocess::bind(
+                                    &mut bindings_stencil_sphere,
+                                    &out_bindings_stencil_sphere,
+                                );
+                                rpass_stencil = bake_context3.runnable(|| {
+                                    graphics_run_indicies(
+                                        &stencil_program,
+                                        &device,
+                                        rpass_stencil,
+                                        &mut bind_group_stencil,
+                                        &mut bind_prerun_stencil,
+                                        &index_data,
+                                    )
+                                });
+                            }
+                        }
+                    }
 
+                    {
+                        let mut rpass = setup_render_pass_color_depth(
+                            &program,
+                            &mut init_encoder,
+                            &frame,
+                            &depth_view,
+                        );
+
+                        {
+                            let context9 = (&context_plane).bind_light_proj(
+                                &light_proj_mat,
+                                &device,
+                                &mut bindings_plane,
+                                &mut out_bindings_plane,
+                            );
+
+                            {
+                                let context10 = context9.bind_light_pos(
+                                    &light_pos,
+                                    &device,
+                                    &mut bindings_plane,
+                                    &mut out_bindings_plane,
+                                );
                                 {
-                                    bind_prerun_stencil_p1 = BindingPreprocess::bind(
-                                        &mut bindings_stencil_plane,
-                                        &out_bindings_stencil_plane,
+                                    bind_prerun_p1 = BindingPreprocess::bind(
+                                        &mut bindings_plane,
+                                        &out_bindings_plane,
                                     );
-                                    rpass_stencil = bake_context3.runnable(|| {
+                                    rpass = context10.runnable(|| {
                                         graphics_run_indicies(
-                                            &stencil_program,
+                                            &program,
                                             &device,
-                                            rpass_stencil,
-                                            &mut bind_group_stencil_p1,
-                                            &mut bind_prerun_stencil_p1,
+                                            rpass,
+                                            &mut bind_group_p1,
+                                            &mut bind_prerun_p1,
                                             &plane_index_data,
                                         )
                                     });
                                 }
                             }
+                        }
+
+                        {
+                            let context9 = (&context_sphere).bind_light_proj(
+                                &light_proj_mat,
+                                &device,
+                                &mut bindings_sphere,
+                                &mut out_bindings_sphere,
+                            );
+
                             {
-                                let bake_context3 = (&bake_context_sphere).bind_u_viewProj(
-                                    &light_proj_mat,
+                                let context10 = context9.bind_light_pos(
+                                    &light_pos,
                                     &device,
-                                    &mut bindings_stencil_sphere,
-                                    &mut out_bindings_stencil_sphere,
+                                    &mut bindings_sphere,
+                                    &mut out_bindings_sphere,
                                 );
                                 {
-                                    bind_prerun_stencil = BindingPreprocess::bind(
-                                        &mut bindings_stencil_sphere,
-                                        &out_bindings_stencil_sphere,
+                                    bind_prerun = BindingPreprocess::bind(
+                                        &mut bindings_sphere,
+                                        &out_bindings_sphere,
                                     );
-                                    rpass_stencil = bake_context3.runnable(|| {
+                                    rpass = context10.runnable(|| {
                                         graphics_run_indicies(
-                                            &stencil_program,
+                                            &program,
                                             &device,
-                                            rpass_stencil,
-                                            &mut bind_group_stencil,
-                                            &mut bind_prerun_stencil,
+                                            rpass,
+                                            &mut bind_group,
+                                            &mut bind_prerun,
                                             &index_data,
                                         )
                                     });
                                 }
                             }
                         }
-
-                        {
-                            let mut rpass = setup_render_pass_color_depth(
-                                &program,
-                                &mut init_encoder,
-                                &frame,
-                                &depth_view,
-                            );
-
-                            {
-                                let context9 = (&context_plane).bind_light_proj(
-                                    &light_proj_mat,
-                                    &device,
-                                    &mut bindings_plane,
-                                    &mut out_bindings_plane,
-                                );
-
-                                {
-                                    let context10 = context9.bind_light_pos(
-                                        &light_pos,
-                                        &device,
-                                        &mut bindings_plane,
-                                        &mut out_bindings_plane,
-                                    );
-                                    {
-                                        bind_prerun_p1 = BindingPreprocess::bind(
-                                            &mut bindings_plane,
-                                            &out_bindings_plane,
-                                        );
-                                        rpass = context10.runnable(|| {
-                                            graphics_run_indicies(
-                                                &program,
-                                                &device,
-                                                rpass,
-                                                &mut bind_group_p1,
-                                                &mut bind_prerun_p1,
-                                                &plane_index_data,
-                                            )
-                                        });
-                                    }
-                                }
-                            }
-
-                            {
-                                let context9 = (&context_sphere).bind_light_proj(
-                                    &light_proj_mat,
-                                    &device,
-                                    &mut bindings_sphere,
-                                    &mut out_bindings_sphere,
-                                );
-
-                                {
-                                    let context10 = context9.bind_light_pos(
-                                        &light_pos,
-                                        &device,
-                                        &mut bindings_sphere,
-                                        &mut out_bindings_sphere,
-                                    );
-                                    {
-                                        bind_prerun = BindingPreprocess::bind(
-                                            &mut bindings_sphere,
-                                            &out_bindings_sphere,
-                                        );
-                                        rpass = context10.runnable(|| {
-                                            graphics_run_indicies(
-                                                &program,
-                                                &device,
-                                                rpass,
-                                                &mut bind_group,
-                                                &mut bind_prerun,
-                                                &index_data,
-                                            )
-                                        });
-                                    }
-                                }
-                            }
-                        }
-
-                        queue.submit(&[init_encoder.finish()]);
                     }
+
+                    queue.submit(&[init_encoder.finish()]);
                 }
             }
             // When the window closes we are done. Change the status
