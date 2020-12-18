@@ -12,6 +12,29 @@ pub use wgpu_macros::{generic_bindings, init};
 async fn execute_gpu() {
     init!();
 
+    let adapter = wgpu::Adapter::request(
+        &wgpu::RequestAdapterOptions {
+            // Can specify Low/High power usage
+            power_preference: wgpu::PowerPreference::Default,
+            compatible_surface: None,
+        },
+        // Map to Vulkan/Metal/Direct3D 12
+        wgpu::BackendBit::PRIMARY,
+    )
+    .await
+    .unwrap();
+
+    // The device manages the connection and resources of the adapter
+    // The queue is a literal queue of tasks for the gpu
+    let (device, queue) = adapter
+        .request_device(&wgpu::DeviceDescriptor {
+            extensions: wgpu::Extensions {
+                anisotropic_filtering: false,
+            },
+            limits: wgpu::Limits::default(),
+        })
+        .await;
+
     // qualifiers
     // buffer: is a buffer?
     // in: this parameter must be bound to before the program runs
@@ -48,20 +71,20 @@ async fn execute_gpu() {
     let indices2: Vec<u32> = vec![4, 3, 2, 1];
 
     {
-        let context1 = context.bind_indices2(&indices2, &program, &mut bindings, &mut out_bindings);
+        let context1 = context.bind_indices2(&indices2, &device, &mut bindings, &mut out_bindings);
         let context2 =
-            (&context1).bind_indices(&indices_1, &program, &mut bindings, &mut out_bindings);
+            (&context1).bind_indices(&indices_1, &device, &mut bindings, &mut out_bindings);
         let result_out_bindings = out_bindings.move_buffers();
 
-        let result1 = context2.runable(|| run(&program, &mut bindings, result_out_bindings));
+        let result1 = context2.runnable(|| run(&program, &mut bindings, result_out_bindings));
 
         println!("{:?}", read_uvec(&program, &result1, "indices").await);
 
         {
             let context3 =
-                context1.bind_indices(&indices_2, &program, &mut bindings, &mut out_bindings);
+                context1.bind_indices(&indices_2, &device, &mut bindings, &mut out_bindings);
             {
-                let result1 = context3.runable(|| run(&program, &mut bindings, out_bindings));
+                let result1 = context3.runnable(|| run(&program, &mut bindings, out_bindings));
                 println!("{:?}", read_uvec(&program, &result1, "indices").await);
             }
         }

@@ -28,7 +28,7 @@ pub fn compile_shader(contents: String, shader: ShaderType, device: &wgpu::Devic
         .read_to_end(&mut vs)
         .expect("Somehow reading the file got interrupted");
     // Take the shader, ...,  and return
-    device.create_shader_module(&wgpu::read_spirv(std::io::Cursor::new(&vs[..])).unwrap())
+    device.create_shader_module(wgpu::util::make_spirv(&vs[..]))
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -323,6 +323,7 @@ pub const fn has_uniform_qual(p: &[QUALIFIER]) -> bool {
 
 #[derive(Debug)]
 pub struct PARAMETER {
+    pub group: Option<&'static str>,
     pub qual: &'static [QUALIFIER],
     pub gtype: GLSLTYPE,
     pub name: &'static str,
@@ -336,14 +337,16 @@ pub struct PARAMETER {
 // https://doc.rust-lang.org/stable/rust-by-example/macros.html
 #[macro_export]
 macro_rules! shader {
-    ( $([[$($qualifier:tt)*] $type:ident $($brack:tt)*] $param:ident;)*
+    ( $([$($group:ident)? [$($qualifier:tt)*] $type:ident $($brack:tt)*] $param:ident;)*
       {$($tt:tt)*}) =>
       {
         {
             const S : &[pipeline::shared::PARAMETER] = &[$(
                 pipeline::shared::PARAMETER{qual:&[$(qualifying!($qualifier)),*],
-                                                      gtype:pipeline::shared::array_type(typing!($type), count_brackets!($($brack)*)),
-                                                      name:stringify!($param)}),*];
+                                            gtype:pipeline::shared::array_type(typing!($type), count_brackets!($($brack)*)),
+                                            name:stringify!($param),
+                                            group:{let mut x : Option<&'static str> = None; $(x = Some(stringify!($group)); )? x},
+                                        }),*];
 
 
             const B: &'static str = munch_body!($($tt)*);

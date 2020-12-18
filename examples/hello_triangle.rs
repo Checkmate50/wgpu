@@ -14,10 +14,10 @@ use winit::{
 pub use pipeline::wgpu_graphics_header::{
     compile_buffer, default_bind_group, generate_swap_chain, graphics_run, setup_render_pass,
     valid_fragment_shader, valid_vertex_shader, GraphicsBindings, GraphicsShader,
-    OutGraphicsBindings,
+    OutGraphicsBindings, PipelineType,
 };
 
-pub use pipeline::bind::Bindings;
+pub use pipeline::bind::Vertex;
 
 pub use wgpu_macros::{generic_bindings, init};
 
@@ -25,6 +25,31 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     let size = window.inner_size();
 
     init!();
+
+    let instance = wgpu::Instance::new(wgpu::BackendBit::PRIMARY);
+    let surface = unsafe { instance.create_surface(&window) };
+    let adapter = instance
+        .request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::Default,
+            // Request an adapter which can render to our surface
+            compatible_surface: Some(&surface),
+        })
+        .await
+        .expect("Failed to find an appropiate adapter");
+
+    // The device manages the connection and resources of the adapter
+    // The queue is a literal queue of tasks for the gpu
+    let (device, queue) = adapter
+        .request_device(
+            &wgpu::DeviceDescriptor {
+                features: wgpu::Features::empty(),
+                limits: wgpu::Limits::default(),
+                shader_validation: true,
+            },
+            None,
+        )
+        .await
+        .expect("Failed to create device");
 
     my_shader! {vertex = {
         [[vertex in] vec3] a_position;
@@ -64,13 +89,16 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     const S_F: GraphicsShader = FRAGMENT;
 
     let (program, template_bindings, template_out_bindings, _) =
-        compile_valid_graphics_program!(window, S_V, S_F);
+        compile_valid_graphics_program!(device, S_V, S_F, PipelineType::Color);
 
     let positions = vec![[0.0, 0.7, 0.0], [-0.5, 0.5, 0.0], [0.5, -0.5, 0.0]];
     let brightness = vec![0.5, 0.5, 0.9];
 
+    let vertex_position = Vertex::new(&device, &positions);
+    let vertex_brightness = Vertex::new(&device, &brightness);
+
     // A "chain" of buffers that we render on to the display
-    let mut swap_chain = generate_swap_chain(&program, &window);
+    let mut swap_chain = generate_swap_chain(&surface, &window, &device);
 
     event_loop.run(move |event, _, control_flow: &mut ControlFlow| {
         *control_flow = ControlFlow::Poll;
@@ -78,47 +106,47 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
             // Everything that can be processed has been so we can now redraw the image on our window
             Event::MainEventsCleared => window.request_redraw(),
             Event::RedrawRequested(_) => {
-                let mut init_encoder = program
-                    .device
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+                let mut init_encoder =
+                    device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
                 let mut frame = swap_chain
-                    .get_next_texture()
-                    .expect("Timeout when acquiring next swap chain texture");
-                let mut rpass = setup_render_pass(&program, &mut init_encoder, &frame);
-                let mut bind_group = default_bind_group(&program);
-
-                let mut bindings: GraphicsBindings = template_bindings.clone();
-                let mut out_bindings: OutGraphicsBindings = template_out_bindings.clone();
+                    .get_current_frame()
+                    .expect("Timeout when acquiring next swap chain texture")
+                    .output;
 
                 {
-                    let context1 = (&context).bind_in_brightness(
+                    /* let context1 = (&context).bind_in_brightness(
                         &brightness,
                         &program,
                         &mut bindings,
                         &mut out_bindings,
-                    );
+                    ); */
+                    let mut rpass = setup_render_pass(&program, &mut init_encoder, &frame);
+                    rpass.set_vertex_buffer(0, vertex_position.get_buffer().slice(..));
+                    rpass.set_vertex_buffer(1, vertex_brightness.get_buffer().slice(..));
+                    rpass = graphics_run(&device, rpass, 3, 1)
 
-                    {
-                        let context2 = context1.bind_a_position(
-                            &positions,
-                            &program,
-                            &mut bindings,
-                            &mut out_bindings,
-                        );
-                        {
-                            context2.runable(|| {
-                                graphics_run(
-                                    &program,
-                                    rpass,
-                                    &mut bind_group,
-                                    &bindings,
-                                    &out_bindings,
-                                )
-                            });
-                        }
-                    }
+                    /* {
+                                           let context2 = context1.bind_a_position(
+                                               &positions,
+                                               &program,
+                                               &mut bindings,
+                                               &mut out_bindings,
+                                           );
+                                           {
+                                               context2.runable(|| {
+                                                   graphics_run(
+                                                       &program,
+                                                       rpass,
+                                                       &mut bind_group,
+                                                       &bindings,
+                                                       &out_bindings,
+                                                   )
+                                               });
+                                           }
+                                       }
+                    */
                 }
-                program.queue.submit(&[init_encoder.finish()]);
+                queue.submit(Some(init_encoder.finish()));
             }
             // When the window closes we are done. Change the status
             Event::WindowEvent {

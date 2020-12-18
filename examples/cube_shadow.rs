@@ -60,8 +60,10 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     my_shader! {BAKE_VERTEXT = {
         [[vertex in] vec3] a_position;
 
-        [[uniform in] mat4] u_viewProj;
-        [[uniform in] mat4] u_World;
+        group {
+            [[uniform in] mat4] u_viewProj;
+            [[uniform in] mat4] u_World;
+        }
 
         [[out] vec4] gl_Position;
 
@@ -87,9 +89,11 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         [[out] vec3] v_Normal;
         [[out] vec4] gl_Position;
 
-        [[uniform in] mat4] u_viewProj;
-        //[[uniform in] mat4] u_proj;
-        [[uniform in] mat4] u_World;
+        group {
+            [[uniform in] mat4] u_viewProj;
+            //[[uniform in] mat4] u_proj;
+            [[uniform in] mat4] u_World;
+        }
         [[uniform in] vec4] u_Color;
 
         {{

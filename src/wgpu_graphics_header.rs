@@ -1,5 +1,4 @@
 use glsl_to_spirv::ShaderType;
-use zerocopy::AsBytes as _;
 
 use std::collections::HashMap;
 use std::convert::TryInto;
@@ -10,10 +9,7 @@ use crate::shared::{
     process_body, string_compare, GLSLTYPE, PARAMETER, QUALIFIER,
 };
 
-use crate::bind::{
-    new_bindings, Bindings, DefaultBinding, OutProgramBindings, ProgramBindings, SamplerBinding,
-    TextureBinding,
-};
+use crate::bind::{DefaultBinding, Indices, SamplerBinding, TextureBinding};
 
 use crate::context::BindingContext;
 
@@ -31,83 +27,9 @@ pub struct GraphicsBindings {
     pub samplers: Vec<SamplerBinding>,
 }
 
-impl ProgramBindings for GraphicsBindings {
-    fn get_bindings(&mut self) -> &mut Vec<DefaultBinding> {
-        &mut self.bindings
-    }
-    fn index_binding(&mut self, index: usize) -> &mut DefaultBinding {
-        &mut self.bindings[index]
-    }
-    fn get_samplers(&mut self) -> Option<&mut Vec<SamplerBinding>> {
-        Some(&mut self.samplers)
-    }
-    fn get_textures(&mut self) -> Option<&mut Vec<TextureBinding>> {
-        Some(&mut self.textures)
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct OutGraphicsBindings {
     pub bindings: Vec<DefaultBinding>,
-}
-
-impl OutProgramBindings for OutGraphicsBindings {
-    fn get_bindings(&mut self) -> &mut Vec<DefaultBinding> {
-        &mut self.bindings
-    }
-    fn index_binding(&mut self, index: usize) -> &mut DefaultBinding {
-        &mut self.bindings[index]
-    }
-}
-
-impl Bindings for GraphicsBindings {
-    fn new(&self) -> GraphicsBindings {
-        GraphicsBindings {
-            bindings: new_bindings(&self.bindings),
-            indicies: None,
-            index_len: None,
-            textures: new_textures(&self.textures),
-            samplers: new_samplers(&self.samplers),
-        }
-    }
-}
-
-impl Bindings for OutGraphicsBindings {
-    fn new(&self) -> OutGraphicsBindings {
-        OutGraphicsBindings {
-            bindings: new_bindings(&self.bindings),
-        }
-    }
-}
-
-fn new_textures(bindings: &Vec<TextureBinding>) -> Vec<TextureBinding> {
-    let mut new = Vec::new();
-
-    for i in bindings.iter() {
-        new.push(TextureBinding {
-            name: i.name.to_string(),
-            binding_number: i.binding_number,
-            qual: i.qual.clone(),
-            gtype: i.gtype.clone(),
-            data: None,
-        })
-    }
-    new
-}
-
-fn new_samplers(bindings: &Vec<SamplerBinding>) -> Vec<SamplerBinding> {
-    let mut new = Vec::new();
-
-    for i in bindings.iter() {
-        new.push(SamplerBinding {
-            name: i.name.to_string(),
-            binding_number: i.binding_number,
-            qual: i.qual.clone(),
-            gtype: i.gtype.clone(),
-            data: None,
-        })
-    }
-    new
 }
 
 fn stringify_shader(
@@ -303,7 +225,7 @@ fn create_bindings(
                     uniform_binding_number += 1;
                 } else {
                     let num = if uniform_map.get(i.name).is_some() {
-                        uniform_map.get(i.name).unwrap().clone()
+                        *uniform_map.get(i.name).unwrap()
                     } else {
                         let x = uniform_binding_number;
                         uniform_map.insert(i.name, x);
@@ -321,10 +243,9 @@ fn create_bindings(
                 }
             } else if i.qual.contains(&QUALIFIER::IN) && !i.qual.contains(&QUALIFIER::OUT) {
                 fragment_binding_struct.push(DefaultBinding {
-                    binding_number: vertex_to_fragment_map
+                    binding_number: *vertex_to_fragment_map
                         .get(i.name)
-                        .unwrap_or_else(|| panic!("{} has not been bound", i.name))
-                        .clone(),
+                        .unwrap_or_else(|| panic!("{} has not been bound", i.name)),
                     name: i.name.to_string(),
                     data: None,
                     length: None,
@@ -410,7 +331,6 @@ pub async fn graphics_compile(
 
     let mut vertex_binding_desc = Vec::new();
     let mut bind_entry = HashMap::new();
-    let mut are_bind_enties = false;
 
     for i in &program_bindings1.bindings[..] {
         if i.qual.contains(&QUALIFIER::UNIFORM) {
@@ -419,10 +339,13 @@ pub async fn graphics_compile(
                 wgpu::BindGroupLayoutEntry {
                     binding: i.binding_number,
                     visibility: wgpu::ShaderStage::VERTEX | wgpu::ShaderStage::FRAGMENT,
-                    ty: wgpu::BindingType::UniformBuffer { dynamic: false },
+                    ty: wgpu::BindingType::UniformBuffer {
+                        dynamic: false,
+                        min_binding_size: wgpu::BufferSize::new(i.gtype.size_of() as u64),
+                    },
+                    count: None,
                 },
             );
-            are_bind_enties = true;
         } else if i.qual.contains(&QUALIFIER::BUFFER) {
             bind_entry.insert(
                 i.binding_number,
@@ -432,10 +355,11 @@ pub async fn graphics_compile(
                     ty: wgpu::BindingType::StorageBuffer {
                         dynamic: false,
                         readonly: false,
+                        min_binding_size: wgpu::BufferSize::new(i.gtype.size_of() as u64),
                     },
+                    count: None,
                 },
             );
-            are_bind_enties = true;
         } else {
             vertex_binding_desc.push(wgpu::VertexBufferDescriptor {
                 stride: (i.gtype.size_of()) as wgpu::BufferAddress,
@@ -458,9 +382,9 @@ pub async fn graphics_compile(
                 binding: i.binding_number,
                 visibility: wgpu::ShaderStage::VERTEX | wgpu::ShaderStage::FRAGMENT,
                 ty: wgpu::BindingType::Sampler { comparison: false },
+                count: None,
             },
         );
-        are_bind_enties = true;
     }
     for i in &program_bindings2.textures[..] {
         bind_entry.insert(
@@ -473,9 +397,9 @@ pub async fn graphics_compile(
                     component_type: wgpu::TextureComponentType::Float,
                     dimension: wgpu::TextureViewDimension::D2,
                 },
+                count: None,
             },
         );
-        are_bind_enties = true;
     }
     for i in &program_bindings2.bindings {
         if i.qual.contains(&QUALIFIER::UNIFORM) && i.qual.contains(&QUALIFIER::IN) {
@@ -484,14 +408,17 @@ pub async fn graphics_compile(
                 wgpu::BindGroupLayoutEntry {
                     binding: i.binding_number,
                     visibility: wgpu::ShaderStage::VERTEX | wgpu::ShaderStage::FRAGMENT, // TODO I've made uniforms visible to both stages even if they are only used in one. Find out if this is a bad thing
-                    ty: wgpu::BindingType::UniformBuffer { dynamic: false },
+                    ty: wgpu::BindingType::UniformBuffer {
+                        dynamic: false,
+                        min_binding_size: wgpu::BufferSize::new(i.gtype.size_of() as u64),
+                    },
+                    count: None,
                 },
             );
-            are_bind_enties = true;
         }
     }
 
-    let bind_entry_vec = bind_entry
+    let mut bind_entry_vec = bind_entry
         .into_iter()
         .map(|(_, v)| v)
         .collect::<Vec<wgpu::BindGroupLayoutEntry>>();
@@ -506,27 +433,38 @@ pub async fn graphics_compile(
     // Our compiled fragment shader
     let fs_module = compile_shader(y, ShaderType::Fragment, &device);
 
+    bind_entry_vec.sort_by(|a, b| a.binding.partial_cmp(&b.binding).unwrap());
+
+    //debug!(bind_entry_vec);
+
     let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         // The layout of for each binding specify a number to connect with the bind_group, a visibility to specify for which stage it's for and a type
-        bindings: if are_bind_enties {
-            &bind_entry_vec
-        } else {
-            &[]
-        },
+        entries: &bind_entry_vec,
         label: None,
     });
 
-    let bind_group_layout_ref = [&bind_group_layout];
+    //debug!(bind_group_layout);
+
+    let mut bind_group_layout_ref = Vec::new();
+    // todo update
+    if bind_entry_vec.len() > 0 {
+        bind_group_layout_ref.push(&bind_group_layout)
+    };
 
     // Bind no values to none of the bindings.
     // Use for something like textures
     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        bind_group_layouts: &bind_group_layout_ref,
+        label: None,
+        bind_group_layouts: &[&bind_group_layout],
+        push_constant_ranges: &[],
     });
+
+    //debug!(pipeline_layout);
 
     // The part where we actually bring it all together
     let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        layout: &pipeline_layout,
+        label: None,
+        layout: Some(&pipeline_layout),
         // Set each of the stages we want to do specifying which function to use to start
         // There is an implicit numbering for each of the stages. This number is used when specifying which stage you are creating bindings for
         // vertex => 1
@@ -561,6 +499,7 @@ pub async fn graphics_compile(
                 PipelineType::ColorWithStencil | PipelineType::Color => 0.0,
             },
             depth_bias_clamp: 0.0,
+            clamp_depth: device.features().contains(wgpu::Features::DEPTH_CLAMPING),
         }),
         // Use Triangles
         primitive_topology: wgpu::PrimitiveTopology::TriangleList,
@@ -587,19 +526,13 @@ pub async fn graphics_compile(
                 format: wgpu::TextureFormat::Depth32Float,
                 depth_write_enabled: true,
                 depth_compare: wgpu::CompareFunction::LessEqual,
-                stencil_front: wgpu::StencilStateFaceDescriptor::IGNORE,
-                stencil_back: wgpu::StencilStateFaceDescriptor::IGNORE,
-                stencil_read_mask: 0,
-                stencil_write_mask: 0,
+                stencil: wgpu::StencilStateDescriptor::default(),
             }),
             PipelineType::ColorWithStencil => Some(wgpu::DepthStencilStateDescriptor {
                 format: wgpu::TextureFormat::Depth32Float,
                 depth_write_enabled: true,
                 depth_compare: wgpu::CompareFunction::Less,
-                stencil_front: wgpu::StencilStateFaceDescriptor::IGNORE,
-                stencil_back: wgpu::StencilStateFaceDescriptor::IGNORE,
-                stencil_read_mask: 0,
-                stencil_write_mask: 0,
+                stencil: wgpu::StencilStateDescriptor::default(),
             }),
             PipelineType::Color => None,
         },
@@ -638,27 +571,6 @@ pub async fn graphics_compile(
     )
 }
 
-/* pub fn bind_texture(
-    bindings: &mut GraphicsBindings,
-    out_bindings: &mut OutGraphicsBindings,
-    texture: wgpu::TextureView,
-    name: String,
-) {
-    let mut binding = match bindings.textures.iter().position(|x| x.name == name) {
-        Some(x) => &mut bindings.textures[x],
-        None => {
-            panic!("I haven't considered that you would output a texture yet")
-            /* let x = out_bindings
-                .getBindings()
-                .iter()
-                .position(|x| x.name == name)
-                .expect("We couldn't find the binding");
-            out_bindings.samplers[x] */
-        }
-    };
-    binding.data = Some(Rc::new(texture));
-} */
-
 fn draw(
     rpass: &mut wgpu::RenderPass,
     vertices: core::ops::Range<u32>,
@@ -682,10 +594,12 @@ pub struct BindingPreprocess {
     num_instances: u32,
     verticies: Vec<(u32, Rc<wgpu::Buffer>)>,
     num_verts: u32,
+    bind_groups: Vec<Rc<wgpu::BindGroup>>,
+    /*
     bind_group_vec: Vec<(u32, Rc<wgpu::Buffer>, std::ops::Range<u64>)>,
     texture_vec: Vec<(u32, Rc<wgpu::TextureView>)>,
     sampler_vec: Vec<(u32, Rc<wgpu::Sampler>)>,
-    //bgd: wgpu::BindGroupDescriptor,
+    */
 }
 
 impl<'a> Default for BindingPreprocess {
@@ -696,221 +610,37 @@ impl<'a> Default for BindingPreprocess {
             num_instances: 0,
             verticies: Vec::new(),
             num_verts: 0,
+            bind_groups: Vec::new(),
+            /*
             bind_group_vec: Vec::new(),
             texture_vec: Vec::new(),
             sampler_vec: Vec::new(),
-            //bgd,
-        }
-    }
-}
-impl<'a> BindingPreprocess {
-    pub fn bind(
-        bindings: &GraphicsBindings,
-        _out_bindings: &OutGraphicsBindings, // There are not out vars that I know of for graphics pipelines so these bindings are ignored
-    ) -> BindingPreprocess {
-        let bind = bindings
-            .bindings
-            .iter()
-            .find(|i| i.qual.contains(&QUALIFIER::VERTEX));
-
-        let num_verts: u32 = if bind.is_none() {
-            3
-        } else {
-            bind.unwrap().length.unwrap() as u32
-        };
-
-        let bind = bindings
-            .bindings
-            .iter()
-            .find(|i| i.qual.contains(&QUALIFIER::LOOP));
-
-        let num_instances: u32 = if bind.is_none() {
-            1
-        } else {
-            bind.unwrap().length.unwrap() as u32
-        };
-
-        let mut bind_group_vec = Vec::new();
-        let mut verticies = Vec::new();
-        let mut textures = Vec::new();
-        let mut samplers = Vec::new();
-
-        for b in bindings.bindings.iter() {
-            if b.qual.contains(&QUALIFIER::VERTEX) && b.qual.contains(&QUALIFIER::IN) {
-                verticies.push((
-                    b.binding_number,
-                    Rc::clone(
-                        b.data
-                            .as_ref()
-                            .expect(&format!("The binding of {} was not set", &b.name)),
-                    ),
-                ))
-            } else {
-                bind_group_vec.push((
-                    b.binding_number,
-                    Rc::clone(
-                        b.data
-                            .as_ref()
-                            .expect(&format!("The binding of {} was not set", &b.name)),
-                    ),
-                    0..b.length
-                        .expect(&format!("The size of {} was not set", &b.name)),
-                ))
-            }
-        }
-
-        for i in bindings.samplers.iter() {
-            samplers.push((
-                i.binding_number,
-                Rc::clone(
-                    i.data
-                        .as_ref()
-                        .expect(&format!("The sampler for {} was not set", &i.name)),
-                ),
-            ));
-        }
-
-        for i in bindings.textures.iter() {
-            textures.push((
-                i.binding_number,
-                Rc::clone(
-                    i.data
-                        .as_ref()
-                        .expect(&format!("The sampler for {} was not set", &i.name)),
-                ),
-            ));
-        }
-
-        BindingPreprocess {
-            indicies: bindings.indicies.as_ref().map(|x| Rc::clone(x)),
-            index_len: bindings.index_len,
-            num_instances,
-            verticies,
-            num_verts,
-            bind_group_vec,
-            texture_vec: textures,
-            sampler_vec: samplers,
+            */
             //bgd,
         }
     }
 }
 
 pub fn graphics_run<'a>(
-    program: &GraphicsProgram,
-    device: &wgpu::Device,
     mut rpass: wgpu::RenderPass<'a>,
-    bind_group: &'a mut wgpu::BindGroup,
-    bind_preprocess: &'a BindingPreprocess,
+    num_verts: u32,
+    num_instances: u32,
 ) -> wgpu::RenderPass<'a> {
-    /* let mut encoder = program
-                        .device
-    .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None }); */
-
-    let bind_group_bindings = &mut bind_preprocess
-        .bind_group_vec
-        .iter()
-        .map(|(idx, buffer, len_range)| wgpu::Binding {
-            binding: *idx,
-            resource: wgpu::BindingResource::Buffer {
-                buffer,
-                range: len_range.clone(),
-            },
-        })
-        .collect::<Vec<wgpu::Binding>>();
-
-    bind_group_bindings.append(
-        &mut bind_preprocess
-            .sampler_vec
-            .iter()
-            .map(|(idx, sample)| wgpu::Binding {
-                binding: *idx,
-                resource: wgpu::BindingResource::Sampler(sample),
-            })
-            .collect::<Vec<wgpu::Binding>>(),
-    );
-
-    bind_group_bindings.append(
-        &mut bind_preprocess
-            .texture_vec
-            .iter()
-            .map(|(idx, texture)| wgpu::Binding {
-                binding: *idx,
-                resource: wgpu::BindingResource::TextureView(texture),
-            })
-            .collect::<Vec<wgpu::Binding>>(),
-    );
-
-    let bgd = &wgpu::BindGroupDescriptor {
-        layout: &program.bind_group_layout,
-        bindings: bind_group_bindings.as_slice(),
-        label: None,
-    };
-
-    *bind_group = device.create_bind_group(bgd);
     {
-        // The order must be set_pipeline -> set a bind_group if needed -> set a vertex buffer -> set an index buffer -> do draw
-        // Otherwise we crash out
-        /* rpass.set_pipeline(&program.pipeline); */
-
-        rpass.set_bind_group(0, bind_group, &[]);
-
-        if bind_preprocess.indicies.is_some() {
-            rpass.set_index_buffer(&bind_preprocess.indicies.as_ref().unwrap(), 0, 0);
-        }
-
-        for (i, d) in bind_preprocess.verticies.iter() {
-            rpass.set_vertex_buffer(*i, &d, 0, 0);
-        }
-
-        /* for i in 0..(out_bindings.bindings.len()) {
-            let b = out_bindings.bindings.get(i as usize).expect(&format!(
-                "I assumed all bindings would be buffers but I guess that has been invalidated"
-            ));
-
-            if b.qual.contains(&QUALIFIER::VERTEX) && b.qual.contains(&QUALIFIER::IN) {
-                rpass.set_vertex_buffer(
-                    b.binding_number,
-                    &b.data
-                        .as_ref()
-                        .unwrap_or_else(|| panic!("The binding of {} was not set", &b.name)),
-                    0,
-                    0,
-                );
-            }
-        } */
-
-        if bind_preprocess.indicies.is_some() {
-            draw_indexed(
-                &mut rpass,
-                0..bind_preprocess.index_len.unwrap(),
-                0..bind_preprocess.num_instances,
-            )
-        } else {
-            draw(
-                &mut rpass,
-                0..bind_preprocess.num_verts,
-                0..bind_preprocess.num_instances,
-            );
-        }
+        draw(&mut rpass, 0..num_verts, 0..num_instances);
     }
     rpass
-    // Do the rendering by saying that we are done and sending it off to the gpu
-    //program.queue.submit(&[encoder.finish()]);
 }
 
 pub fn graphics_run_indicies<'a>(
-    program: &'a GraphicsProgram,
-    device: &wgpu::Device,
-    pass: wgpu::RenderPass<'a>,
-    bind_group: &'a mut wgpu::BindGroup,
-    bind_preprocess: &'a mut BindingPreprocess,
-    indicies: &Vec<u16>,
+    mut rpass: wgpu::RenderPass<'a>,
+    indicies: &'a Indices,
+    num_instances: u32,
 ) -> wgpu::RenderPass<'a> {
-    bind_preprocess.indicies = Some(Rc::new(
-        device.create_buffer_with_data(indicies.as_slice().as_bytes(), wgpu::BufferUsage::INDEX),
-    ));
-    bind_preprocess.index_len = Some(indicies.len() as u32);
-    graphics_run(program, device, pass, bind_group, bind_preprocess)
+    rpass.set_index_buffer(indicies.buffer.slice(..));
+
+    draw_indexed(&mut rpass, 0..indicies.len, 0..num_instances);
+    rpass
 }
 /* todo
 pub fn graphics_pipe(
@@ -949,38 +679,19 @@ pub fn graphics_pipe(
     graphics_run(program, rpass, bind_group, &in_bindings, out_bindings);
 } */
 
-pub fn default_bind_group(device: &wgpu::Device) -> wgpu::BindGroup {
-    let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        // The layout of for each binding specify a number to connect with the bind_group, a visibility to specify for which stage it's for and a type
-        bindings: &[],
-        label: None,
-    });
-
-    let bgd = &wgpu::BindGroupDescriptor {
-        layout: &bind_group_layout,
-        bindings: &[],
-        label: None,
-    };
-
-    device.create_bind_group(bgd)
-}
-
 pub fn setup_render_pass<'a>(
     program: &'a GraphicsProgram,
     encoder: &'a mut wgpu::CommandEncoder,
-    frame: &'a wgpu::SwapChainOutput,
+    frame: &'a wgpu::SwapChainTexture,
 ) -> wgpu::RenderPass<'a> {
     let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-        // color_attachments is literally where we draw the colors to
         color_attachments: &[wgpu::RenderPassColorAttachmentDescriptor {
-            // The texture we are saving the colors to
             attachment: &frame.view,
             resolve_target: None,
-            load_op: wgpu::LoadOp::Clear,
-            store_op: wgpu::StoreOp::Store,
-            // Default color for all pixels
-            // Use Color to specify a specific rgba value
-            clear_color: wgpu::Color::TRANSPARENT,
+            ops: wgpu::Operations {
+                load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                store: true,
+            },
         }],
         depth_stencil_attachment: None,
     });
@@ -998,14 +709,12 @@ pub fn setup_render_pass_depth<'a>(
         // color_attachments is literally where we draw the colors to
         color_attachments: &[],
         depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachmentDescriptor {
-            // The texture we are saving the colors to
             attachment: &texture,
-            depth_load_op: wgpu::LoadOp::Clear,
-            depth_store_op: wgpu::StoreOp::Store,
-            stencil_load_op: wgpu::LoadOp::Clear,
-            stencil_store_op: wgpu::StoreOp::Store,
-            clear_depth: 1.0,
-            clear_stencil: 0,
+            depth_ops: Some(wgpu::Operations {
+                load: wgpu::LoadOp::Clear(1.0),
+                store: true,
+            }),
+            stencil_ops: None,
         }),
     });
 
@@ -1016,36 +725,31 @@ pub fn setup_render_pass_depth<'a>(
 pub fn setup_render_pass_color_depth<'a>(
     program: &'a GraphicsProgram,
     encoder: &'a mut wgpu::CommandEncoder,
-    frame: &'a wgpu::SwapChainOutput,
+    frame: &'a wgpu::SwapChainTexture,
     texture: &'a wgpu::TextureView,
 ) -> wgpu::RenderPass<'a> {
     let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
         // color_attachments is literally where we draw the colors to
         color_attachments: &[wgpu::RenderPassColorAttachmentDescriptor {
-            // The texture we are saving the colors to
             attachment: &frame.view,
             resolve_target: None,
-            load_op: wgpu::LoadOp::Clear,
-            store_op: wgpu::StoreOp::Store,
-            // Default color for all pixels
-            // Use Color to specify a specific rgba value
-            /* clear_color: wgpu::Color::TRANSPARENT, */
-            clear_color: wgpu::Color {
-                r: 0.1,
-                g: 0.2,
-                b: 0.3,
-                a: 1.0,
+            ops: wgpu::Operations {
+                load: wgpu::LoadOp::Clear(wgpu::Color {
+                    r: 0.1,
+                    g: 0.2,
+                    b: 0.3,
+                    a: 1.0,
+                }),
+                store: true,
             },
         }],
         depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachmentDescriptor {
-            // The texture we are saving the colors to
             attachment: &texture,
-            depth_load_op: wgpu::LoadOp::Clear,
-            depth_store_op: wgpu::StoreOp::Store,
-            stencil_load_op: wgpu::LoadOp::Clear,
-            stencil_store_op: wgpu::StoreOp::Store,
-            clear_depth: 1.0,
-            clear_stencil: 0,
+            depth_ops: Some(wgpu::Operations {
+                load: wgpu::LoadOp::Clear(1.0),
+                store: true,
+            }),
+            stencil_ops: None,
         }),
     });
 
