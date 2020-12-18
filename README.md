@@ -2,11 +2,6 @@
 
 ## Binding
 
-todo fix parser, macros
-todo Example based explanation of what this system solves. What errors are prevented
-todo future work section(reevaluate the github issues as well)
-todo limitations of the work
-
 ### Introduction
 
 Binding is the assigning of data to a buffer on the GPU. The CPU representations of these buffers(+parameter metadata) are stored as special buffer structs or in bind groups of buffers (see [bind.rs](src/bind.rs)). During a given iteration, these can then be set in the context of a pipeline. When a program(a pipeline compiled from a compute shader or vertex/fragment shader pair) has a completely bound context, the pipeline is drawn/dispatched.
@@ -107,11 +102,6 @@ let pass = render_pass_initializer(...);
         }
     }
 }
-pass.set_vertex_buffer(0, color_data); // color_data : vec3
-pass.set_vertex_buffer(1, position_data); // position_data : vec4
-pass.set_bind_group(0, u_view_proj_mat); // u_view_proj_mat : mat4
-
-pass.run();
 ```
 
 
