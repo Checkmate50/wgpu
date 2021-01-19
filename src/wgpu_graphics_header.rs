@@ -14,7 +14,6 @@ use crate::bind::{DefaultBinding, Indices, SamplerBinding, TextureBinding};
 use crate::context::BindingContext;
 
 pub struct GraphicsProgram {
-    bind_group_layout: wgpu::BindGroupLayout,
     pub pipeline: wgpu::RenderPipeline,
 }
 
@@ -302,14 +301,17 @@ pub enum PipelineType {
 pub async fn graphics_compile(
     vec_buffer: &mut [wgpu::VertexAttributeDescriptor; 32],
     device: &wgpu::Device,
+    bind_group_layout: Vec<wgpu::BindGroupLayout>,
     vertex: &GraphicsShader,
     fragment: &GraphicsShader,
     pipe_type: PipelineType,
-) -> (GraphicsProgram, GraphicsBindings, OutGraphicsBindings) {
+) -> GraphicsProgram {
     // the adapter is the handler to the physical graphics unit
 
-    let (mut program_bindings1, out_program_bindings1, program_bindings2, out_program_bindings2) =
+    let (program_bindings1, out_program_bindings1, program_bindings2, out_program_bindings2) =
         create_bindings(&vertex, &fragment);
+
+    debug!(program_bindings1);
 
     for i in &program_bindings1.bindings[..] {
         if i.qual.contains(&QUALIFIER::VERTEX) {
@@ -330,37 +332,9 @@ pub async fn graphics_compile(
     }
 
     let mut vertex_binding_desc = Vec::new();
-    let mut bind_entry = HashMap::new();
 
     for i in &program_bindings1.bindings[..] {
-        if i.qual.contains(&QUALIFIER::UNIFORM) {
-            bind_entry.insert(
-                i.binding_number,
-                wgpu::BindGroupLayoutEntry {
-                    binding: i.binding_number,
-                    visibility: wgpu::ShaderStage::VERTEX | wgpu::ShaderStage::FRAGMENT,
-                    ty: wgpu::BindingType::UniformBuffer {
-                        dynamic: false,
-                        min_binding_size: wgpu::BufferSize::new(i.gtype.size_of() as u64),
-                    },
-                    count: None,
-                },
-            );
-        } else if i.qual.contains(&QUALIFIER::BUFFER) {
-            bind_entry.insert(
-                i.binding_number,
-                wgpu::BindGroupLayoutEntry {
-                    binding: i.binding_number,
-                    visibility: wgpu::ShaderStage::VERTEX | wgpu::ShaderStage::FRAGMENT,
-                    ty: wgpu::BindingType::StorageBuffer {
-                        dynamic: false,
-                        readonly: false,
-                        min_binding_size: wgpu::BufferSize::new(i.gtype.size_of() as u64),
-                    },
-                    count: None,
-                },
-            );
-        } else {
+        if !i.qual.contains(&QUALIFIER::UNIFORM) && !i.qual.contains(&QUALIFIER::BUFFER) {
             vertex_binding_desc.push(wgpu::VertexBufferDescriptor {
                 stride: (i.gtype.size_of()) as wgpu::BufferAddress,
                 step_mode: if i.qual.contains(&QUALIFIER::VERTEX) {
@@ -375,54 +349,6 @@ pub async fn graphics_compile(
         }
     }
 
-    for i in &program_bindings2.samplers[..] {
-        bind_entry.insert(
-            i.binding_number,
-            wgpu::BindGroupLayoutEntry {
-                binding: i.binding_number,
-                visibility: wgpu::ShaderStage::VERTEX | wgpu::ShaderStage::FRAGMENT,
-                ty: wgpu::BindingType::Sampler { comparison: false },
-                count: None,
-            },
-        );
-    }
-    for i in &program_bindings2.textures[..] {
-        bind_entry.insert(
-            i.binding_number,
-            wgpu::BindGroupLayoutEntry {
-                binding: i.binding_number,
-                visibility: wgpu::ShaderStage::VERTEX | wgpu::ShaderStage::FRAGMENT,
-                ty: wgpu::BindingType::SampledTexture {
-                    multisampled: false,
-                    component_type: wgpu::TextureComponentType::Float,
-                    dimension: wgpu::TextureViewDimension::D2,
-                },
-                count: None,
-            },
-        );
-    }
-    for i in &program_bindings2.bindings {
-        if i.qual.contains(&QUALIFIER::UNIFORM) && i.qual.contains(&QUALIFIER::IN) {
-            bind_entry.insert(
-                i.binding_number,
-                wgpu::BindGroupLayoutEntry {
-                    binding: i.binding_number,
-                    visibility: wgpu::ShaderStage::VERTEX | wgpu::ShaderStage::FRAGMENT, // TODO I've made uniforms visible to both stages even if they are only used in one. Find out if this is a bad thing
-                    ty: wgpu::BindingType::UniformBuffer {
-                        dynamic: false,
-                        min_binding_size: wgpu::BufferSize::new(i.gtype.size_of() as u64),
-                    },
-                    count: None,
-                },
-            );
-        }
-    }
-
-    let mut bind_entry_vec = bind_entry
-        .into_iter()
-        .map(|(_, v)| v)
-        .collect::<Vec<wgpu::BindGroupLayoutEntry>>();
-
     let x = stringify_shader(vertex, &program_bindings1, &out_program_bindings1);
 
     // Our compiled vertex shader
@@ -433,29 +359,14 @@ pub async fn graphics_compile(
     // Our compiled fragment shader
     let fs_module = compile_shader(y, ShaderType::Fragment, &device);
 
-    bind_entry_vec.sort_by(|a, b| a.binding.partial_cmp(&b.binding).unwrap());
-
-    //debug!(bind_entry_vec);
-
-    let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        // The layout of for each binding specify a number to connect with the bind_group, a visibility to specify for which stage it's for and a type
-        entries: &bind_entry_vec,
-        label: None,
-    });
-
-    //debug!(bind_group_layout);
-
-    let mut bind_group_layout_ref = Vec::new();
-    // todo update
-    if bind_entry_vec.len() > 0 {
-        bind_group_layout_ref.push(&bind_group_layout)
-    };
+    let bind_group_layout_ref: Vec<&wgpu::BindGroupLayout> =
+        bind_group_layout.iter().map(|a| a).collect();
 
     // Bind no values to none of the bindings.
     // Use for something like textures
     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: None,
-        bind_group_layouts: &[&bind_group_layout],
+        bind_group_layouts: &bind_group_layout_ref,
         push_constant_ranges: &[],
     });
 
@@ -548,27 +459,9 @@ pub async fn graphics_compile(
         alpha_to_coverage_enabled: false,
     });
 
-    // TODO This is ugly, We should be able to bind across different stages and such
-    program_bindings2.bindings.into_iter().for_each(|b| {
-        if b.qual.contains(&QUALIFIER::UNIFORM)
-            && !program_bindings1
-                .bindings
-                .iter()
-                .any(|b2| b2.name == b.name)
-        {
-            program_bindings1.bindings.push(b)
-        }
-    });
-    program_bindings1.samplers = program_bindings2.samplers;
-    program_bindings1.textures = program_bindings2.textures;
-    (
-        GraphicsProgram {
-            pipeline: render_pipeline,
-            bind_group_layout,
-        },
-        program_bindings1,
-        out_program_bindings1,
-    )
+    GraphicsProgram {
+        pipeline: render_pipeline,
+    }
 }
 
 fn draw(
@@ -621,11 +514,11 @@ impl<'a> Default for BindingPreprocess {
     }
 }
 
-pub fn graphics_run<'a>(
-    mut rpass: wgpu::RenderPass<'a>,
+pub fn graphics_run(
+    mut rpass: wgpu::RenderPass,
     num_verts: u32,
     num_instances: u32,
-) -> wgpu::RenderPass<'a> {
+) -> wgpu::RenderPass {
     {
         draw(&mut rpass, 0..num_verts, 0..num_instances);
     }
@@ -801,21 +694,22 @@ macro_rules! graphics_shader {
 
 #[macro_export]
 macro_rules! compile_valid_graphics_program {
-    ($device:tt, $vertex:tt, $fragment:tt, $pipe_type:path) => {{
+    ($device:tt, $context:tt, $vertex:tt, $fragment:tt, $pipe_type:path) => {{
         let mut compile_buffer: [wgpu::VertexAttributeDescriptor; 32] =
             pipeline::wgpu_graphics_header::compile_buffer();
 
         const _: () = pipeline::wgpu_graphics_header::valid_vertex_shader(&$vertex);
         const _: () = pipeline::wgpu_graphics_header::valid_fragment_shader(&$fragment);
-        let (x, y, z) = pipeline::wgpu_graphics_header::graphics_compile(
+        let x = pipeline::wgpu_graphics_header::graphics_compile(
             &mut compile_buffer,
             &$device,
+            $context.get_layout(&$device),
             &$vertex,
             &$fragment,
             $pipe_type,
         )
         .await;
-        (x, y, z, compile_buffer)
+        (x, compile_buffer)
     }};
 }
 
@@ -826,7 +720,7 @@ macro_rules! compile_valid_stencil_program {
             pipeline::wgpu_graphics_header::compile_buffer();
 
         const _: () = pipeline::wgpu_graphics_header::valid_vertex_shader(&$vertex);
-        let (x, y, z) = pipeline::wgpu_graphics_header::graphics_compile(
+        let x = pipeline::wgpu_graphics_header::graphics_compile(
             &mut compile_buffer,
             &$device,
             &$vertex,
@@ -834,7 +728,7 @@ macro_rules! compile_valid_stencil_program {
             $pipe_type,
         )
         .await;
-        (x, y, z, compile_buffer)
+        (x, compile_buffer)
     }};
 }
 

@@ -1,4 +1,4 @@
-#![recursion_limit = "512"]
+#![recursion_limit = "1024"]
 #[macro_use]
 extern crate pipeline;
 
@@ -12,20 +12,15 @@ use winit::{
 };
 
 pub use pipeline::wgpu_graphics_header::{
-    compile_buffer, default_bind_group, generate_swap_chain, graphics_run, setup_render_pass,
-    valid_fragment_shader, valid_vertex_shader, GraphicsBindings, GraphicsShader,
-    OutGraphicsBindings, PipelineType,
+    generate_swap_chain, graphics_run, setup_render_pass, GraphicsShader, PipelineType,
 };
 
-pub use pipeline::bind::Vertex;
+use crate::pipeline::AbstractBind;
+pub use pipeline::bind::{Vertex};
 
-pub use wgpu_macros::{generic_bindings, init};
+pub use wgpu_macros::generic_bindings;
 
 async fn run(event_loop: EventLoop<()>, window: Window) {
-    let size = window.inner_size();
-
-    init!();
-
     let instance = wgpu::Instance::new(wgpu::BackendBit::PRIMARY);
     let surface = unsafe { instance.create_surface(&window) };
     let adapter = instance
@@ -53,9 +48,9 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 
     my_shader! {vertex = {
         [[vertex in] vec3] a_position;
-        [[vertex in] float] in_brightness;
+        [[vertex in] vec1] in_brightness;
         [[out] vec3] posColor;
-        [[out] float] brightness;
+        [[out] vec1] brightness;
         [[out] vec4] gl_Position;
         {{
             void main() {
@@ -68,7 +63,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 
     my_shader! {fragment = {
         [[in] vec3] posColor;
-        [[in] float] brightness;
+        [[in] vec1] brightness;
         [[out] vec4] color;
         {{
             void main() {
@@ -77,19 +72,13 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         }}
     }}
 
-    const VERTEXT: GraphicsShader = eager_graphics_shader! {vertex!()};
+    const S_V: GraphicsShader = eager_graphics_shader! {vertex!()};
 
-    const FRAGMENT: GraphicsShader = eager_graphics_shader! {fragment!()};
+    const S_F: GraphicsShader = eager_graphics_shader! {fragment!()};
 
-    //generic_bindings! {context = a_position, in_brightness; color, gl_Position}
-    //eager! { lazy! { generic_bindings! { context = eager!{ vertex!(), fragment!()}}}};
     eager_binding! {context = vertex!(), fragment!()};
 
-    const S_V: GraphicsShader = VERTEXT;
-    const S_F: GraphicsShader = FRAGMENT;
-
-    let (program, template_bindings, template_out_bindings, _) =
-        compile_valid_graphics_program!(device, S_V, S_F, PipelineType::Color);
+    let (program, _) = compile_valid_graphics_program!(device, context, S_V, S_F, PipelineType::Color);
 
     let positions = vec![[0.0, 0.7, 0.0], [-0.5, 0.5, 0.0], [0.5, -0.5, 0.0]];
     let brightness = vec![0.5, 0.5, 0.9];
@@ -108,43 +97,21 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
             Event::RedrawRequested(_) => {
                 let mut init_encoder =
                     device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-                let mut frame = swap_chain
+                let frame = swap_chain
                     .get_current_frame()
                     .expect("Timeout when acquiring next swap chain texture")
                     .output;
 
                 {
-                    /* let context1 = (&context).bind_in_brightness(
-                        &brightness,
-                        &program,
-                        &mut bindings,
-                        &mut out_bindings,
-                    ); */
                     let mut rpass = setup_render_pass(&program, &mut init_encoder, &frame);
-                    rpass.set_vertex_buffer(0, vertex_position.get_buffer().slice(..));
-                    rpass.set_vertex_buffer(1, vertex_brightness.get_buffer().slice(..));
-                    rpass = graphics_run(&device, rpass, 3, 1)
 
-                    /* {
-                                           let context2 = context1.bind_a_position(
-                                               &positions,
-                                               &program,
-                                               &mut bindings,
-                                               &mut out_bindings,
-                                           );
-                                           {
-                                               context2.runable(|| {
-                                                   graphics_run(
-                                                       &program,
-                                                       rpass,
-                                                       &mut bind_group,
-                                                       &bindings,
-                                                       &out_bindings,
-                                                   )
-                                               });
-                                           }
-                                       }
-                    */
+                    let context1 = (&context).set_a_position(&mut rpass, &vertex_position);
+                    {
+                        let context2 = context1.set_in_brightness(&mut rpass, &vertex_brightness);
+                        {
+                            context2.runnable(|| graphics_run(rpass, 3, 1));
+                        }
+                    }
                 }
                 queue.submit(Some(init_encoder.finish()));
             }

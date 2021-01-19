@@ -1,5 +1,10 @@
+#![recursion_limit = "1024"]
+#![feature(trace_macros)]
 #[macro_use]
 extern crate pipeline;
+
+#[macro_use]
+extern crate eager;
 
 use winit::{
     event::{Event, WindowEvent},
@@ -8,30 +13,53 @@ use winit::{
 };
 
 pub use pipeline::wgpu_graphics_header::{
-    default_bind_group, generate_swap_chain, graphics_run_indicies, setup_render_pass,
-    BindingPreprocess, GraphicsBindings, GraphicsShader, OutGraphicsBindings,
+    generate_swap_chain, graphics_run_indicies, setup_render_pass, GraphicsShader, PipelineType,
 };
 
-pub use pipeline::shared::{is_gl_builtin, Bindable, Bindings, Context};
-
-pub use pipeline::context::{ready_to_run, update_bind_context, BindingContext};
+use crate::pipeline::AbstractBind;
+pub use pipeline::bind::{BindGroup1, BindGroup2, Indices, Vertex};
 
 pub use pipeline::helper::{
     generate_identity_matrix, generate_projection_matrix, generate_view_matrix, load_model,
-    rotation_y,
+    rotate_vec3, rotation_y, scale,
 };
 
 async fn run(event_loop: EventLoop<()>, window: Window) {
     let size = window.inner_size();
 
-    const VERTEXT: (GraphicsShader, BindingContext) = graphics_shader! {
+    let instance = wgpu::Instance::new(wgpu::BackendBit::PRIMARY);
+    let surface = unsafe { instance.create_surface(&window) };
+    let adapter = instance
+        .request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::Default,
+            // Request an adapter which can render to our surface
+            compatible_surface: Some(&surface),
+        })
+        .await
+        .expect("Failed to find an appropiate adapter");
+
+    // The device manages the connection and resources of the adapter
+    // The queue is a literal queue of tasks for the gpu
+    let (device, queue) = adapter
+        .request_device(
+            &wgpu::DeviceDescriptor {
+                features: wgpu::Features::empty(),
+                limits: wgpu::Limits::default(),
+                shader_validation: true,
+            },
+            None,
+        )
+        .await
+        .expect("Failed to create device");
+
+    my_shader! {vertex = {
         [[vertex in] vec3] a_position;
         [[vertex in] vec3] a_normal;
-        [[uniform in] vec3] Ambient;
-        [[uniform in] vec3] LightDirection;
-        [[uniform in] mat4] u_view;
-        [[uniform in] mat4] u_proj;
-        [[uniform in] mat4] u_model;
+        [group1 [uniform in] vec3] Ambient;
+        [group2 [uniform in] vec3] LightDirection;
+        [group3 [uniform in] mat4] u_view;
+        [group3 [uniform in] mat4] u_proj;
+        [group4 [uniform in] mat4] u_model;
         [[] int] gl_VertexID;
 
         [[out] vec3] fragmentNormal;
@@ -46,12 +74,12 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                 gl_Position = u_proj * u_view * u_model * vec4(a_position, 1.0);
             }
         }}
-    };
+    }}
 
-    const FRAGMENT: (GraphicsShader, BindingContext) = graphics_shader! {
+    my_shader! {fragment = {
         [[in] vec3] fragmentNormal;
-        [[uniform in] vec3] Ambient;
-        [[uniform in] vec3] LightDirection;
+        [group1 [uniform in] vec3] Ambient;
+        [group2 [uniform in] vec3] LightDirection;
         [[out] vec4] color;
         {{
             void main() {
@@ -59,16 +87,17 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                 color = vec4(Ambient + fragColor * max(dot(normalize(fragmentNormal), normalize(LightDirection)), 0.0), 1.0);
             }
         }}
-    };
+    }}
 
-    const S_V: GraphicsShader = VERTEXT.0;
-    const STARTING_BIND_CONTEXT: BindingContext = VERTEXT.1;
-    const S_F: GraphicsShader = FRAGMENT.0;
+    const S_V: GraphicsShader = eager_graphics_shader! {vertex!()};
 
-    let (program, template_bindings, template_out_bindings, _) =
-        compile_valid_graphics_program!(window, S_V, S_F);
+    const S_F: GraphicsShader = eager_graphics_shader! {fragment!()};
 
-    let (positions, normals, indices) = load_model("src/models/teapot.obj");
+    eager_binding! {context = vertex!(), fragment!()};
+
+    let (program, _) = compile_valid_graphics_program!(device, context, S_V, S_F, PipelineType::Color);
+
+    let (positions, normals, index_data) = load_model("src/models/teapot.obj");
 
     let mut light_direction = vec![[20.0, 0.0, 0.0]];
 
@@ -78,11 +107,17 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 
     let proj_mat = generate_projection_matrix(size.width as f32 / size.height as f32);
 
-    let mut model_mat_init = generate_identity_matrix();
+    let model_mat_init = generate_identity_matrix();
     let mut model_mat = scale(model_mat_init, 0.7);
 
+    let vertex_position = Vertex::new(&device, &positions);
+    let vertex_normal = Vertex::new(&device, &normals);
+    let indices = Indices::new(&device, &index_data);
+    let bind_group_ambient = BindGroup1::new(&device, &light_ambient);
+    let bind_group_view_proj = BindGroup2::new(&device, &view_mat, &proj_mat);
+
     // A "chain" of buffers that we render on to the display
-    let mut swap_chain = generate_swap_chain(&program, &window);
+    let mut swap_chain = generate_swap_chain(&surface, &window, &device);
 
     event_loop.run(move |event, _, control_flow: &mut ControlFlow| {
         *control_flow = ControlFlow::Poll;
@@ -90,138 +125,42 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
             // Everything that can be processed has been so we can now redraw the image on our window
             Event::MainEventsCleared => window.request_redraw(),
             Event::RedrawRequested(_) => {
-                let mut init_encoder = program
-                    .device
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+                let mut init_encoder =
+                    device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
                 let frame = swap_chain
-                    .get_next_texture()
-                    .expect("Timeout when acquiring next swap chain texture");
+                    .get_current_frame()
+                    .expect("Timeout when acquiring next swap chain texture")
+                    .output;
+
+                light_direction = rotate_vec3(&light_direction, 0.05);
+                let bind_group_light_dir = BindGroup1::new(&device, &light_direction);
+
+                model_mat = rotation_y(model_mat, 0.05);
+                let bind_group_model = BindGroup1::new(&device, &model_mat);
                 {
-                    let mut bind_group = default_bind_group(&program);
-
-                    let mut bindings: GraphicsBindings = template_bindings.clone();
-                    let mut out_bindings: OutGraphicsBindings = template_out_bindings.clone();
-                    let mut bind_group = default_bind_group(&program);
-                    let mut bind_prerun;
-
                     let mut rpass = setup_render_pass(&program, &mut init_encoder, &frame);
 
-                    model_mat = rotation_y(model_mat, 0.05);
-
-                    fn rotate_vec3(start: &Vec<[f32; 3]>, delta_y: f32) -> Vec<[f32; 3]> {
-                        let mut temp_vec3 =
-                            cgmath::Vector3::new(start[0][0], start[0][1], start[0][2]);
-                        temp_vec3 = cgmath::Matrix3::from_angle_y(cgmath::Rad(delta_y)) * temp_vec3;
-                        vec![[temp_vec3.x, temp_vec3.y, temp_vec3.z]]
-                    };
-
-                    light_direction = rotate_vec3(&light_direction, 0.05);
-                    let context = Context::new();
                     {
-                        const BIND_CONTEXT_1: BindingContext =
-                            update_bind_context(&STARTING_BIND_CONTEXT, "a_position");
-                        let context1 = bind!(
-                            program,
-                            bindings,
-                            out_bindings,
-                            "a_position",
-                            positions,
-                            context,
-                            BIND_CONTEXT_1
-                        );
+                        let context1 = (&context).set_a_position(&mut rpass, &vertex_position);
                         {
-                            const BIND_CONTEXT_2: BindingContext =
-                                update_bind_context(&BIND_CONTEXT_1, "u_view");
-                            let context2 = bind!(
-                                program,
-                                bindings,
-                                out_bindings,
-                                "u_view",
-                                view_mat,
-                                context1,
-                                BIND_CONTEXT_2
-                            );
+                            let context2 = (&context1).set_a_normal(&mut rpass, &vertex_normal);
                             {
-                                const BIND_CONTEXT_3: BindingContext =
-                                    update_bind_context(&BIND_CONTEXT_2, "u_model");
-                                let context3 = bind!(
-                                    program,
-                                    bindings,
-                                    out_bindings,
-                                    "u_model",
-                                    model_mat,
-                                    context2,
-                                    BIND_CONTEXT_3
-                                );
+                                let context3 =
+                                    (&context2).set_Ambient(&mut rpass, &bind_group_ambient);
                                 {
-                                    const BIND_CONTEXT_4: BindingContext =
-                                        update_bind_context(&BIND_CONTEXT_3, "u_proj");
-                                    let context4 = bind!(
-                                        program,
-                                        bindings,
-                                        out_bindings,
-                                        "u_proj",
-                                        proj_mat,
-                                        context3,
-                                        BIND_CONTEXT_4
-                                    );
+                                    let context4 = (&context3)
+                                        .set_u_view_u_proj(&mut rpass, &bind_group_view_proj);
                                     {
-                                        const BIND_CONTEXT_5: BindingContext =
-                                            update_bind_context(&BIND_CONTEXT_4, "Ambient");
-                                        let context5 = bind!(
-                                            program,
-                                            bindings,
-                                            out_bindings,
-                                            "Ambient",
-                                            light_ambient,
-                                            context4,
-                                            BIND_CONTEXT_5
-                                        );
+                                        let context5 = (&context4)
+                                            .set_LightDirection(&mut rpass, &bind_group_light_dir);
                                         {
-                                            const BIND_CONTEXT_6: BindingContext =
-                                                update_bind_context(
-                                                    &BIND_CONTEXT_5,
-                                                    "LightDirection",
-                                                );
-                                            let context6 = bind!(
-                                                program,
-                                                bindings,
-                                                out_bindings,
-                                                "LightDirection",
-                                                light_direction,
-                                                context5,
-                                                BIND_CONTEXT_6
-                                            );
+                                            let context6 = (&context5)
+                                                .set_u_model(&mut rpass, &bind_group_model);
                                             {
-                                                const BIND_CONTEXT_7: BindingContext =
-                                                    update_bind_context(
-                                                        &BIND_CONTEXT_6,
-                                                        "a_normal",
-                                                    );
-                                                let context7 = bind!(
-                                                    program,
-                                                    bindings,
-                                                    out_bindings,
-                                                    "a_normal",
-                                                    normals,
-                                                    context6,
-                                                    BIND_CONTEXT_7
-                                                );
-                                                {
-                                                    ready_to_run(BIND_CONTEXT_7);
-                                                    bind_prerun = BindingPreprocess::bind(
-                                                        &mut bindings,
-                                                        &out_bindings,
-                                                    );
-                                                    rpass = graphics_run_indicies(
-                                                        &program,
-                                                        rpass,
-                                                        &mut bind_group,
-                                                        &mut bind_prerun,
-                                                        &indices,
-                                                    );
-                                                }
+                                                let _ = context6.runnable(|| {
+                                                    graphics_run_indicies(rpass, &indices, 1)
+                                                });
                                             }
                                         }
                                     }
@@ -230,7 +169,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                         }
                     }
                 }
-                program.queue.submit(&[init_encoder.finish()]);
+                queue.submit(Some(init_encoder.finish()));
             }
             // When the window closes we are done. Change the status
             Event::WindowEvent {

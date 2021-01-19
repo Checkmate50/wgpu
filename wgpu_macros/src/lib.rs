@@ -1,4 +1,5 @@
 #![feature(vec_remove_item)]
+#![allow(deprecated)]
 extern crate proc_macro;
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
@@ -20,10 +21,11 @@ struct Parameters {
 }
 
 impl PartialEq for Parameters {
-    fn eq(&self, other: &Parameters) -> bool {
+    fn eq(&self, other: &Self) -> bool {
         self.name == other.name
     }
 }
+impl Eq for Parameters {}
 
 impl Parse for Parameters {
     fn parse(input: ParseStream) -> Result<Self> {
@@ -71,11 +73,33 @@ struct Shader {
     params: Vec<Parameters>, //body: String,
 }
 
+fn is_gl_builtin(p: &str) -> bool {
+    let builtin = vec![
+        "gl_VertexID",
+        "gl_InstanceID",
+        "gl_FragCoord",
+        "gl_FrontFacing",
+        "gl_PointCoord",
+        "gl_SampleID",
+        "gl_SamplePosition",
+        "gl_NumWorkGroups",
+        "gl_WorkGroupID",
+        "gl_LocalInvocationID",
+        "gl_GlobalInvocationID",
+        "gl_LocalInvocationIndex",
+    ];
+    builtin.contains(&p)
+}
+
 impl Parse for Shader {
     fn parse(input: ParseStream) -> Result<Self> {
         let mut params = Vec::new();
         while !input.peek(syn::token::Brace) {
-            params.push(input.parse::<Parameters>()?);
+            let p = input.parse::<Parameters>()?;
+            if !is_gl_builtin(&p.name.to_string()) {
+                params.push(p);
+            }
+
             input.parse::<Token![;]>()?;
         }
 
@@ -113,14 +137,9 @@ impl Parse for Context {
         let mut outs = Vec::new();
 
         shaders.into_iter().for_each(|s| {
-            println!();
-            println!("ins : {:?}", ins);
-            println!("outs : {:?}", outs);
             s.params.into_iter().for_each(|p| {
                 if p.quals.contains(&format_ident!("in")) {
-                    if outs.contains(&p) {
-                        outs.remove_item(&p);
-                    } else {
+                    if !outs.contains(&p) && !ins.contains(&p) {
                         ins.push(p);
                     }
                 } else if p.quals.contains(&format_ident!("out")) {
@@ -133,43 +152,83 @@ impl Parse for Context {
             })
         });
 
-        Ok(Context { context, ins, outs })
+        Ok(Context {
+            context,
+            ins: ins.into_iter().collect(),
+            outs: outs.into_iter().collect(),
+        })
     }
-}
-
-// todo Maybe throw this in a file instead of using init()?
-#[proc_macro]
-pub fn init(_: TokenStream) -> TokenStream {
-    TokenStream::from(quote! {
-        trait AbstractBind {
-            fn new() -> Self;
-        }
-
-        struct Bound {}
-
-        struct Unbound {}
-
-        impl AbstractBind for Bound {
-            fn new() -> Self {
-                Bound {}
-            }
-        }
-
-        impl AbstractBind for Unbound{
-            fn new() -> Self {
-                Unbound {}
-            }
-        }
-
-        trait ContextInputs {
-            fn inputs(&self) -> Vec<String>;
-        }
-    })
 }
 
 fn create_base_type(ty: &Ident) -> syn::GenericArgument {
     let mut data_type = syn::punctuated::Punctuated::new();
     match &ty.to_string()[..] {
+        "vec1" => {
+            //Vec<f32>
+            let mut array_type = syn::punctuated::Punctuated::new();
+            array_type.push(syn::PathSegment {
+                ident: format_ident!("f32"),
+                arguments: syn::PathArguments::None,
+            });
+
+            let mut bracked_type = syn::punctuated::Punctuated::new();
+            bracked_type.push(syn::GenericArgument::Type(syn::Type::Path(syn::TypePath {
+                qself: None,
+                path: syn::Path {
+                    leading_colon: None,
+                    segments: array_type,
+                },
+            })));
+            data_type.push(syn::PathSegment {
+                ident: format_ident!("Vec"),
+                arguments: syn::PathArguments::AngleBracketed(
+                    syn::AngleBracketedGenericArguments {
+                        args: bracked_type,
+                        colon2_token: None,
+                        lt_token: Token!(<)(proc_macro2::Span::call_site()),
+                        gt_token: Token!(>)(proc_macro2::Span::call_site()),
+                    },
+                ),
+            });
+        }
+        "vec2" => {
+            //Vec<[f32; 2]>
+            let mut array_type = syn::punctuated::Punctuated::new();
+            array_type.push(syn::PathSegment {
+                ident: format_ident!("f32"),
+                arguments: syn::PathArguments::None,
+            });
+
+            let mut bracked_type = syn::punctuated::Punctuated::new();
+            bracked_type.push(syn::GenericArgument::Type(syn::Type::Array(
+                syn::TypeArray {
+                    bracket_token: syn::token::Bracket(proc_macro2::Span::call_site()),
+                    elem: Box::new(syn::Type::Path(syn::TypePath {
+                        qself: None,
+                        path: syn::Path {
+                            leading_colon: None,
+                            segments: array_type,
+                        },
+                    })),
+                    semi_token: Token!(;)(proc_macro2::Span::call_site()),
+                    len: syn::Expr::Lit(syn::ExprLit {
+                        attrs: Vec::new(),
+                        lit: syn::Lit::Int(syn::LitInt::new("2", proc_macro2::Span::call_site())),
+                    }),
+                },
+            )));
+            data_type.push(syn::PathSegment {
+                ident: format_ident!("Vec"),
+                arguments: syn::PathArguments::AngleBracketed(
+                    syn::AngleBracketedGenericArguments {
+                        args: bracked_type,
+                        colon2_token: None,
+                        lt_token: Token!(<)(proc_macro2::Span::call_site()),
+                        gt_token: Token!(>)(proc_macro2::Span::call_site()),
+                    },
+                ),
+            });
+        }
         "vec3" => {
             //Vec<[f32; 3]>
             let mut array_type = syn::punctuated::Punctuated::new();
@@ -193,6 +252,44 @@ fn create_base_type(ty: &Ident) -> syn::GenericArgument {
                     len: syn::Expr::Lit(syn::ExprLit {
                         attrs: Vec::new(),
                         lit: syn::Lit::Int(syn::LitInt::new("3", proc_macro2::Span::call_site())),
+                    }),
+                },
+            )));
+            data_type.push(syn::PathSegment {
+                ident: format_ident!("Vec"),
+                arguments: syn::PathArguments::AngleBracketed(
+                    syn::AngleBracketedGenericArguments {
+                        args: bracked_type,
+                        colon2_token: None,
+                        lt_token: Token!(<)(proc_macro2::Span::call_site()),
+                        gt_token: Token!(>)(proc_macro2::Span::call_site()),
+                    },
+                ),
+            });
+        }
+        "vec4" => {
+            //Vec<[f32; 4]>
+            let mut array_type = syn::punctuated::Punctuated::new();
+            array_type.push(syn::PathSegment {
+                ident: format_ident!("f32"),
+                arguments: syn::PathArguments::None,
+            });
+
+            let mut bracked_type = syn::punctuated::Punctuated::new();
+            bracked_type.push(syn::GenericArgument::Type(syn::Type::Array(
+                syn::TypeArray {
+                    bracket_token: syn::token::Bracket(proc_macro2::Span::call_site()),
+                    elem: Box::new(syn::Type::Path(syn::TypePath {
+                        qself: None,
+                        path: syn::Path {
+                            leading_colon: None,
+                            segments: array_type,
+                        },
+                    })),
+                    semi_token: Token!(;)(proc_macro2::Span::call_site()),
+                    len: syn::Expr::Lit(syn::ExprLit {
+                        attrs: Vec::new(),
+                        lit: syn::Lit::Int(syn::LitInt::new("4", proc_macro2::Span::call_site())),
                     }),
                 },
             )));
@@ -240,7 +337,33 @@ fn create_base_type(ty: &Ident) -> syn::GenericArgument {
                 ),
             });
         }
-
+        "float" => {
+            //f32
+            data_type.push(syn::PathSegment {
+                ident: format_ident!("f32"),
+                arguments: syn::PathArguments::None,
+            });
+        }
+        "sampler" => {
+            data_type.push(syn::PathSegment {
+                ident: format_ident!("wgpu"),
+                arguments: syn::PathArguments::None,
+            });
+            data_type.push(syn::PathSegment {
+                ident: format_ident!("SamplerDescriptor"),
+                arguments: syn::PathArguments::None,
+            });
+        }
+        "texture2D" => {
+            data_type.push(syn::PathSegment {
+                ident: format_ident!("wgpu"),
+                arguments: syn::PathArguments::None,
+            });
+            data_type.push(syn::PathSegment {
+                ident: format_ident!("Texture"),
+                arguments: syn::PathArguments::None,
+            });
+        }
         _ => panic!(format!("Unsupported type for Vertex: {}", ty.to_string())),
     }
 
@@ -302,7 +425,7 @@ fn create_bindgroup(ty: Vec<&Ident>) -> syn::Type {
         ident: format_ident!("BindGroup{}", ty.len()),
         arguments: syn::PathArguments::AngleBracketed(syn::AngleBracketedGenericArguments {
             args: bind_ty,
-            colon2_token: None,
+            colon2_token: Some(Token!(::)(proc_macro2::Span::call_site())),
             lt_token: Token!(<)(proc_macro2::Span::call_site()),
             gt_token: Token!(>)(proc_macro2::Span::call_site()),
         }),
@@ -377,6 +500,59 @@ fn process_params(params: Vec<Parameters>) -> Vec<ParamType> {
     res
 }
 
+fn make_trait(t: String) -> syn::Type {
+    let mut bound_path = syn::punctuated::Punctuated::new();
+    bound_path.push(syn::PathSegment {
+        ident: format_ident!("{}", t),
+        arguments: syn::PathArguments::None,
+    });
+    syn::Type::Path(syn::TypePath {
+        qself: None,
+        path: syn::Path {
+            leading_colon: None,
+            segments: bound_path,
+        },
+    })
+}
+
+fn bound() -> syn::Type {
+    let mut bound_path = syn::punctuated::Punctuated::new();
+    bound_path.push(syn::PathSegment {
+        ident: format_ident!("pipeline"),
+        arguments: syn::PathArguments::None,
+    });
+    bound_path.push(syn::PathSegment {
+        ident: format_ident!("Bound"),
+        arguments: syn::PathArguments::None,
+    });
+    syn::Type::Path(syn::TypePath {
+        qself: None,
+        path: syn::Path {
+            leading_colon: None,
+            segments: bound_path,
+        },
+    })
+}
+
+fn unbound() -> syn::Type {
+    let mut bound_path = syn::punctuated::Punctuated::new();
+    bound_path.push(syn::PathSegment {
+        ident: format_ident!("pipeline"),
+        arguments: syn::PathArguments::None,
+    });
+    bound_path.push(syn::PathSegment {
+        ident: format_ident!("Unbound"),
+        arguments: syn::PathArguments::None,
+    });
+    syn::Type::Path(syn::TypePath {
+        qself: None,
+        path: syn::Path {
+            leading_colon: None,
+            segments: bound_path,
+        },
+    })
+}
+
 // Implementation 3
 #[proc_macro]
 pub fn generic_bindings(input: TokenStream) -> TokenStream {
@@ -392,8 +568,6 @@ pub fn generic_bindings(input: TokenStream) -> TokenStream {
 
     let input_params = process_params(input_vec);
 
-    println!("{:?}", input_params);
-
     let mut rng = rand::thread_rng();
 
     let n1: u8 = rng.gen();
@@ -401,35 +575,52 @@ pub fn generic_bindings(input: TokenStream) -> TokenStream {
 
     let mut all_expanded = Vec::new();
 
-    let variables: Vec<Ident> = (1..input_params.len() + 1)
+    let variables: Vec<syn::Type> = (1..input_params.len() + 1)
         .into_iter()
-        .map(|x| format_ident!("T{}", x))
+        .map(|x| make_trait(format!("T{}", x)))
         .collect();
     let fields: Vec<Ident> = (1..input_params.len() + 1)
         .into_iter()
         .map(|x| format_ident!("field{}", x))
         .collect();
-    let init: Vec<Ident> = iter::repeat(format_ident!("Unbound"))
-        .take(input_params.len())
-        .collect();
-    let run: Vec<Ident> = iter::repeat(format_ident!("Bound"))
-        .take(input_params.len())
-        .collect();
+    let init: Vec<syn::Type> = iter::repeat(unbound()).take(input_params.len()).collect();
+    let run: Vec<syn::Type> = iter::repeat(bound()).take(input_params.len()).collect();
     let ctxloc = shader_params.context;
+
+
+    // For setting up pipeline
+    let mut bind_group_types: Vec<(u32, syn::Type)> = input_params
+        .clone()
+        .into_iter()
+        .filter_map(|a| match a {
+            ParamType::Vertex { .. } => None,
+            ParamType::Group { num, param } => Some((
+                num,
+                create_bindgroup(param.iter().map(|p| &p.glsl_type).collect()),
+            )),
+        }).collect();
+    bind_group_types.sort_by(|(a,_), (b,_)| a.cmp(b));
+
+    let sorted_bind_group_types : Vec<syn::Type> = bind_group_types.into_iter().map(|(_,x)| x).collect();
+
+
     all_expanded.push(quote! {
-        struct #context<#(#variables: AbstractBind),*> {
+        struct #context<#(#variables: pipeline::AbstractBind),*> {
             #(#fields: #variables,)*
         }
 
         impl #context<#(#init),*> {
             fn new() -> Self {
                 #context {
-                    #(#fields: Unbound {},)*
+                    #(#fields: pipeline::Unbound {},)*
                 }
+            }
+            fn get_layout(&self, device : &wgpu::Device) -> Vec<wgpu::BindGroupLayout> {
+                vec![#(#sorted_bind_group_types::get_layout(device),)*]
             }
         }
 
-        impl ContextInputs for #context<#(#init),*> {
+        impl pipeline::ContextInputs for #context<#(#init),*> {
             fn inputs(&self) -> Vec<String> {
                 vec![#(stringify!(#input_names).to_string()),*]
             }
@@ -439,7 +630,7 @@ pub fn generic_bindings(input: TokenStream) -> TokenStream {
             fn runnable<P, B>(&self, f: P) -> B where P: FnOnce() -> B{
                 f()
             }
-            fn can_pipe(&self, b : &dyn ContextInputs) {
+            fn can_pipe(&self, b : &dyn pipeline::ContextInputs) {
                 let a = vec![#(stringify!(#output_names).to_string()),*];
                 assert!(b.inputs().iter().all(|item| a.contains(item)));
             }
@@ -448,8 +639,8 @@ pub fn generic_bindings(input: TokenStream) -> TokenStream {
         let #ctxloc = #context::new();
     });
 
-    let bound = format_ident!("Bound");
-    let unbound = format_ident!("Unbound");
+    let bound = bound();
+    let unbound = unbound();
 
     let mut curr = -1;
     let index_numbers: Vec<syn::Expr> = iter::repeat_with(|| {
@@ -474,10 +665,9 @@ pub fn generic_bindings(input: TokenStream) -> TokenStream {
             current_thing
                 .get_params()
                 .iter()
-                .fold(format!("set"), |acc, p| format!("{}_{}", acc, p.name))
+                .fold("set".to_string(), |acc, p| format!("{}_{}", acc, p.name))
         );
 
-        let is_vertex = true;
         let index = index_numbers.get(current_thing.get_num() as usize).unwrap();
 
         let data_type = match current_thing.clone() {
@@ -501,23 +691,8 @@ pub fn generic_bindings(input: TokenStream) -> TokenStream {
         let mut bind_names = input_params.clone();
         bind_names.remove(i);
 
-        // For the first, restricted implementation
-        // Only have T_? for parameters that are not required to be unbound
-        let restricted_abstract: Vec<syn::Ident> = trait_params
-            .clone()
-            .into_iter()
-            .enumerate()
-            .filter(|&(x, _)| {
-                !bind_names[x]
-                    .get_params()
-                    .iter()
-                    .any(|p| out_vec.contains(p))
-            })
-            .map(|(_, e)| e)
-            .collect();
-
         // Make sure the above are unbound
-        let restricted_trait: Vec<syn::Ident> = trait_params
+        let restricted_trait: Vec<syn::Type> = trait_params
             .clone()
             .into_iter()
             .enumerate()
@@ -541,11 +716,11 @@ pub fn generic_bindings(input: TokenStream) -> TokenStream {
 
         match current_thing {
             ParamType::Vertex{..} => all_expanded.push(quote! {
-                trait #trait_name<#(#trait_params: AbstractBind,)* >{
+                trait #trait_name<#(#trait_params: pipeline::AbstractBind,)* >{
                     fn #bind_name<'a>(self, rpass: &mut wgpu::RenderPass<'a>, data : &'a #data_type) -> #context<#(#type_params),*>;
                 }
 
-                impl<#(#trait_params: AbstractBind,)* > #trait_name<#(#trait_params,)*> for &#context<#(#impl_params),*> {
+                impl<#(#trait_params: pipeline::AbstractBind,)* > #trait_name<#(#trait_params,)*> for &#context<#(#impl_params),*> {
                     fn #bind_name<'a>(self, rpass: &mut wgpu::RenderPass<'a>, data : &'a #data_type) -> #context<#(#type_params),*>{
                         rpass.set_vertex_buffer(#index as u32, data.get_buffer().slice(..));
                         #context {
@@ -553,7 +728,7 @@ pub fn generic_bindings(input: TokenStream) -> TokenStream {
                         }
                     }
                 }
-                impl<#(#trait_params: AbstractBind,)* > #trait_name<#(#trait_params,)*> for #context<#(#impl_params),*> {
+                impl<#(#trait_params: pipeline::AbstractBind,)* > #trait_name<#(#trait_params,)*> for #context<#(#impl_params),*> {
                     fn #bind_name<'a>(self, rpass: &mut wgpu::RenderPass<'a>, data : &'a #data_type) -> #context<#(#type_params),*>{
                         rpass.set_vertex_buffer(#index as u32, data.get_buffer().slice(..));
                         #context {
@@ -564,11 +739,11 @@ pub fn generic_bindings(input: TokenStream) -> TokenStream {
 
             }),
             ParamType::Group{..} =>all_expanded.push(quote! {
-            trait #trait_name<#(#trait_params: AbstractBind,)* >{
+            trait #trait_name<#(#trait_params: pipeline::AbstractBind,)* >{
                 fn #bind_name<'a>(self, rpass: &mut wgpu::RenderPass<'a>, data : &'a #data_type) -> #context<#(#type_params),*>;
             }
 
-            impl<#(#trait_params: AbstractBind,)* > #trait_name<#(#trait_params,)*> for &#context<#(#impl_params),*> {
+            impl<#(#trait_params: pipeline::AbstractBind,)* > #trait_name<#(#trait_params,)*> for &#context<#(#impl_params),*> {
                 fn #bind_name<'a>(self, rpass: &mut wgpu::RenderPass<'a>, data : &'a #data_type) -> #context<#(#type_params),*>{
                     rpass.set_bind_group(0 as u32, data.get_bind_group(), &[]);
                     #context {
@@ -576,7 +751,7 @@ pub fn generic_bindings(input: TokenStream) -> TokenStream {
                     }
                 }
             }
-            impl<#(#trait_params: AbstractBind,)* > #trait_name<#(#trait_params,)*> for #context<#(#impl_params),*> {
+            impl<#(#trait_params: pipeline::AbstractBind,)* > #trait_name<#(#trait_params,)*> for #context<#(#impl_params),*> {
                 fn #bind_name<'a>(self, rpass: &mut wgpu::RenderPass<'a>, data : &'a #data_type) -> #context<#(#type_params),*>{
                     rpass.set_bind_group(0 as u32, data.get_bind_group(), &[]);
                     #context {
@@ -597,7 +772,7 @@ pub fn generic_bindings(input: TokenStream) -> TokenStream {
         }
     }
 
-    println!("{}", collapsed_expanded);
+    //println!("{}", collapsed_expanded);
 
     // Hand the output tokens back to the compiler
     TokenStream::from(collapsed_expanded)

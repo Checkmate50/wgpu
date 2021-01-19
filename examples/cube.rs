@@ -13,20 +13,15 @@ use winit::{
 };
 
 pub use pipeline::wgpu_graphics_header::{
-    compile_buffer, generate_swap_chain, graphics_run_indicies, graphics_starting_context,
-    setup_render_pass, valid_fragment_shader, valid_vertex_shader, BindingPreprocess,
-    GraphicsBindings, GraphicsShader, OutGraphicsBindings, PipelineType,
+    generate_swap_chain, graphics_run_indicies, setup_render_pass, GraphicsShader, PipelineType,
 };
 
-pub use wgpu_macros::{generic_bindings, init};
-
+use crate::pipeline::AbstractBind;
 pub use pipeline::bind::{BindGroup2, Indices, Vertex};
 
 pub use pipeline::helper::{generate_projection_matrix, generate_view_matrix, load_cube};
 
 async fn run(event_loop: EventLoop<()>, window: Window) {
-    init!();
-
     let size = window.inner_size();
 
     // Create a surface to draw images on
@@ -90,12 +85,9 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 
     eager_binding! {context = vertex!(), fragment!()};
 
-    let (program, template_bindings, template_out_bindings, _) =
-        compile_valid_graphics_program!(device, S_V, S_F, PipelineType::Color);
+    let (program, _) = compile_valid_graphics_program!(device, context, S_V, S_F, PipelineType::Color);
 
     let (positions, _, index_data) = load_cube();
-
-    let indices = Indices::new(&device, &index_data);
 
     let color_data = vec![
         [0.583, 0.771, 0.014],
@@ -141,6 +133,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 
     let vertex_position = Vertex::new(&device, &positions);
     let vertex_color = Vertex::new(&device, &color_data);
+    let indices = Indices::new(&device, &index_data);
 
     let bind_group_view_proj = BindGroup2::new(&device, &view_mat, &proj_mat);
 
@@ -155,7 +148,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
             Event::RedrawRequested(_) => {
                 let mut init_encoder =
                     device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-                let mut frame = swap_chain
+                let frame = swap_chain
                     .get_current_frame()
                     .expect("Timeout when acquiring next swap chain texture")
                     .output;
@@ -166,22 +159,19 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                     // Handle the setup for the pipeline
                     //
 
+                    let context1 = (&context).set_a_position(&mut rpass, &vertex_position);
+
                     {
-                        let context1 = (&context).set_a_position(&mut rpass, &vertex_position);
+                        let context2 = (&context1).set_vertexColor(&mut rpass, &vertex_color);
 
                         {
-                            let context2 = (&context1).set_vertexColor(&mut rpass, &vertex_color);
-
+                            let context3 =
+                                context2.set_u_view_u_proj(&mut rpass, &bind_group_view_proj);
                             {
-                                let context3 =
-                                    context2.set_u_view_u_proj(&mut rpass, &bind_group_view_proj);
-                                {
-                                    rpass = context3
-                                        .runnable(|| graphics_run_indicies(rpass, &indices, 1));
-                                }
+                                let _ =
+                                    context3.runnable(|| graphics_run_indicies(rpass, &indices, 1));
                             }
                         }
-                        //let context4 = context1.set_vertexColor(&mut rpass, &vertex_color);
                     }
                 }
                 queue.submit(Some(init_encoder.finish()));
@@ -203,7 +193,6 @@ fn main() {
     let window = winit::window::WindowBuilder::new()
         .build(&event_loop)
         .unwrap();
-    /* let window = winit::window::Window::new(&event_loop).unwrap(); */
 
     // Why do we need to be async? Because of event_loop?
     futures::executor::block_on(run(event_loop, window));

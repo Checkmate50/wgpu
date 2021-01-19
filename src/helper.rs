@@ -206,12 +206,13 @@ pub fn scale(matrix: cgmath::Matrix4<f32>, scale: f32) -> cgmath::Matrix4<f32> {
     cgmath::Matrix4::from_scale(scale) * matrix
 }
 
-pub fn rotate_vec3(start: &Vec<[f32; 3]>, delta_y: f32) -> Vec<[f32; 3]> {
+pub fn rotate_vec3(start: &[[f32; 3]], delta_y: f32) -> Vec<[f32; 3]> {
     let mut temp_vec3 = cgmath::Vector3::new(start[0][0], start[0][1], start[0][2]);
     temp_vec3 = cgmath::Matrix3::from_angle_y(cgmath::Rad(delta_y)) * temp_vec3;
     vec![[temp_vec3.x, temp_vec3.y, temp_vec3.z]]
 }
-pub fn rotate_vec4(start: &Vec<[f32; 4]>, delta_y: f32) -> Vec<[f32; 4]> {
+
+pub fn rotate_vec4(start: &[[f32; 4]], delta_y: f32) -> Vec<[f32; 4]> {
     let mut temp_vec3 = cgmath::Vector4::new(start[0][0], start[0][1], start[0][2], start[0][3]);
     temp_vec3 = cgmath::Matrix4::from_angle_x(cgmath::Rad(delta_y)) * temp_vec3;
     vec![[temp_vec3.x, temp_vec3.y, temp_vec3.z, temp_vec3.w]]

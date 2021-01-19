@@ -191,6 +191,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     let light_color = vec![[1.0, 0.5, 0.5, 0.5]];
 
     let shadow_sampler = wgpu::SamplerDescriptor {
+        label: Some("shadow"),
         address_mode_u: wgpu::AddressMode::ClampToEdge,
         address_mode_v: wgpu::AddressMode::ClampToEdge,
         address_mode_w: wgpu::AddressMode::ClampToEdge,
@@ -200,6 +201,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         lod_min_clamp: -100.0,
         lod_max_clamp: 100.0,
         compare: wgpu::CompareFunction::LessEqual,
+        ..Default::default()
     };
 
     let shadow_size = wgpu::Extent3d {

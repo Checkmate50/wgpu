@@ -38,6 +38,7 @@ pub enum GLSLTYPE {
     Int,
     Uint,
     Float,
+    Vec1,
     Vec2,
     Uvec3,
     Vec3,
@@ -63,6 +64,7 @@ impl GLSLTYPE {
             GLSLTYPE::Float => std::mem::size_of::<f32>(),
             GLSLTYPE::Int => std::mem::size_of::<i32>(),
             GLSLTYPE::Uint => std::mem::size_of::<u32>(),
+            GLSLTYPE::Vec1 => std::mem::size_of::<f32>(),
             GLSLTYPE::Vec2 => std::mem::size_of::<[f32; 2]>(),
             GLSLTYPE::Uvec3 => std::mem::size_of::<[u32; 3]>(),
             GLSLTYPE::Vec3 => std::mem::size_of::<[f32; 3]>(),
@@ -90,6 +92,8 @@ impl fmt::Display for GLSLTYPE {
             GLSLTYPE::Float => write!(f, "float"),
             GLSLTYPE::Int => write!(f, "int"),
             GLSLTYPE::Uint => write!(f, "uint"),
+            // we have this as a vec1 to know it is an array of floats but glsl only has float
+            GLSLTYPE::Vec1 => write!(f, "float"),
             GLSLTYPE::Vec2 => write!(f, "vec2"),
             GLSLTYPE::Uvec3 => write!(f, "uvec3"),
             GLSLTYPE::Vec3 => write!(f, "vec3"),
@@ -124,6 +128,9 @@ macro_rules! typing {
     (float) => {
         pipeline::shared::GLSLTYPE::Float
     };
+    (vec1) => {
+        pipeline::shared::GLSLTYPE::Vec1
+    };
     (vec2) => {
         pipeline::shared::GLSLTYPE::Vec2
     };
@@ -156,12 +163,15 @@ macro_rules! typing {
     };
 }
 
+
+//todo why do I have this again?
 pub const fn array_type(gtype: GLSLTYPE, depth: i64) -> GLSLTYPE {
     if depth == 1 {
         match gtype {
             GLSLTYPE::Float => GLSLTYPE::ArrayFloat,
             GLSLTYPE::Int => GLSLTYPE::ArrayInt,
             GLSLTYPE::Uint => GLSLTYPE::ArrayUint,
+            GLSLTYPE::Vec1 => GLSLTYPE::ArrayVec2,
             GLSLTYPE::Vec2 => GLSLTYPE::ArrayVec2,
             GLSLTYPE::Vec3 => GLSLTYPE::ArrayVec3,
             GLSLTYPE::Vec4 => GLSLTYPE::ArrayVec4,
@@ -376,7 +386,7 @@ macro_rules! shader {
 macro_rules! my_shader {
     ($name:tt = {$($tt:tt)*}) =>
         {
-        eager_macro_rules! { $eager_1
+        eager::eager_macro_rules! { $eager_1
             #[macro_export]
             macro_rules! $name{
                 ()=>{$($tt)*};

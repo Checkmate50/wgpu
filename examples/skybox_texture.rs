@@ -1,15 +1,16 @@
+#![recursion_limit = "1024"]
 #[macro_use]
 extern crate pipeline;
 
+#[macro_use]
+extern crate eager;
 use winit::{
     event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
     window::Window,
 };
 
-pub use static_assertions::const_assert;
 
-pub use pipeline::wgpu_graphics_header;
 pub use pipeline::wgpu_graphics_header::{
     bind_sampler, bind_texture, compile_buffer, default_bind_group, generate_swap_chain,
     graphics_starting_context, setup_render_pass, valid_fragment_shader, valid_vertex_shader,

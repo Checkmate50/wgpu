@@ -7,23 +7,205 @@ use std::rc::Rc;
 use wgpu::util::DeviceExt;
 
 pub trait WgpuType {
-    fn bind(&self, device: &wgpu::Device) -> BoundData;
+    fn bind(&self, device: &wgpu::Device, qual: QUALIFIER) -> BoundData;
+
+    // This is the size of the type for the purposes of layout
+    // This is not the size of the underlying data
+    fn size_of() -> usize;
+
+    fn create_binding_type() -> wgpu::BindingType;
+}
+
+impl WgpuType for f32 {
+    fn bind(&self, device: &wgpu::Device, qual: QUALIFIER) -> BoundData {
+        bind_helper(device, self.as_bytes(), 1, Some(qual))
+    }
+    fn size_of() -> usize {
+        std::mem::size_of::<f32>()
+    }
+
+    fn create_binding_type() -> wgpu::BindingType {
+        wgpu::BindingType::UniformBuffer {
+            dynamic: false,
+            min_binding_size: wgpu::BufferSize::new(Self::size_of() as u64),
+        }
+    }
+}
+
+impl WgpuType for Vec<u32> {
+    fn bind(&self, device: &wgpu::Device, qual: QUALIFIER) -> BoundData {
+        bind_helper(
+            device,
+            self.as_slice().as_bytes(),
+            self.len() as u64,
+            Some(qual),
+        )
+    }
+    fn size_of() -> usize {
+        std::mem::size_of::<[u32; 1]>()
+    }
+    fn create_binding_type() -> wgpu::BindingType {
+        wgpu::BindingType::UniformBuffer {
+            dynamic: false,
+            min_binding_size: wgpu::BufferSize::new(Self::size_of() as u64),
+        }
+    }
 }
 
 impl WgpuType for Vec<f32> {
-    fn bind(&self, device: &wgpu::Device) -> BoundData {
-        Bindable::bind(self, device, Some(crate::shared::QUALIFIER::VERTEX))
+    fn bind(&self, device: &wgpu::Device, qual: QUALIFIER) -> BoundData {
+        bind_helper(
+            device,
+            self.as_slice().as_bytes(),
+            self.len() as u64,
+            Some(qual),
+        )
+    }
+    fn size_of() -> usize {
+        std::mem::size_of::<[f32; 1]>()
+    }
+    fn create_binding_type() -> wgpu::BindingType {
+        wgpu::BindingType::UniformBuffer {
+            dynamic: false,
+            min_binding_size: wgpu::BufferSize::new(Self::size_of() as u64),
+        }
+    }
+}
+
+impl WgpuType for Vec<[f32; 2]> {
+    fn bind(&self, device: &wgpu::Device, qual: QUALIFIER) -> BoundData {
+        let numbers: Vec<f32> = self
+            .clone()
+            .into_iter()
+            .map(|x| x.to_vec())
+            .flatten()
+            .collect();
+        bind_helper(
+            device,
+            numbers.as_slice().as_bytes(),
+            self.len() as u64,
+            Some(qual),
+        )
+    }
+
+    fn size_of() -> usize {
+        std::mem::size_of::<[f32; 2]>()
+    }
+    fn create_binding_type() -> wgpu::BindingType {
+        wgpu::BindingType::UniformBuffer {
+            dynamic: false,
+            min_binding_size: wgpu::BufferSize::new(Self::size_of() as u64),
+        }
     }
 }
 
 impl WgpuType for Vec<[f32; 3]> {
-    fn bind(&self, device: &wgpu::Device) -> BoundData {
-        Bindable::bind(self, device, Some(crate::shared::QUALIFIER::VERTEX))
+    fn bind(&self, device: &wgpu::Device, qual: QUALIFIER) -> BoundData {
+        let numbers: Vec<f32> = self
+            .clone()
+            .into_iter()
+            .map(|x| x.to_vec())
+            .flatten()
+            .collect();
+        bind_helper(
+            device,
+            numbers.as_slice().as_bytes(),
+            self.len() as u64,
+            Some(qual),
+        )
+    }
+
+    fn size_of() -> usize {
+        std::mem::size_of::<[f32; 3]>()
+    }
+    fn create_binding_type() -> wgpu::BindingType {
+        wgpu::BindingType::UniformBuffer {
+            dynamic: false,
+            min_binding_size: wgpu::BufferSize::new(Self::size_of() as u64),
+        }
     }
 }
+
+impl WgpuType for Vec<[f32; 4]> {
+    fn bind(&self, device: &wgpu::Device, qual: QUALIFIER) -> BoundData {
+        let numbers: Vec<f32> = self
+            .clone()
+            .into_iter()
+            .map(|x| x.to_vec())
+            .flatten()
+            .collect();
+        bind_helper(
+            device,
+            numbers.as_slice().as_bytes(),
+            self.len() as u64,
+            Some(qual),
+        )
+    }
+
+    fn size_of() -> usize {
+        std::mem::size_of::<[f32; 4]>()
+    }
+    fn create_binding_type() -> wgpu::BindingType {
+        wgpu::BindingType::UniformBuffer {
+            dynamic: false,
+            min_binding_size: wgpu::BufferSize::new(Self::size_of() as u64),
+        }
+    }
+}
+
 impl WgpuType for cgmath::Matrix4<f32> {
-    fn bind(&self, device: &wgpu::Device) -> BoundData {
-        Bindable::bind(self, device, Some(crate::shared::QUALIFIER::UNIFORM))
+    fn bind(&self, device: &wgpu::Device, qual: QUALIFIER) -> BoundData {
+        let mat_slice: &[f32; 16] = self.as_ref();
+        bind_helper(
+            device,
+            bytemuck::cast_slice(mat_slice.as_bytes()),
+            64,
+            Some(qual),
+        )
+    }
+
+    fn size_of() -> usize {
+        64
+    }
+    fn create_binding_type() -> wgpu::BindingType {
+        wgpu::BindingType::UniformBuffer {
+            dynamic: false,
+            min_binding_size: wgpu::BufferSize::new(Self::size_of() as u64),
+        }
+    }
+}
+
+impl WgpuType for wgpu::SamplerDescriptor<'_> {
+    fn bind(&self, device: &wgpu::Device, _: QUALIFIER) -> BoundData {
+        BoundData::Sampler {
+            data: device.create_sampler(self),
+        }
+    }
+    fn size_of() -> usize {
+        panic!("TODO: I haven't checked the size of this yet")
+    }
+
+    fn create_binding_type() -> wgpu::BindingType {
+        wgpu::BindingType::Sampler { comparison: false }
+    }
+}
+
+impl WgpuType for wgpu::Texture {
+    fn bind(&self, _device: &wgpu::Device, _: QUALIFIER) -> BoundData {
+        BoundData::Texture {
+            data: self.create_view(&wgpu::TextureViewDescriptor::default()),
+        }
+    }
+    fn size_of() -> usize {
+        panic!("TODO: I haven't checked the size of this yet")
+    }
+
+    fn create_binding_type() -> wgpu::BindingType {
+        wgpu::BindingType::SampledTexture {
+            multisampled: false,
+            component_type: wgpu::TextureComponentType::Float,
+            dimension: wgpu::TextureViewDimension::D2,
+        }
     }
 }
 
@@ -34,19 +216,19 @@ pub enum BoundData {
 }
 
 impl BoundData {
-    pub fn getBuffer(self) -> (wgpu::Buffer, u64) {
+    pub fn get_buffer(self) -> (wgpu::Buffer, u64) {
         match self {
             BoundData::Buffer { data, len } => (data, len),
             _ => unreachable!(),
         }
     }
-    pub fn getTexture(self) -> wgpu::TextureView {
+    pub fn get_texture(self) -> wgpu::TextureView {
         match self {
             BoundData::Texture { data } => data,
             _ => unreachable!(),
         }
     }
-    pub fn getSampler(self) -> wgpu::Sampler {
+    pub fn get_sampler(self) -> wgpu::Sampler {
         match self {
             BoundData::Sampler { data } => (data),
             _ => unreachable!(),
@@ -130,172 +312,6 @@ fn bind_helper(
     }
 }
 
-pub trait Bindable {
-    fn bind(&self, device: &wgpu::Device, qual: Option<QUALIFIER>) -> BoundData;
-}
-
-impl Bindable for Vec<u32> {
-    fn bind(&self, device: &wgpu::Device, qual: Option<QUALIFIER>) -> BoundData {
-        bind_helper(device, self.as_slice().as_bytes(), self.len() as u64, qual)
-    }
-}
-
-impl Bindable for Vec<f32> {
-    fn bind(&self, device: &wgpu::Device, qual: Option<QUALIFIER>) -> BoundData {
-        bind_helper(device, self.as_slice().as_bytes(), self.len() as u64, qual)
-    }
-}
-
-impl Bindable for Vec<[f32; 3]> {
-    fn bind(&self, device: &wgpu::Device, qual: Option<QUALIFIER>) -> BoundData {
-        let numbers: Vec<f32> = self
-            .clone()
-            .into_iter()
-            .map(|x| x.to_vec())
-            .flatten()
-            .collect();
-        bind_helper(
-            device,
-            numbers.as_slice().as_bytes(),
-            self.len() as u64,
-            qual,
-        )
-    }
-}
-impl Bindable for Vec<[f32; 4]> {
-    fn bind(&self, device: &wgpu::Device, qual: Option<QUALIFIER>) -> BoundData {
-        let numbers: Vec<f32> = self
-            .clone()
-            .into_iter()
-            .map(|x| x.to_vec())
-            .flatten()
-            .collect();
-        bind_helper(
-            device,
-            numbers.as_slice().as_bytes(),
-            self.len() as u64,
-            qual,
-        )
-    }
-}
-
-impl Bindable for wgpu::SamplerDescriptor<'_> {
-    fn bind(&self, device: &wgpu::Device, _: Option<QUALIFIER>) -> BoundData {
-        BoundData::Sampler {
-            data: device.create_sampler(self),
-        }
-    }
-}
-
-impl Bindable for wgpu::Texture {
-    fn bind(&self, _device: &wgpu::Device, _: Option<QUALIFIER>) -> BoundData {
-        BoundData::Texture {
-            data: self.create_view(&wgpu::TextureViewDescriptor::default()),
-        }
-    }
-}
-
-impl Bindable for cgmath::Matrix4<f32> {
-    fn bind(&self, device: &wgpu::Device, qual: Option<QUALIFIER>) -> BoundData {
-        let mat_slice: &[f32; 16] = self.as_ref();
-        bind_helper(device, bytemuck::cast_slice(mat_slice.as_bytes()), 64, qual)
-    }
-}
-
-/* pub fn bind_vec2(
-    device: wgpu::Device,
-    bindings: &mut dyn ProgramBindings,
-    out_bindings: &mut dyn OutProgramBindings,
-    vecs: &Vec<[f32; 2]>,
-    name: String,
-) {
-    let numbers: Vec<f32> = vecs
-        .clone()
-        .into_iter()
-        .map(|x| x.to_vec())
-        .flatten()
-        .collect();
-    bind_helper(
-        program,
-        bindings,
-        out_bindings,
-        numbers.as_slice().as_bytes(),
-        vecs.len() as u64,
-        if numbers.len() == 2 {
-            vec![GLSLTYPE::Vec2, GLSLTYPE::ArrayVec2]
-        } else {
-            //todo only ArrayVec
-            vec![GLSLTYPE::Vec2, GLSLTYPE::ArrayVec2]
-        },
-        name,
-    )
-} */
-
-/* pub fn bind_fvec2(
-    device: wgpu::Device,
-    bindings: &mut dyn ProgramBindings,
-    out_bindings: &mut dyn OutProgramBindings,
-    numbers: &Vec<f32>,
-    name: String,
-) {
-    if numbers.len() % 2 != 0 {
-        panic!(
-            "Your trying to bind to vec to but your not giving a vector that can be split into 2's"
-        )
-    }
-    bind_helper(
-        program,
-        bindings,
-        out_bindings,
-        numbers.as_slice().as_bytes(),
-        (numbers.len() / 2) as u64,
-        if numbers.len() == 2 {
-            vec![GLSLTYPE::Vec2, GLSLTYPE::ArrayVec2]
-        } else {
-            //todo only ArrayVec
-            vec![GLSLTYPE::Vec2, GLSLTYPE::ArrayVec2]
-        },
-        name,
-    )
-} */
-
-/* pub fn bind_mat4(
-    device: wgpu::Device,
-    bindings: &mut dyn ProgramBindings,
-    out_bindings: &mut dyn OutProgramBindings,
-    mat: cgmath::Matrix4<f32>,
-    name: String,
-) {
-    let mat_slice: &[f32; 16] = mat.as_ref();
-    bind_helper(
-        program,
-        bindings,
-        out_bindings,
-        bytemuck::cast_slice(mat_slice.as_bytes()),
-        64 as u64,
-        vec![GLSLTYPE::Mat4],
-        name,
-    )
-} */
-
-/* pub fn bind_float(
-    device: wgpu::Device,
-    bindings: &mut dyn ProgramBindings,
-    out_bindings: &mut dyn OutProgramBindings,
-    numbers: &f32,
-    name: String,
-) {
-    bind_helper(
-        program,
-        bindings,
-        out_bindings,
-        numbers.as_bytes(),
-        1 as u64,
-        vec![GLSLTYPE::Float],
-        name,
-    )
-} */
-
 pub struct Vertex<A: WgpuType + ?Sized> {
     typ: PhantomData<A>,
     buffer: wgpu::Buffer,
@@ -309,7 +325,7 @@ impl<'a, A: WgpuType> Vertex<A> {
     pub fn new(device: &wgpu::Device, data: &A) -> Self {
         Vertex {
             typ: PhantomData,
-            buffer: data.bind(device).getBuffer().0,
+            buffer: data.bind(device, QUALIFIER::VERTEX).get_buffer().0,
         }
     }
 }
@@ -353,7 +369,6 @@ fn create_bind_group(device: &wgpu::Device, buffers: Vec<(wgpu::Buffer, u64)>) -
 // todo generate with a macro
 pub struct BindGroup1<B: WgpuType> {
     typ1: PhantomData<B>,
-
     bind_group: wgpu::BindGroup,
 }
 
@@ -361,8 +376,26 @@ impl<'a, B: WgpuType> BindGroup1<B> {
     pub fn get_bind_group(&'a self) -> &'a wgpu::BindGroup {
         &self.bind_group
     }
+
+    pub fn get_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+        let bind_entry_vec = vec![wgpu::BindGroupLayoutEntry {
+            binding: 0,
+            visibility: wgpu::ShaderStage::VERTEX | wgpu::ShaderStage::FRAGMENT, // TODO I've made uniforms visible to both stages even if they are only used in one. Find out if this is a bad thing
+            ty: B::create_binding_type(),
+            count: None,
+        }];
+
+        debug!(bind_entry_vec);
+
+        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            // The layout of for each binding specify a number to connect with the bind_group, a visibility to specify for which stage it's for and a type
+            entries: &bind_entry_vec,
+            label: None,
+        })
+    }
+
     pub fn new(device: &wgpu::Device, data0: &B) -> Self {
-        let buffers = vec![data0.bind(device).getBuffer()];
+        let buffers = vec![data0.bind(device, QUALIFIER::UNIFORM).get_buffer()];
 
         BindGroup1 {
             typ1: PhantomData,
@@ -382,10 +415,36 @@ impl<'a, B: WgpuType, C: WgpuType> BindGroup2<B, C> {
     pub fn get_bind_group(&'a self) -> &'a wgpu::BindGroup {
         &self.bind_group
     }
+
+    pub fn get_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+        let bind_entry_vec = vec![
+            wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStage::VERTEX | wgpu::ShaderStage::FRAGMENT, // TODO I've made uniforms visible to both stages even if they are only used in one. Find out if this is a bad thing
+                ty: B::create_binding_type(),
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 1,
+                visibility: wgpu::ShaderStage::VERTEX | wgpu::ShaderStage::FRAGMENT, // TODO I've made uniforms visible to both stages even if they are only used in one. Find out if this is a bad thing
+                ty: C::create_binding_type(),
+                count: None,
+            },
+        ];
+
+        debug!(bind_entry_vec);
+
+        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            // The layout of for each binding specify a number to connect with the bind_group, a visibility to specify for which stage it's for and a type
+            entries: &bind_entry_vec,
+            label: None,
+        })
+    }
+
     pub fn new(device: &wgpu::Device, data0: &B, data1: &C) -> Self {
         let buffers = vec![
-            data0.bind(device).getBuffer(),
-            data1.bind(device).getBuffer(),
+            data0.bind(device, QUALIFIER::UNIFORM).get_buffer(),
+            data1.bind(device, QUALIFIER::UNIFORM).get_buffer(),
         ];
 
         BindGroup2 {
@@ -410,9 +469,9 @@ impl<'a, B: WgpuType, C: WgpuType, D: WgpuType> BindGroup3<B, C, D> {
     }
     pub fn new(device: &wgpu::Device, data0: &B, data1: &C, data2: &D) -> Self {
         let buffers = vec![
-            data0.bind(device).getBuffer(),
-            data1.bind(device).getBuffer(),
-            data2.bind(device).getBuffer(),
+            data0.bind(device, QUALIFIER::UNIFORM).get_buffer(),
+            data1.bind(device, QUALIFIER::UNIFORM).get_buffer(),
+            data2.bind(device, QUALIFIER::UNIFORM).get_buffer(),
         ];
 
         BindGroup3 {

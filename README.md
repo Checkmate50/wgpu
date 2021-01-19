@@ -104,21 +104,27 @@ let pass = render_pass_initializer(...);
 }
 ```
 
-
-
 ## Future Work
 
+### Immediate Work
+
 - User-defined structs.
-- Enforce scope around Context<>'s without relying on the programmer.
+- Better/more testing.
+- Using real projects.
+- Create documentation.
 - Clean the project up and make it performant.
+
+### Distant Work
+
+- Enforce scope around Context<>'s without relying on the programmer.
 - Testing the modularity of compute shaders. See if there are examples where this library can make it easier to create pipelines of shaders.
 - Compute shaders should be able to dispatch a job across more than just a single dimension. Currently, we go one by one in the x-direction.
 - Look into how more optimizations can be applied. For instance, are there optimizations around how multiple pieces of data can be stored in the same buffer?
-- Better/more testing.
+- Interloping with Gator?
 
 ## Limitations
-
 - The current libraries are fragile.
+<!--- todo what does fragile mean??? --->
 - Data cannot be shared across bind groups.
 - The programmer is responsible for choosing appropriate/efficient bind groups.
 - The programmer is responsible for maintaining that a given render pass is only used with its corresponding context.
@@ -142,7 +148,7 @@ Windows/display related stuff
 
 ## Resources
 
-A decent tutorial that breaks up it's example into bite-sized pieces but adds very little that can't be learned from reading the documentation. It does have useful information on transitioning across breaking version changes and is continuously being improved.
+A decent tutorial that breaks up its example into bite-sized pieces but adds very little that can't be learned from reading the documentation. It does have useful information on transitioning across breaking version changes and is continuously being improved.
 <https://sotrh.github.io/learn-wgpu/>
 
 A more explanatory tutorial

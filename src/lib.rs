@@ -10,6 +10,31 @@ pub mod shared;
 //pub mod wgpu_compute_header;
 pub mod wgpu_graphics_header;
 
+// Traits for the proc macros
+pub trait AbstractBind {
+    fn new() -> Self;
+}
+
+pub struct Bound {}
+
+pub struct Unbound {}
+
+impl AbstractBind for Bound {
+    fn new() -> Self {
+        Bound {}
+    }
+}
+
+impl AbstractBind for Unbound {
+    fn new() -> Self {
+        Unbound {}
+    }
+}
+
+pub trait ContextInputs {
+    fn inputs(&self) -> Vec<String>;
+}
+
 #[macro_export]
 macro_rules! eager_compute_shader {
     ($name:tt!()) => {
@@ -26,7 +51,7 @@ macro_rules! eager_graphics_shader {
 
 #[macro_export]
 macro_rules! eager_binding {
-    ($context_name:tt = $($macro_name:tt!()),*) => {eager! { lazy! { generic_bindings! { $context_name = eager!{ $($macro_name!()),*}}}}}
+    ($context_name:tt = $($macro_name:tt!()),*) => {eager! { lazy! { wgpu_macros::generic_bindings! { $context_name = eager!{ $($macro_name!()),*}}}}}
 }
 
 // hi
