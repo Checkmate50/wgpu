@@ -1,4 +1,3 @@
-#![feature(vec_remove_item)]
 #![allow(deprecated)]
 extern crate proc_macro;
 use proc_macro::TokenStream;
@@ -144,7 +143,7 @@ impl Parse for Context {
                     }
                 } else if p.quals.contains(&format_ident!("out")) {
                     if ins.contains(&(p)) {
-                        ins.remove_item(&p);
+                        ins.remove(ins.iter().position(|x| *x == p).unwrap());
                     } else {
                         outs.push(p);
                     }
@@ -745,7 +744,7 @@ pub fn generic_bindings(input: TokenStream) -> TokenStream {
 
             impl<#(#trait_params: pipeline::AbstractBind,)* > #trait_name<#(#trait_params,)*> for &#context<#(#impl_params),*> {
                 fn #bind_name<'a>(self, rpass: &mut wgpu::RenderPass<'a>, data : &'a #data_type) -> #context<#(#type_params),*>{
-                    rpass.set_bind_group(0 as u32, data.get_bind_group(), &[]);
+                    rpass.set_bind_group(#index as u32, data.get_bind_group(), &[]);
                     #context {
                         #(#fields : #type_params::new()),*
                     }
@@ -753,7 +752,7 @@ pub fn generic_bindings(input: TokenStream) -> TokenStream {
             }
             impl<#(#trait_params: pipeline::AbstractBind,)* > #trait_name<#(#trait_params,)*> for #context<#(#impl_params),*> {
                 fn #bind_name<'a>(self, rpass: &mut wgpu::RenderPass<'a>, data : &'a #data_type) -> #context<#(#type_params),*>{
-                    rpass.set_bind_group(0 as u32, data.get_bind_group(), &[]);
+                    rpass.set_bind_group(#index as u32, data.get_bind_group(), &[]);
                     #context {
                         #(#fields : #type_params::new()),*
                     }
