@@ -52,6 +52,11 @@ cube:
 	cargo +nightly run --example cube
 	#cargo +nightly run --example cube --release
 
+.PHONY: no_scoping
+no_scoping:
+	cargo +nightly run --example why_we_need_scoping
+	#cargo +nightly run --example cube --release
+
 .PHONY: cube2
 cube2:
 	export RUST_BACKTRACE=1 && cargo +nightly run --example cube_texture
