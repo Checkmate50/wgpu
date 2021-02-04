@@ -1,4 +1,3 @@
-#![feature(vec_remove_item)]
 #![allow(deprecated)]
 extern crate proc_macro;
 use proc_macro::TokenStream;
@@ -144,7 +143,7 @@ impl Parse for Context {
                     }
                 } else if p.quals.contains(&format_ident!("out")) {
                     if ins.contains(&(p)) {
-                        ins.remove_item(&p);
+                        ins.remove(ins.iter().position(|x| *x == p).unwrap());
                     } else {
                         outs.push(p);
                     }
@@ -691,6 +690,19 @@ pub fn generic_bindings(input: TokenStream) -> TokenStream {
         let mut bind_names = input_params.clone();
         bind_names.remove(i);
 
+        // For the first, restricted implementation
+        // Only have T_? for parameters that are not required to be unbound
+        let restricted_abstract: Vec<syn::Type> = trait_params
+            .clone()
+            .into_iter()
+            .enumerate()
+            .filter(|&(x, _)| !bind_names[x]
+                    .get_params()
+                    .iter()
+                    .any(|p| out_vec.contains(p)))
+            .map(|(_, e)| e)
+            .collect();
+
         // Make sure the above are unbound
         let restricted_trait: Vec<syn::Type> = trait_params
             .clone()
@@ -720,8 +732,8 @@ pub fn generic_bindings(input: TokenStream) -> TokenStream {
                     fn #bind_name<'a>(self, rpass: &mut wgpu::RenderPass<'a>, data : &'a #data_type) -> #context<#(#type_params),*>;
                 }
 
-                impl<#(#trait_params: pipeline::AbstractBind,)* > #trait_name<#(#trait_params,)*> for &#context<#(#impl_params),*> {
-                    fn #bind_name<'a>(self, rpass: &mut wgpu::RenderPass<'a>, data : &'a #data_type) -> #context<#(#type_params),*>{
+                impl<#(#restricted_abstract: pipeline::AbstractBind,)* > #trait_name<#(#restricted_trait,)*> for &#context<#(#restricted_impl),*> {
+                    fn #bind_name<'a>(self, rpass: &mut wgpu::RenderPass<'a>, data : &'a #data_type) -> #context<#(#restricted_type),*>{
                         rpass.set_vertex_buffer(#index as u32, data.get_buffer().slice(..));
                         #context {
                             #(#fields : #type_params::new()),*
@@ -743,9 +755,9 @@ pub fn generic_bindings(input: TokenStream) -> TokenStream {
                 fn #bind_name<'a>(self, rpass: &mut wgpu::RenderPass<'a>, data : &'a #data_type) -> #context<#(#type_params),*>;
             }
 
-            impl<#(#trait_params: pipeline::AbstractBind,)* > #trait_name<#(#trait_params,)*> for &#context<#(#impl_params),*> {
-                fn #bind_name<'a>(self, rpass: &mut wgpu::RenderPass<'a>, data : &'a #data_type) -> #context<#(#type_params),*>{
-                    rpass.set_bind_group(0 as u32, data.get_bind_group(), &[]);
+            impl<#(#restricted_abstract: pipeline::AbstractBind,)* > #trait_name<#(#restricted_trait,)*> for &#context<#(#restricted_impl),*> {
+                fn #bind_name<'a>(self, rpass: &mut wgpu::RenderPass<'a>, data : &'a #data_type) -> #context<#(#restricted_type),*>{
+                    rpass.set_bind_group(#index as u32, data.get_bind_group(), &[]);
                     #context {
                         #(#fields : #type_params::new()),*
                     }
@@ -753,7 +765,7 @@ pub fn generic_bindings(input: TokenStream) -> TokenStream {
             }
             impl<#(#trait_params: pipeline::AbstractBind,)* > #trait_name<#(#trait_params,)*> for #context<#(#impl_params),*> {
                 fn #bind_name<'a>(self, rpass: &mut wgpu::RenderPass<'a>, data : &'a #data_type) -> #context<#(#type_params),*>{
-                    rpass.set_bind_group(0 as u32, data.get_bind_group(), &[]);
+                    rpass.set_bind_group(#index as u32, data.get_bind_group(), &[]);
                     #context {
                         #(#fields : #type_params::new()),*
                     }
