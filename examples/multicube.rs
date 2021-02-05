@@ -13,12 +13,11 @@ use winit::{
 };
 
 pub use pipeline::wgpu_graphics_header::{
-    generate_swap_chain, graphics_run_indicies, setup_render_pass,
-    BindingPreprocess, GraphicsBindings, GraphicsShader, OutGraphicsBindings,
+    generate_swap_chain, graphics_run_indicies, setup_render_pass, GraphicsShader, PipelineType,
 };
 
 use crate::pipeline::AbstractBind;
-pub use pipeline::bind::{BindGroup2, Indices, Vertex};
+pub use pipeline::bind::{BindGroup1, BindGroup2, Indices, Vertex};
 
 pub use pipeline::helper::{
     generate_identity_matrix, generate_projection_matrix, generate_view_matrix, load_cube,
@@ -58,9 +57,9 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     my_shader! {vertex = {
         [[vertex in] vec3] a_position;
         [[vertex in] vec3] vertexColor;
-        [[uniform in] mat4] u_view;
-        [[uniform in] mat4] u_proj;
-        [[uniform in] mat4] u_model;
+        [group1 [uniform in] mat4] u_view;
+        [group2 [uniform in] mat4] u_proj;
+        [group3 [uniform in] mat4] u_model;
 
 
         [[out] vec3] fragmentColor;
@@ -143,6 +142,9 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     let vertex_position = Vertex::new(&device, &positions);
     let vertex_color = Vertex::new(&device, &color_data);
     let indices = Indices::new(&device, &index_data);
+    let view_mat_bind = BindGroup1::new(&device, &view_mat);
+    let proj_mat_bind = BindGroup1::new(&device, &proj_mat);
+    let model_mat_bind = BindGroup1::new(&device, &model_mat);
 
     // A "chain" of buffers that we render on to the display
     let mut swap_chain = generate_swap_chain(&surface, &window, &device);
@@ -153,10 +155,8 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
             // Everything that can be processed has been so we can now redraw the image on our window
             Event::MainEventsCleared => window.request_redraw(),
             Event::RedrawRequested(_) => {
-                let mut init_encoder = program
-                    .device
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-
+                let mut init_encoder =
+                    device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
                 let frame = swap_chain
                     .get_current_frame()
                     .expect("Timeout when acquiring next swap chain texture")
@@ -166,15 +166,14 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 
                     {
                         let context1 = (&context).set_a_position(&mut rpass, &vertex_position);
-
                         {
-                            let context2 = (&contex1.set_u_view(&mut rpass, &view_mat));
+                            let context2 = (&context1).set_u_view(&mut rpass, &view_mat_bind);
                             {
-                                let context3 = (&context2.set_vertexColor(&mut rpass, &vertex_color));
+                                let context3 = (&context2).set_vertexColor(&mut rpass, &vertex_color);
                                 {
-                                    let context4 = (&context3.set_u_proj(&mut rpass, &proj_mat));
+                                    let context4 = (&context3).set_u_proj(&mut rpass, &proj_mat_bind);
                                     {
-                                        let context5 = (&context3.set_u_model(&mut rpass, &model_mat)); 
+                                        let context5 = (&context4).set_u_model(&mut rpass, &model_mat_bind); 
                                         {
                                             let _ =
                                             context5.runnable(|| graphics_run_indicies(rpass, &indices, 1));
@@ -182,103 +181,10 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                     }
                                 }
                             }
-                        // {
-                        //     const BIND_CONTEXT_2: BindingContext =
-                        //         update_bind_context(&BIND_CONTEXT_1, "u_view");
-                        //     let context2 = bind!(
-                        //         program,
-                        //         bindings,
-                        //         out_bindings,
-                        //         "u_view",
-                        //         view_mat,
-                        //         context1,
-                        //         BIND_CONTEXT_2
-                        //     );
-                        //     {
-                        //         const BIND_CONTEXT_3: BindingContext =
-                        //             update_bind_context(&BIND_CONTEXT_2, "vertexColor");
-                        //         let context3 = bind!(
-                        //             program,
-                        //             bindings,
-                        //             out_bindings,
-                        //             "vertexColor",
-                        //             color_data,
-                        //             context2,
-                        //             BIND_CONTEXT_3
-                        //         );
-                        //         {
-                        //             const BIND_CONTEXT_4: BindingContext =
-                        //                 update_bind_context(&BIND_CONTEXT_3, "u_proj");
-                        //             let context4 = bind!(
-                        //                 program,
-                        //                 bindings,
-                        //                 out_bindings,
-                        //                 "u_proj",
-                        //                 proj_mat,
-                        //                 context3,
-                        //                 BIND_CONTEXT_4
-                        //             );
-                        //             {
-                        //                 const BIND_CONTEXT_5: BindingContext =
-                        //                     update_bind_context(&BIND_CONTEXT_4, "u_model");
-                        //                 let _ = bind!(
-                        //                     program,
-                        //                     bindings,
-                        //                     out_bindings,
-                        //                     "u_model",
-                        //                     model_mat,
-                        //                     context4,
-                        //                     BIND_CONTEXT_5
-                        //                 );
-                        //                 {
-                        //                     ready_to_run(BIND_CONTEXT_5);
-                        //                     bind_prerun = BindingPreprocess::bind(
-                        //                         &mut bindings,
-                        //                         &out_bindings,
-                        //                     );
-                        //                     rpass = graphics_run_indicies(
-                        //                         &program,
-                        //                         rpass,
-                        //                         &mut bind_group,
-                        //                         &mut bind_prerun,
-                        //                         &index_data,
-                        //                     );
-                        //                 }
-                        //             }
-                        //             {
-                        //                 const BIND_CONTEXT_5_1: BindingContext =
-                        //                     update_bind_context(&BIND_CONTEXT_4, "u_model");
-                        //                 let _ = bind!(
-                        //                     program,
-                        //                     bindings,
-                        //                     out_bindings,
-                        //                     "u_model",
-                        //                     model_mat2,
-                        //                     context4,
-                        //                     BIND_CONTEXT_5_1
-                        //                 );
-                        //                 {
-                        //                     ready_to_run(BIND_CONTEXT_5_1);
-                        //                     bind_prerun2 = BindingPreprocess::bind(
-                        //                         &mut bindings,
-                        //                         &out_bindings,
-                        //                     );
-                        //                     graphics_run_indicies(
-                        //                         &program,
-                        //                         rpass,
-                        //                         &mut bind_group2,
-                        //                         &mut bind_prerun2,
-                        //                         &index_data,
-                        //                     );
-                        //                 }
-                        //             }
-                        //         }
-                        //     }
-                        // }
                         }
                     }
                 }
-                program.queue.submit(&[init_encoder.finish()]);
+                queue.submit(Some(init_encoder.finish()));
                 /* std::process::exit(0); */
             }
             // When the window closes we are done. Change the status
