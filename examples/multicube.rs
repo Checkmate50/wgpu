@@ -164,8 +164,6 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                 {
                     let mut rpass = setup_render_pass(&program, &mut init_encoder, &frame);
 
-                    let context = Context::new();
-
                     {
                         let context1 = (&context).set_a_position(&mut rpass, &vertex_position);
 
