@@ -11,7 +11,7 @@ pub use static_assertions::const_assert;
 
 pub use pipeline::wgpu_graphics_header;
 pub use pipeline::wgpu_graphics_header::{
-    compile_buffer, default_bind_group, generate_swap_chain, graphics_run_indicies,
+    compile_buffer, default_bind_group, generate_swap_chain, graphics_run_indices,
     setup_render_pass, valid_fragment_shader, valid_vertex_shader, GraphicsBindings,
     GraphicsShader, OutGraphicsBindings,
 };
@@ -145,7 +145,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                 );
                                 {
                                     ready_to_run(BIND_CONTEXT_4);
-                                    graphics_run_indicies(
+                                    graphics_run_indices(
                                         &program,
                                         rpass,
                                         &mut bind_group,

@@ -109,6 +109,7 @@ let pass = render_pass_initializer(...);
 ### Immediate Work
 
 - User-defined structs.
+- We can probably move more to proc macros to get rid of brackets
 - Better/more testing.
 - Using real projects.
 - Create documentation.

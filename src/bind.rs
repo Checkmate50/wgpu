@@ -23,7 +23,6 @@ impl WgpuType for f32 {
     fn size_of() -> usize {
         std::mem::size_of::<f32>()
     }
-
     fn create_binding_type() -> wgpu::BindingType {
         wgpu::BindingType::UniformBuffer {
             dynamic: false,
@@ -190,10 +189,10 @@ impl WgpuType for wgpu::SamplerDescriptor<'_> {
     }
 }
 
-impl WgpuType for wgpu::Texture {
+impl WgpuType for (wgpu::Texture, wgpu::TextureViewDescriptor<'_>) {
     fn bind(&self, _device: &wgpu::Device, _: QUALIFIER) -> BoundData {
         BoundData::Texture {
-            data: self.create_view(&wgpu::TextureViewDescriptor::default()),
+            data: self.0.create_view(&self.1),
         }
     }
     fn size_of() -> usize {
@@ -257,6 +256,7 @@ pub struct SamplerBinding {
 #[derive(Debug, Clone)]
 pub struct DefaultBinding {
     pub binding_number: u32,
+    pub group_number: u32,
     pub name: String,
     pub data: Option<Rc<wgpu::Buffer>>,
     pub length: Option<u64>,

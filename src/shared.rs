@@ -163,7 +163,6 @@ macro_rules! typing {
     };
 }
 
-
 //todo why do I have this again?
 pub const fn array_type(gtype: GLSLTYPE, depth: i64) -> GLSLTYPE {
     if depth == 1 {

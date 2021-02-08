@@ -363,6 +363,16 @@ fn create_base_type(ty: &Ident) -> syn::GenericArgument {
                 arguments: syn::PathArguments::None,
             });
         }
+        "textureCube" => {
+            data_type.push(syn::PathSegment {
+                ident: format_ident!("wgpu"),
+                arguments: syn::PathArguments::None,
+            });
+            data_type.push(syn::PathSegment {
+                ident: format_ident!("Texture"),
+                arguments: syn::PathArguments::None,
+            });
+        }
         _ => panic!(format!("Unsupported type for Vertex: {}", ty.to_string())),
     }
 

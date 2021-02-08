@@ -1,5 +1,4 @@
 #![recursion_limit = "1024"]
-#![feature(trace_macros)]
 #[macro_use]
 extern crate pipeline;
 
@@ -13,7 +12,7 @@ use winit::{
 };
 
 pub use pipeline::wgpu_graphics_header::{
-    generate_swap_chain, graphics_run_indicies, setup_render_pass, GraphicsShader, PipelineType,
+    generate_swap_chain, graphics_run_indices, setup_render_pass, GraphicsShader, PipelineType,
 };
 
 use crate::pipeline::AbstractBind;
@@ -95,7 +94,8 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 
     eager_binding! {context = vertex!(), fragment!()};
 
-    let (program, _) = compile_valid_graphics_program!(device, context, S_V, S_F, PipelineType::Color);
+    let (program, _) =
+        compile_valid_graphics_program!(device, context, S_V, S_F, PipelineType::Color);
 
     let (positions, normals, index_data) = load_model("src/models/teapot.obj");
 
@@ -159,7 +159,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                                 .set_u_model(&mut rpass, &bind_group_model);
                                             {
                                                 let _ = context6.runnable(|| {
-                                                    graphics_run_indicies(rpass, &indices, 1)
+                                                    graphics_run_indices(rpass, &indices, 1)
                                                 });
                                             }
                                         }

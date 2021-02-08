@@ -8,7 +8,7 @@ use winit::{
 };
 
 pub use pipeline::wgpu_graphics_header::{
-    default_bind_group, generate_swap_chain, graphics_run_indicies, setup_render_pass,
+    default_bind_group, generate_swap_chain, graphics_run_indices, setup_render_pass,
     BindingPreprocess, GraphicsBindings, GraphicsShader, OutGraphicsBindings,
 };
 
@@ -202,7 +202,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                                 &mut bindings,
                                                 &out_bindings,
                                             );
-                                            rpass = graphics_run_indicies(
+                                            rpass = graphics_run_indices(
                                                 &program,
                                                 rpass,
                                                 &mut bind_group,
@@ -229,7 +229,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                                 &mut bindings,
                                                 &out_bindings,
                                             );
-                                            graphics_run_indicies(
+                                            graphics_run_indices(
                                                 &program,
                                                 rpass,
                                                 &mut bind_group2,

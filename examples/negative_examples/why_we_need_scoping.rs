@@ -13,7 +13,7 @@ use winit::{
 };
 
 pub use pipeline::wgpu_graphics_header::{
-    generate_swap_chain, graphics_run_indicies, setup_render_pass, GraphicsShader, PipelineType,
+    generate_swap_chain, graphics_run_indices, setup_render_pass, GraphicsShader, PipelineType,
 };
 
 use crate::pipeline::AbstractBind;
@@ -85,7 +85,8 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 
     eager_binding! {context = vertex!(), fragment!()};
 
-    let (program, _) = compile_valid_graphics_program!(device, context, S_V, S_F, PipelineType::Color);
+    let (program, _) =
+        compile_valid_graphics_program!(device, context, S_V, S_F, PipelineType::Color);
 
     let (positions, _, index_data) = load_cube();
 
@@ -201,19 +202,14 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 
                     let context1 = (&context).set_a_position(&mut rpass, &vertex_position);
 
-
                     let context2 = (&context1).set_vertexColor(&mut rpass, &vertex_color);
 
-
-                    let context3 =
-                        context2.set_u_view_u_proj(&mut rpass, &bind_group_view_proj);
+                    let context3 = context2.set_u_view_u_proj(&mut rpass, &bind_group_view_proj);
 
                     // Without scoping for each context, that uses the previous context, I've inserted a call here to change the vertexColor. This should only be visible in the bad_context, as that is where it is bound, but the effect is shown when you try to run context3. Remember, at no point in the chain of context's to create context3 did we bind this bad_vertex_color and we still see the effect.
                     let bad_context = context1.set_vertexColor(&mut rpass, &bad_vertex_color);
 
-                    let _ =
-                        context3.runnable(|| graphics_run_indicies(rpass, &indices, 1));
-
+                    let _ = context3.runnable(|| graphics_run_indices(rpass, &indices, 1));
                 }
                 queue.submit(Some(init_encoder.finish()));
             }
