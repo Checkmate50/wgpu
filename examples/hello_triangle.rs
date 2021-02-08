@@ -16,7 +16,7 @@ pub use pipeline::wgpu_graphics_header::{
 };
 
 use crate::pipeline::AbstractBind;
-pub use pipeline::bind::{Vertex};
+pub use pipeline::bind::Vertex;
 
 pub use wgpu_macros::generic_bindings;
 
@@ -78,7 +78,8 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 
     eager_binding! {context = vertex!(), fragment!()};
 
-    let (program, _) = compile_valid_graphics_program!(device, context, S_V, S_F, PipelineType::Color);
+    let (program, _) =
+        compile_valid_graphics_program!(device, context, S_V, S_F, PipelineType::Color);
 
     let positions = vec![[0.0, 0.7, 0.0], [-0.5, 0.5, 0.0], [0.5, -0.5, 0.0]];
     let brightness = vec![0.5, 0.5, 0.9];

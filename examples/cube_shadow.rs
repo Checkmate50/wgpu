@@ -12,7 +12,7 @@ use winit::{
 };
 
 pub use pipeline::wgpu_graphics_header::{
-    default_bind_group, generate_swap_chain, graphics_run_indicies, graphics_starting_context,
+    default_bind_group, generate_swap_chain, graphics_run_indices, graphics_starting_context,
     setup_render_pass, setup_render_pass_color_depth, setup_render_pass_depth, BindingPreprocess,
     GraphicsBindings, GraphicsShader, OutGraphicsBindings, PipelineType,
 };
@@ -251,76 +251,76 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     });
     let depth_view = depth_texture.create_default_view();
 
-/*
-    param1 : in
-    param2 : in
+    /*
+        param1 : in
+        param2 : in
 
-    // todo go with this
-    // todo fix examples
-    // todo fix run
-    //
-    context2
-    context3
-    {
-        context1 = bind a to param1 in context
+        // todo go with this
+        // todo fix examples
+        // todo fix run
+        //
+        context2
+        context3
         {
-            context2 = bind b to param2 in context1
-        }
-        {
-            context3 = bind c to param2 in context1
-        }
-    }
-
-    render_loop {
-        bind light in context2
-        bind light in context3
-
-        run(context2)
-        run(context3)
-    }
-
-    ///////
-
-    program 1
-    program 2
-
-    context<Bound, Unbound, ...>
-    context<[Bound, Unbound], [Unbound, Unbound], ...>
-
-    bind_param1(data,...)
-
-    bind_param1([Update, Don't Update, ...], data, ...)
-
-    {
-        bind a to param1@1@2
-        {
-            bind b to param2@1
+            context1 = bind a to param1 in context
             {
-                bind c to param2@2
-                render_loop {
-                    bind light to paramlight@1@2 {
-                        run(context@1)
-                        run(context@2)
+                context2 = bind b to param2 in context1
+            }
+            {
+                context3 = bind c to param2 in context1
+            }
+        }
+
+        render_loop {
+            bind light in context2
+            bind light in context3
+
+            run(context2)
+            run(context3)
+        }
+
+        ///////
+
+        program 1
+        program 2
+
+        context<Bound, Unbound, ...>
+        context<[Bound, Unbound], [Unbound, Unbound], ...>
+
+        bind_param1(data,...)
+
+        bind_param1([Update, Don't Update, ...], data, ...)
+
+        {
+            bind a to param1@1@2
+            {
+                bind b to param2@1
+                {
+                    bind c to param2@2
+                    render_loop {
+                        bind light to paramlight@1@2 {
+                            run(context@1)
+                            run(context@2)
+                        }
                     }
                 }
             }
         }
-    }
 
 
-    bind a to param1 { // bindgroup = {a}
-        render_loop {
-            bind b to param2 {
-                // bindgroup = {b}
-                run()
-            }
-            bind c to param2 {
-                // bindgroup = {c}
-                run()
+        bind a to param1 { // bindgroup = {a}
+            render_loop {
+                bind b to param2 {
+                    // bindgroup = {b}
+                    run()
+                }
+                bind c to param2 {
+                    // bindgroup = {c}
+                    run()
+                }
             }
         }
-    }
-*/
+    */
 
     let mut bind_group = default_bind_group(&device);
     let mut bind_group_p1 = default_bind_group(&device);
@@ -488,8 +488,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         }
     }
 
-
-    {bind param2
+    /* {bind param2
         render_loop {
         bind param1
     run()}
@@ -504,8 +503,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     most common -> least common
 
 
-    non-changing -> changing
-
+    non-changing -> changing */
 
     event_loop.run(move |event, _, control_flow: &mut ControlFlow| {
         *control_flow = ControlFlow::Poll;
@@ -550,7 +548,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                     &out_bindings_stencil_plane,
                                 );
                                 rpass_stencil = bake_context3.runnable(|| {
-                                    graphics_run_indicies(
+                                    graphics_run_indices(
                                         &stencil_program,
                                         &device,
                                         rpass_stencil,
@@ -574,7 +572,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                     &out_bindings_stencil_sphere,
                                 );
                                 rpass_stencil = bake_context3.runnable(|| {
-                                    graphics_run_indicies(
+                                    graphics_run_indices(
                                         &stencil_program,
                                         &device,
                                         rpass_stencil,
@@ -616,7 +614,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                         &out_bindings_plane,
                                     );
                                     rpass = context10.runnable(|| {
-                                        graphics_run_indicies(
+                                        graphics_run_indices(
                                             &program,
                                             &device,
                                             rpass,
@@ -650,7 +648,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                         &out_bindings_sphere,
                                     );
                                     rpass = context10.runnable(|| {
-                                        graphics_run_indicies(
+                                        graphics_run_indices(
                                             &program,
                                             &device,
                                             rpass,

@@ -350,7 +350,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                         );
                                         {
                                             ready_to_run(BIND_CONTEXT_7);
-                                            rpass = wgpu_graphics_header::graphics_run_indicies(
+                                            rpass = wgpu_graphics_header::graphics_run_indices(
                                                 &program,
                                                 rpass,
                                                 &mut bind_group,
@@ -437,7 +437,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                         );
                                         {
                                             ready_to_run(BIND_CONTEXT_7_1);
-                                            rpass = wgpu_graphics_header::graphics_run_indicies(
+                                            rpass = wgpu_graphics_header::graphics_run_indices(
                                                 &program,
                                                 rpass,
                                                 &mut bind_group2,
@@ -505,7 +505,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                 );
                                 {
                                     ready_to_run(BIND_CONTEXT_5_2);
-                                    wgpu_graphics_header::graphics_run_indicies(
+                                    wgpu_graphics_header::graphics_run_indices(
                                         &program_CUBE,
                                         rpass,
                                         &mut bind_group3,

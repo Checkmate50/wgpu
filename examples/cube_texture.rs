@@ -12,7 +12,7 @@ use winit::{
 };
 
 pub use pipeline::wgpu_graphics_header::{
-    generate_swap_chain, graphics_run_indicies, setup_render_pass, GraphicsShader, PipelineType,
+    generate_swap_chain, graphics_run_indices, setup_render_pass, GraphicsShader, PipelineType,
 };
 
 pub use wgpu_macros::generic_bindings;
@@ -232,7 +232,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 
                                 {
                                     let _ = context4
-                                        .runnable(|| graphics_run_indicies(rpass, &indices, 1));
+                                        .runnable(|| graphics_run_indices(rpass, &indices, 1));
                                 }
                             }
                         }

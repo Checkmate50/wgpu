@@ -70,13 +70,13 @@ async fn execute_gpu() {
             println!("{:?}", read_vec(&program, &result1, "indices").await);
         }
     }
-    const BIND_CONTEXT_3: [&str; 32] = update_bind_context!(STARTING_BIND_CONTEXT, "indicies");
+    const BIND_CONTEXT_3: [&str; 32] = update_bind_context!(STARTING_BIND_CONTEXT, "indices");
     bind_vec(
         &program,
         &mut bindings,
         &mut out_bindings2,
         &indices,
-        "indicies".to_string(),
+        "indices".to_string(),
     );
     {
         const BIND_CONTEXT_4: [&str; 32] = update_bind_context!(BIND_CONTEXT_3, "indices2");

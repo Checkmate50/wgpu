@@ -6,7 +6,7 @@ use std::rc::Rc;
 
 use crate::shared::{
     check_gl_builtin_type, compile_shader, has_in_qual, has_out_qual, has_uniform_qual,
-    process_body, string_compare, GLSLTYPE, PARAMETER, QUALIFIER,
+    is_gl_builtin, process_body, string_compare, GLSLTYPE, PARAMETER, QUALIFIER,
 };
 
 use crate::bind::{DefaultBinding, Indices, SamplerBinding, TextureBinding};
@@ -20,7 +20,7 @@ pub struct GraphicsProgram {
 #[derive(Debug, Clone)]
 pub struct GraphicsBindings {
     pub bindings: Vec<DefaultBinding>,
-    pub indicies: Option<Rc<wgpu::Buffer>>,
+    pub indices: Option<Rc<wgpu::Buffer>>,
     pub index_len: Option<u32>,
     pub textures: Vec<TextureBinding>,
     pub samplers: Vec<SamplerBinding>,
@@ -40,10 +40,10 @@ fn stringify_shader(
     for i in &b.bindings[..] {
         if i.qual.contains(&QUALIFIER::UNIFORM) {
             buffer.push(format!(
-                "layout(binding = {}) uniform UNIFORM{} {{\n\t {} {};\n}};\n",
-                i.binding_number, i.binding_number, i.gtype, i.name
+                "layout(set = {}, binding = {}) uniform UNIFORM{}{} {{\n\t {} {};\n}};\n",
+                i.group_number, i.binding_number, i.group_number, i.binding_number, i.gtype, i.name
             ));
-        } else if i.name != "gl_Position" {
+        } else if !is_gl_builtin(&i.name) {
             buffer.push(format!(
                 "layout(location={}) {} {} {};\n",
                 i.binding_number,
@@ -137,15 +137,18 @@ fn create_bindings(
     let mut vertex_binding_number = 0;
     let mut vertex_to_fragment_binding_number = 0;
     let mut vertex_to_fragment_map = HashMap::new();
-    let mut uniform_binding_number = 0;
     let mut uniform_map = HashMap::new();
+    let mut uniform_binding_number_map = HashMap::new();
     let mut fragment_out_binding_number = 0;
+    let mut group_map: HashMap<&str, u32> = HashMap::new();
+    let mut group_set_number = 0;
     for i in &vertex.params[..] {
         if !check_gl_builtin_type(i.name, &i.gtype) {
             // Bindings that are kept between runs
             if i.qual.contains(&QUALIFIER::VERTEX) {
                 vertex_binding_struct.push(DefaultBinding {
                     binding_number: vertex_binding_number,
+                    group_number: 0,
                     name: i.name.to_string(),
                     data: None,
                     length: None,
@@ -155,19 +158,32 @@ fn create_bindings(
                 vertex_binding_number += 1;
             // Bindings that are invalidated after a run
             } else if i.qual.contains(&QUALIFIER::UNIFORM) {
+                let group_number = match group_map.get(i.group.unwrap()) {
+                    Some(i) => *i,
+                    None => {
+                        let x = group_set_number;
+                        group_map.insert(i.group.unwrap(), x);
+                        group_set_number += 1;
+                        x
+                    }
+                };
+                let uniform_binding_number =
+                    uniform_binding_number_map.entry(group_number).or_insert(0);
                 vertex_binding_struct.push(DefaultBinding {
-                    binding_number: uniform_binding_number,
+                    binding_number: *uniform_binding_number,
+                    group_number,
                     name: i.name.to_string(),
                     data: None,
                     length: None,
                     gtype: i.gtype.clone(),
                     qual: i.qual.to_vec(),
                 });
-                uniform_map.insert(i.name, uniform_binding_number);
-                uniform_binding_number += 1;
+                uniform_map.insert(i.group.unwrap(), *uniform_binding_number);
+                *uniform_binding_number += 1;
             } else if i.qual.contains(&QUALIFIER::IN) && !i.qual.contains(&QUALIFIER::OUT) {
                 vertex_binding_struct.push(DefaultBinding {
                     binding_number: vertex_stage_binding_number,
+                    group_number: 0,
                     name: i.name.to_string(),
                     data: None,
                     length: None,
@@ -179,6 +195,7 @@ fn create_bindings(
             } else if !i.qual.contains(&QUALIFIER::IN) && i.qual.contains(&QUALIFIER::OUT) {
                 vertex_out_binding_struct.push(DefaultBinding {
                     binding_number: vertex_to_fragment_binding_number,
+                    group_number: 0,
                     name: i.name.to_string(),
                     data: None,
                     length: None,
@@ -198,41 +215,55 @@ fn create_bindings(
     let mut samplers_struct = Vec::new();
 
     for i in &fragment.params[..] {
+        //todo the binding_number's below are probably wrong
         if !check_gl_builtin_type(i.name, &i.gtype) {
             // Bindings that are kept between runs
             if i.qual.contains(&QUALIFIER::UNIFORM) {
                 if i.gtype == GLSLTYPE::Sampler || i.gtype == GLSLTYPE::SamplerShadow {
                     samplers_struct.push(SamplerBinding {
-                        binding_number: uniform_binding_number,
+                        binding_number: *uniform_binding_number_map
+                            .get(group_map.get(&i.group.unwrap()).unwrap())
+                            .unwrap(),
                         name: i.name.to_string(),
                         data: None,
                         gtype: i.gtype.clone(),
                         qual: i.qual.to_vec(),
                     });
-                    uniform_binding_number += 1;
                 } else if i.gtype == GLSLTYPE::Texture2D
                     || i.gtype == GLSLTYPE::Texture2DArray
                     || i.gtype == GLSLTYPE::TextureCube
                 {
                     textures_struct.push(TextureBinding {
-                        binding_number: uniform_binding_number,
+                        binding_number: *uniform_binding_number_map
+                            .get(group_map.get(&i.group.unwrap()).unwrap())
+                            .unwrap(),
                         name: i.name.to_string(),
                         data: None,
                         gtype: i.gtype.clone(),
                         qual: i.qual.to_vec(),
                     });
-                    uniform_binding_number += 1;
                 } else {
+                    let group_number = match group_map.get(i.group.unwrap()) {
+                        Some(i) => *i,
+                        None => {
+                            let x = group_set_number;
+                            group_map.insert(i.group.unwrap(), x);
+                            group_set_number += 1;
+                            x
+                        }
+                    };
                     let num = if uniform_map.get(i.name).is_some() {
                         *uniform_map.get(i.name).unwrap()
                     } else {
-                        let x = uniform_binding_number;
+                        0
+                        /* let x = uniform_binding_number;
                         uniform_map.insert(i.name, x);
                         uniform_binding_number += 1;
-                        x
+                        x */
                     };
                     fragment_binding_struct.push(DefaultBinding {
                         binding_number: num,
+                        group_number,
                         name: i.name.to_string(),
                         data: None,
                         length: None,
@@ -245,6 +276,7 @@ fn create_bindings(
                     binding_number: *vertex_to_fragment_map
                         .get(i.name)
                         .unwrap_or_else(|| panic!("{} has not been bound", i.name)),
+                    group_number: 0,
                     name: i.name.to_string(),
                     data: None,
                     length: None,
@@ -255,6 +287,7 @@ fn create_bindings(
             } else if !i.qual.contains(&QUALIFIER::IN) && i.qual.contains(&QUALIFIER::OUT) {
                 fragment_out_binding_struct.push(DefaultBinding {
                     binding_number: fragment_out_binding_number,
+                    group_number: 0,
                     name: i.name.to_string(),
                     data: None,
                     length: None,
@@ -271,7 +304,7 @@ fn create_bindings(
     (
         GraphicsBindings {
             bindings: vertex_binding_struct,
-            indicies: None,
+            indices: None,
             index_len: None,
             textures: Vec::new(),
             samplers: Vec::new(),
@@ -281,7 +314,7 @@ fn create_bindings(
         },
         GraphicsBindings {
             bindings: fragment_binding_struct,
-            indicies: None,
+            indices: None,
             index_len: None,
             textures: textures_struct,
             samplers: samplers_struct,
@@ -310,8 +343,6 @@ pub async fn graphics_compile(
 
     let (program_bindings1, out_program_bindings1, program_bindings2, out_program_bindings2) =
         create_bindings(&vertex, &fragment);
-
-    debug!(program_bindings1);
 
     for i in &program_bindings1.bindings[..] {
         if i.qual.contains(&QUALIFIER::VERTEX) {
@@ -351,10 +382,14 @@ pub async fn graphics_compile(
 
     let x = stringify_shader(vertex, &program_bindings1, &out_program_bindings1);
 
+    println!("{}", x);
+
     // Our compiled vertex shader
     let vs_module = compile_shader(x, ShaderType::Vertex, &device);
 
     let y = stringify_shader(fragment, &program_bindings2, &out_program_bindings2);
+
+    println!("{}", y);
 
     // Our compiled fragment shader
     let fs_module = compile_shader(y, ShaderType::Fragment, &device);
@@ -371,6 +406,7 @@ pub async fn graphics_compile(
     });
 
     //debug!(pipeline_layout);
+    debug!(vertex_binding_desc);
 
     // The part where we actually bring it all together
     let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -482,34 +518,23 @@ fn draw_indexed(
 
 #[derive(Debug)]
 pub struct BindingPreprocess {
-    indicies: Option<Rc<wgpu::Buffer>>,
+    indices: Option<Rc<wgpu::Buffer>>,
     index_len: Option<u32>,
     num_instances: u32,
     verticies: Vec<(u32, Rc<wgpu::Buffer>)>,
     num_verts: u32,
     bind_groups: Vec<Rc<wgpu::BindGroup>>,
-    /*
-    bind_group_vec: Vec<(u32, Rc<wgpu::Buffer>, std::ops::Range<u64>)>,
-    texture_vec: Vec<(u32, Rc<wgpu::TextureView>)>,
-    sampler_vec: Vec<(u32, Rc<wgpu::Sampler>)>,
-    */
 }
 
 impl<'a> Default for BindingPreprocess {
     fn default() -> Self {
         BindingPreprocess {
-            indicies: None,
+            indices: None,
             index_len: None,
             num_instances: 0,
             verticies: Vec::new(),
             num_verts: 0,
             bind_groups: Vec::new(),
-            /*
-            bind_group_vec: Vec::new(),
-            texture_vec: Vec::new(),
-            sampler_vec: Vec::new(),
-            */
-            //bgd,
         }
     }
 }
@@ -525,14 +550,14 @@ pub fn graphics_run(
     rpass
 }
 
-pub fn graphics_run_indicies<'a>(
+pub fn graphics_run_indices<'a>(
     mut rpass: wgpu::RenderPass<'a>,
-    indicies: &'a Indices,
+    indices: &'a Indices,
     num_instances: u32,
 ) -> wgpu::RenderPass<'a> {
-    rpass.set_index_buffer(indicies.buffer.slice(..));
+    rpass.set_index_buffer(indices.buffer.slice(..));
 
-    draw_indexed(&mut rpass, 0..indicies.len, 0..num_instances);
+    draw_indexed(&mut rpass, 0..indices.len, 0..num_instances);
     rpass
 }
 /* todo
