@@ -6,6 +6,7 @@ extern crate pipeline;
 #[macro_use]
 extern crate eager;
 
+use pipeline::helper::generate_identity_matrix;
 use winit::{
     event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
@@ -17,12 +18,9 @@ pub use pipeline::wgpu_graphics_header::{
 };
 
 use crate::pipeline::AbstractBind;
-pub use pipeline::bind::{BindGroup1, BindGroup2, Indices, Vertex};
+pub use pipeline::bind::{BindGroup1, Indices, Vertex};
 
-pub use pipeline::helper::{
-    generate_identity_matrix, generate_projection_matrix, generate_view_matrix, load_cube,
-    translate,
-};
+pub use pipeline::helper::{generate_projection_matrix, generate_view_matrix, load_cube};
 
 async fn run(event_loop: EventLoop<()>, window: Window) {
     let size = window.inner_size();
@@ -57,20 +55,21 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     my_shader! {vertex = {
         [[vertex in] vec3] a_position;
         [[vertex in] vec3] vertexColor;
+
         [group1 [uniform in] mat4] u_view;
         [group2 [uniform in] mat4] u_proj;
         [group3 [uniform in] mat4] u_model;
 
-
         [[out] vec3] fragmentColor;
         [[out] vec4] gl_Position;
+
         {{
             void main() {
                 fragmentColor = vertexColor;
-                gl_Position = u_proj * u_view * u_model * vec4(0.5 * a_position, 1.0);
+                gl_Position = u_proj * u_view * vec4(0.7 * a_position, 1.0);
             }
         }}
-    }};
+    }}
 
     my_shader! {fragment = {
         [[in] vec3] fragmentColor;
@@ -80,7 +79,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                 color = vec4(fragmentColor, 1.0);
             }
         }}
-    }};
+    }}
 
     const S_V: GraphicsShader = eager_graphics_shader! {vertex!()};
 
@@ -130,21 +129,19 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         [0.820, 0.883, 0.371],
         [0.982, 0.099, 0.879],
     ];
-
     let view_mat = generate_view_matrix();
 
     let proj_mat = generate_projection_matrix(size.width as f32 / size.height as f32);
 
     let model_mat = generate_identity_matrix();
 
-    let model_mat2 = translate(model_mat, 2.0, 0.0, 0.0);
-
     let vertex_position = Vertex::new(&device, &positions);
     let vertex_color = Vertex::new(&device, &color_data);
     let indices = Indices::new(&device, &index_data);
-    let view_mat_bind = BindGroup1::new(&device, &view_mat);
-    let proj_mat_bind = BindGroup1::new(&device, &proj_mat);
-    let model_mat_bind = BindGroup1::new(&device, &model_mat);
+
+    let bind_view_mat = BindGroup1::new(&device, &view_mat);
+    let bind_proj_mat = BindGroup1::new(&device, &proj_mat);
+    let bind_model_mat = BindGroup1::new(&device, &model_mat);
 
     // A "chain" of buffers that we render on to the display
     let mut swap_chain = generate_swap_chain(&surface, &window, &device);
@@ -164,20 +161,24 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                 {
                     let mut rpass = setup_render_pass(&program, &mut init_encoder, &frame);
 
+                    //
+                    // Handle the setup for the pipeline
+                    //
+
+                    let context1 = (&context).set_a_position(&mut rpass, &vertex_position);
+
                     {
-                        let context1 = (&context).set_a_position(&mut rpass, &vertex_position);
+                        let context2 = (&context1).set_vertexColor(&mut rpass, &vertex_color);
+
                         {
-                            let context2 = (&context1).set_u_view(&mut rpass, &view_mat_bind);
+                            let context3 = (&context2).set_u_view(&mut rpass, &bind_view_mat);
                             {
-                                let context3 = (&context2).set_vertexColor(&mut rpass, &vertex_color);
+                                let context4 = (&context3).set_u_proj(&mut rpass, &bind_proj_mat);
                                 {
-                                    let context4 = (&context3).set_u_proj(&mut rpass, &proj_mat_bind);
-                                    {
-                                        let context5 = (&context4).set_u_model(&mut rpass, &model_mat_bind); 
-                                        {
-                                            let _ =
+                                    let context5 = (&context4).set_u_model(&mut rpass, &bind_model_mat);
+                                    {   
+                                        let _ =
                                             context5.runnable(|| graphics_run_indicies(rpass, &indices, 1));
-                                        }
                                     }
                                 }
                             }
@@ -185,7 +186,6 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                     }
                 }
                 queue.submit(Some(init_encoder.finish()));
-                /* std::process::exit(0); */
             }
             // When the window closes we are done. Change the status
             Event::WindowEvent {
