@@ -1,6 +1,12 @@
+#![recursion_limit = "1024"]
+#![feature(trace_macros)]
 #[macro_use]
 extern crate pipeline;
 
+#[macro_use]
+extern crate eager;
+
+use pipeline::helper::generate_identity_matrix;
 use winit::{
     event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
@@ -8,41 +14,64 @@ use winit::{
 };
 
 pub use pipeline::wgpu_graphics_header::{
-    default_bind_group, generate_swap_chain, graphics_run_indices, setup_render_pass,
-    BindingPreprocess, GraphicsBindings, GraphicsShader, OutGraphicsBindings,
+    generate_swap_chain, graphics_run_indices, setup_render_pass, GraphicsShader, PipelineType,
 };
 
-pub use pipeline::shared::{is_gl_builtin, Bindable, Bindings, Context};
+use crate::pipeline::AbstractBind;
+pub use pipeline::bind::{BindGroup1, Indices, Vertex};
 
-pub use pipeline::context::{ready_to_run, update_bind_context, BindingContext};
-
-pub use pipeline::helper::{
-    generate_identity_matrix, generate_projection_matrix, generate_view_matrix, load_cube,
-    translate,
-};
+pub use pipeline::helper::{generate_projection_matrix, generate_view_matrix, load_cube};
 
 async fn run(event_loop: EventLoop<()>, window: Window) {
     let size = window.inner_size();
 
-    const VERTEXT: (GraphicsShader, BindingContext) = graphics_shader! {
+    // Create a surface to draw images on
+    // this is the new way wgpu does things... unsafe is kind of sad
+    let instance = wgpu::Instance::new(wgpu::BackendBit::PRIMARY);
+    let surface = unsafe { instance.create_surface(&window) };
+    let adapter = instance
+        .request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::Default,
+            // Request an adapter which can render to our surface
+            compatible_surface: Some(&surface),
+        })
+        .await
+        .expect("Failed to find an appropiate adapter");
+
+    // The device manages the connection and resources of the adapter
+    // The queue is a literal queue of tasks for the gpu
+    let (device, queue) = adapter
+        .request_device(
+            &wgpu::DeviceDescriptor {
+                features: wgpu::Features::empty(),
+                limits: wgpu::Limits::default(),
+                shader_validation: true,
+            },
+            None,
+        )
+        .await
+        .expect("Failed to create device");
+
+    my_shader! {vertex = {
         [[vertex in] vec3] a_position;
         [[vertex in] vec3] vertexColor;
-        [[uniform in] mat4] u_view;
-        [[uniform in] mat4] u_proj;
-        [[uniform in] mat4] u_model;
 
+        [group1 [uniform in] mat4] u_view;
+        [group2 [uniform in] mat4] u_proj;
+        [group3 [uniform in] mat4] u_model;
 
         [[out] vec3] fragmentColor;
         [[out] vec4] gl_Position;
+
         {{
             void main() {
                 fragmentColor = vertexColor;
-                gl_Position = u_proj * u_view * u_model * vec4(0.5 * a_position, 1.0);
+                gl_Position = u_proj * u_view * vec4(0.7 * a_position, 1.0);
             }
         }}
-    };
+    }}
 
-    const FRAGMENT: (GraphicsShader, BindingContext) = graphics_shader! {
+    my_shader! {fragment = {
         [[in] vec3] fragmentColor;
         [[out] vec4] color;
         {{
@@ -50,14 +79,15 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                 color = vec4(fragmentColor, 1.0);
             }
         }}
-    };
+    }}
 
-    const S_V: GraphicsShader = VERTEXT.0;
-    const STARTING_BIND_CONTEXT: BindingContext = VERTEXT.1;
-    const S_F: GraphicsShader = FRAGMENT.0;
+    const S_V: GraphicsShader = eager_graphics_shader! {vertex!()};
 
-    let (program, template_bindings, template_out_bindings, _) =
-        compile_valid_graphics_program!(window, S_V, S_F);
+    const S_F: GraphicsShader = eager_graphics_shader! {fragment!()};
+
+    eager_binding! {context = vertex!(), fragment!()};
+
+    let (program, _) = compile_valid_graphics_program!(device, context, S_V, S_F, PipelineType::Color);
 
     let (positions, _, index_data) = load_cube();
 
@@ -99,17 +129,22 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         [0.820, 0.883, 0.371],
         [0.982, 0.099, 0.879],
     ];
-
     let view_mat = generate_view_matrix();
 
     let proj_mat = generate_projection_matrix(size.width as f32 / size.height as f32);
 
     let model_mat = generate_identity_matrix();
 
-    let model_mat2 = translate(model_mat, 2.0, 0.0, 0.0);
+    let vertex_position = Vertex::new(&device, &positions);
+    let vertex_color = Vertex::new(&device, &color_data);
+    let indices = Indices::new(&device, &index_data);
+
+    let bind_view_mat = BindGroup1::new(&device, &view_mat);
+    let bind_proj_mat = BindGroup1::new(&device, &proj_mat);
+    let bind_model_mat = BindGroup1::new(&device, &model_mat);
 
     // A "chain" of buffers that we render on to the display
-    let mut swap_chain = generate_swap_chain(&program, &window);
+    let mut swap_chain = generate_swap_chain(&surface, &window, &device);
 
     event_loop.run(move |event, _, control_flow: &mut ControlFlow| {
         *control_flow = ControlFlow::Poll;
@@ -117,134 +152,40 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
             // Everything that can be processed has been so we can now redraw the image on our window
             Event::MainEventsCleared => window.request_redraw(),
             Event::RedrawRequested(_) => {
-                let mut init_encoder = program
-                    .device
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-
+                let mut init_encoder =
+                    device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
                 let frame = swap_chain
-                    .get_next_texture()
-                    .expect("Timeout when acquiring next swap chain texture");
+                    .get_current_frame()
+                    .expect("Timeout when acquiring next swap chain texture")
+                    .output;
                 {
-                    let mut bindings: GraphicsBindings = template_bindings.clone();
-                    let mut out_bindings: OutGraphicsBindings = template_out_bindings.clone();
-                    let mut bind_group = default_bind_group(&program);
-                    let mut bind_group2 = default_bind_group(&program);
-
-                    let mut bind_prerun;
-                    let mut bind_prerun2;
                     let mut rpass = setup_render_pass(&program, &mut init_encoder, &frame);
 
-                    let context = Context::new();
+                    //
+                    // Handle the setup for the pipeline
+                    //
+
+                    let context1 = (&context).set_a_position(&mut rpass, &vertex_position);
 
                     {
-                        const BIND_CONTEXT_1: BindingContext =
-                            update_bind_context(&STARTING_BIND_CONTEXT, "a_position");
-                        let context1 = bind!(
-                            program,
-                            bindings,
-                            out_bindings,
-                            "a_position",
-                            positions,
-                            context,
-                            BIND_CONTEXT_1
-                        );
+                        let context2 = (&context1).set_vertexColor(&mut rpass, &vertex_color);
+
                         {
-                            const BIND_CONTEXT_2: BindingContext =
-                                update_bind_context(&BIND_CONTEXT_1, "u_view");
-                            let context2 = bind!(
-                                program,
-                                bindings,
-                                out_bindings,
-                                "u_view",
-                                view_mat,
-                                context1,
-                                BIND_CONTEXT_2
-                            );
+                            let context3 = (&context2).set_u_view(&mut rpass, &bind_view_mat);
                             {
-                                const BIND_CONTEXT_3: BindingContext =
-                                    update_bind_context(&BIND_CONTEXT_2, "vertexColor");
-                                let context3 = bind!(
-                                    program,
-                                    bindings,
-                                    out_bindings,
-                                    "vertexColor",
-                                    color_data,
-                                    context2,
-                                    BIND_CONTEXT_3
-                                );
+                                let context4 = (&context3).set_u_proj(&mut rpass, &bind_proj_mat);
                                 {
-                                    const BIND_CONTEXT_4: BindingContext =
-                                        update_bind_context(&BIND_CONTEXT_3, "u_proj");
-                                    let context4 = bind!(
-                                        program,
-                                        bindings,
-                                        out_bindings,
-                                        "u_proj",
-                                        proj_mat,
-                                        context3,
-                                        BIND_CONTEXT_4
-                                    );
-                                    {
-                                        const BIND_CONTEXT_5: BindingContext =
-                                            update_bind_context(&BIND_CONTEXT_4, "u_model");
-                                        let _ = bind!(
-                                            program,
-                                            bindings,
-                                            out_bindings,
-                                            "u_model",
-                                            model_mat,
-                                            context4,
-                                            BIND_CONTEXT_5
-                                        );
-                                        {
-                                            ready_to_run(BIND_CONTEXT_5);
-                                            bind_prerun = BindingPreprocess::bind(
-                                                &mut bindings,
-                                                &out_bindings,
-                                            );
-                                            rpass = graphics_run_indices(
-                                                &program,
-                                                rpass,
-                                                &mut bind_group,
-                                                &mut bind_prerun,
-                                                &index_data,
-                                            );
-                                        }
-                                    }
-                                    {
-                                        const BIND_CONTEXT_5_1: BindingContext =
-                                            update_bind_context(&BIND_CONTEXT_4, "u_model");
-                                        let _ = bind!(
-                                            program,
-                                            bindings,
-                                            out_bindings,
-                                            "u_model",
-                                            model_mat2,
-                                            context4,
-                                            BIND_CONTEXT_5_1
-                                        );
-                                        {
-                                            ready_to_run(BIND_CONTEXT_5_1);
-                                            bind_prerun2 = BindingPreprocess::bind(
-                                                &mut bindings,
-                                                &out_bindings,
-                                            );
-                                            graphics_run_indices(
-                                                &program,
-                                                rpass,
-                                                &mut bind_group2,
-                                                &mut bind_prerun2,
-                                                &index_data,
-                                            );
-                                        }
+                                    let context5 = (&context4).set_u_model(&mut rpass, &bind_model_mat);
+                                    {   
+                                        let _ =
+                                            context5.runnable(|| graphics_run_indices(rpass, &indices, 1));
                                     }
                                 }
                             }
                         }
                     }
                 }
-                program.queue.submit(&[init_encoder.finish()]);
-                /* std::process::exit(0); */
+                queue.submit(Some(init_encoder.finish()));
             }
             // When the window closes we are done. Change the status
             Event::WindowEvent {
