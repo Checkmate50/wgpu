@@ -7,6 +7,7 @@ extern crate pipeline;
 extern crate eager;
 
 use pipeline::helper::generate_identity_matrix;
+use pipeline::helper::translate;
 use winit::{
     event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
@@ -134,6 +135,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     let proj_mat = generate_projection_matrix(size.width as f32 / size.height as f32);
 
     let model_mat = generate_identity_matrix();
+    let model_mat2 = translate(model_mat, 2.0, 0.0, 0.0);
 
     let vertex_position = Vertex::new(&device, &positions);
     let vertex_color = Vertex::new(&device, &color_data);
@@ -142,6 +144,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     let bind_view_mat = BindGroup1::new(&device, &view_mat);
     let bind_proj_mat = BindGroup1::new(&device, &proj_mat);
     let bind_model_mat = BindGroup1::new(&device, &model_mat);
+    let bind_model_mat2 = BindGroup1::new(&device, &model_mat2);
 
     // A "chain" of buffers that we render on to the display
     let mut swap_chain = generate_swap_chain(&surface, &window, &device);
@@ -166,10 +169,8 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                     //
 
                     let context1 = (&context).set_a_position(&mut rpass, &vertex_position);
-
                     {
                         let context2 = (&context1).set_vertexColor(&mut rpass, &vertex_color);
-
                         {
                             let context3 = (&context2).set_u_view(&mut rpass, &bind_view_mat);
                             {
@@ -177,8 +178,13 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                 {
                                     let context5 = (&context4).set_u_model(&mut rpass, &bind_model_mat);
                                     {
-                                        let _ =
+                                        rpass =
                                             context5.runnable(|| graphics_run_indices(rpass, &indices, 1));
+                                    }
+                                    let context5_1 = (&context4).set_u_model(&mut rpass, &bind_model_mat2);
+                                    {
+                                        let _ =
+                                            context5_1.runnable(|| graphics_run_indices(rpass, &indices, 1));
                                     }
                                 }
                             }
