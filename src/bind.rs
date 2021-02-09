@@ -24,8 +24,9 @@ impl WgpuType for f32 {
         std::mem::size_of::<f32>()
     }
     fn create_binding_type() -> wgpu::BindingType {
-        wgpu::BindingType::UniformBuffer {
-            dynamic: false,
+        wgpu::BindingType::Buffer {
+            ty: wgpu::BufferBindingType::Uniform,
+                has_dynamic_offset: false,
             min_binding_size: wgpu::BufferSize::new(Self::size_of() as u64),
         }
     }
@@ -44,8 +45,9 @@ impl WgpuType for Vec<u32> {
         std::mem::size_of::<[u32; 1]>()
     }
     fn create_binding_type() -> wgpu::BindingType {
-        wgpu::BindingType::UniformBuffer {
-            dynamic: false,
+        wgpu::BindingType::Buffer {
+            ty: wgpu::BufferBindingType::Uniform,
+                has_dynamic_offset: false,
             min_binding_size: wgpu::BufferSize::new(Self::size_of() as u64),
         }
     }
@@ -64,8 +66,9 @@ impl WgpuType for Vec<f32> {
         std::mem::size_of::<[f32; 1]>()
     }
     fn create_binding_type() -> wgpu::BindingType {
-        wgpu::BindingType::UniformBuffer {
-            dynamic: false,
+        wgpu::BindingType::Buffer {
+            ty: wgpu::BufferBindingType::Uniform,
+                has_dynamic_offset: false,
             min_binding_size: wgpu::BufferSize::new(Self::size_of() as u64),
         }
     }
@@ -91,8 +94,9 @@ impl WgpuType for Vec<[f32; 2]> {
         std::mem::size_of::<[f32; 2]>()
     }
     fn create_binding_type() -> wgpu::BindingType {
-        wgpu::BindingType::UniformBuffer {
-            dynamic: false,
+        wgpu::BindingType::Buffer {
+            ty: wgpu::BufferBindingType::Uniform,
+                has_dynamic_offset: false,
             min_binding_size: wgpu::BufferSize::new(Self::size_of() as u64),
         }
     }
@@ -118,8 +122,9 @@ impl WgpuType for Vec<[f32; 3]> {
         std::mem::size_of::<[f32; 3]>()
     }
     fn create_binding_type() -> wgpu::BindingType {
-        wgpu::BindingType::UniformBuffer {
-            dynamic: false,
+        wgpu::BindingType::Buffer {
+            ty: wgpu::BufferBindingType::Uniform,
+                has_dynamic_offset: false,
             min_binding_size: wgpu::BufferSize::new(Self::size_of() as u64),
         }
     }
@@ -145,8 +150,9 @@ impl WgpuType for Vec<[f32; 4]> {
         std::mem::size_of::<[f32; 4]>()
     }
     fn create_binding_type() -> wgpu::BindingType {
-        wgpu::BindingType::UniformBuffer {
-            dynamic: false,
+        wgpu::BindingType::Buffer {
+            ty: wgpu::BufferBindingType::Uniform,
+                has_dynamic_offset: false,
             min_binding_size: wgpu::BufferSize::new(Self::size_of() as u64),
         }
     }
@@ -167,8 +173,9 @@ impl WgpuType for cgmath::Matrix4<f32> {
         64
     }
     fn create_binding_type() -> wgpu::BindingType {
-        wgpu::BindingType::UniformBuffer {
-            dynamic: false,
+        wgpu::BindingType::Buffer {
+            ty: wgpu::BufferBindingType::Uniform,
+                has_dynamic_offset: false,
             min_binding_size: wgpu::BufferSize::new(Self::size_of() as u64),
         }
     }
@@ -185,14 +192,17 @@ impl WgpuType for wgpu::SamplerDescriptor<'_> {
     }
 
     fn create_binding_type() -> wgpu::BindingType {
-        wgpu::BindingType::Sampler { comparison: false }
+        wgpu::BindingType::Sampler {
+            comparison: false,
+            filtering: true,
+        }
     }
 }
 
-impl WgpuType for (wgpu::Texture, wgpu::TextureViewDescriptor<'_>) {
+impl WgpuType for wgpu::Texture {
     fn bind(&self, _device: &wgpu::Device, _: QUALIFIER) -> BoundData {
         BoundData::Texture {
-            data: self.0.create_view(&self.1),
+            data: self.create_view(&wgpu::TextureViewDescriptor::default()),
         }
     }
     fn size_of() -> usize {
@@ -200,10 +210,10 @@ impl WgpuType for (wgpu::Texture, wgpu::TextureViewDescriptor<'_>) {
     }
 
     fn create_binding_type() -> wgpu::BindingType {
-        wgpu::BindingType::SampledTexture {
+        wgpu::BindingType::Texture {
             multisampled: false,
-            component_type: wgpu::TextureComponentType::Float,
-            dimension: wgpu::TextureViewDimension::D2,
+            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+            view_dimension: wgpu::TextureViewDimension::D2,
         }
     }
 }
@@ -337,8 +347,9 @@ fn create_bind_group(device: &wgpu::Device, buffers: Vec<(wgpu::Buffer, u64)>) -
         .map(|(i, buf)| wgpu::BindGroupLayoutEntry {
             binding: i as u32,
             visibility: wgpu::ShaderStage::VERTEX | wgpu::ShaderStage::FRAGMENT, // can check which stage
-            ty: wgpu::BindingType::UniformBuffer {
-                dynamic: false,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Uniform,
+                has_dynamic_offset: false,
                 min_binding_size: wgpu::BufferSize::new(buf.1),
             },
             count: None,
@@ -355,7 +366,7 @@ fn create_bind_group(device: &wgpu::Device, buffers: Vec<(wgpu::Buffer, u64)>) -
         .enumerate()
         .map(|(i, buf)| wgpu::BindGroupEntry {
             binding: i as u32,
-            resource: wgpu::BindingResource::Buffer(buf.0.slice(..)),
+            resource: buf.0.as_entire_binding(),
         })
         .collect();
     let bgd = &wgpu::BindGroupDescriptor {

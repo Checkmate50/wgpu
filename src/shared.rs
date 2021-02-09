@@ -4,6 +4,8 @@ use std::fmt;
 use std::io::Read;
 use wgpu::ShaderModule;
 
+use std::borrow::Cow;
+
 // Remove spaces between tokens that should be one token
 // Strip off the starting and ending { }
 pub fn process_body(body: &str) -> String {
@@ -28,7 +30,11 @@ pub fn compile_shader(contents: String, shader: ShaderType, device: &wgpu::Devic
         .read_to_end(&mut vs)
         .expect("Somehow reading the file got interrupted");
     // Take the shader, ...,  and return
-    device.create_shader_module(wgpu::util::make_spirv(&vs[..]))
+    device.create_shader_module(&wgpu::ShaderModuleDescriptor {
+        label: None,
+        source: wgpu::util::make_spirv(&vs[..]),
+        flags: wgpu::ShaderFlags::VALIDATION,
+    })
 }
 
 #[derive(Debug, Clone, PartialEq)]

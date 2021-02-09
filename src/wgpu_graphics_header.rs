@@ -1,4 +1,5 @@
 use glsl_to_spirv::ShaderType;
+use wgpu::ColorWrite;
 
 use std::collections::HashMap;
 use std::convert::TryInto;
@@ -108,13 +109,11 @@ pub fn generate_swap_chain(
     let size = window.inner_size();
     // For drawing to window
     let sc_desc = wgpu::SwapChainDescriptor {
-        usage: wgpu::TextureUsage::OUTPUT_ATTACHMENT,
+        usage: wgpu::TextureUsage::RENDER_ATTACHMENT,
         format: wgpu::TextureFormat::Bgra8UnormSrgb,
         // Window dimensions
         width: size.width,
         height: size.height,
-        // Only update during the "vertical blanking interval"
-        // As opposed to Immediate where it is possible to see visual tearing(where multiple frames are visible at once)
         present_mode: wgpu::PresentMode::Mailbox,
     };
     device.create_swap_chain(&surface, &sc_desc)
@@ -332,7 +331,7 @@ pub enum PipelineType {
 }
 
 pub async fn graphics_compile(
-    vec_buffer: &mut [wgpu::VertexAttributeDescriptor; 32],
+    vec_buffer: &mut [wgpu::VertexAttribute; 32],
     device: &wgpu::Device,
     bind_group_layout: Vec<wgpu::BindGroupLayout>,
     vertex: &GraphicsShader,
@@ -346,7 +345,7 @@ pub async fn graphics_compile(
 
     for i in &program_bindings1.bindings[..] {
         if i.qual.contains(&QUALIFIER::VERTEX) {
-            vec_buffer[i.binding_number as usize] = wgpu::VertexAttributeDescriptor {
+            vec_buffer[i.binding_number as usize] = wgpu::VertexAttribute {
                 offset: 0,
                 // This is our connection to shader.vert
                 // TODO WOW I had an error because I hardcoded the format's below. That should not be a thing
@@ -366,8 +365,8 @@ pub async fn graphics_compile(
 
     for i in &program_bindings1.bindings[..] {
         if !i.qual.contains(&QUALIFIER::UNIFORM) && !i.qual.contains(&QUALIFIER::BUFFER) {
-            vertex_binding_desc.push(wgpu::VertexBufferDescriptor {
-                stride: (i.gtype.size_of()) as wgpu::BufferAddress,
+            vertex_binding_desc.push(wgpu::VertexBufferLayout {
+                array_stride: (i.gtype.size_of()) as wgpu::BufferAddress,
                 step_mode: if i.qual.contains(&QUALIFIER::VERTEX) {
                     wgpu::InputStepMode::Vertex
                 } else {
@@ -417,39 +416,32 @@ pub async fn graphics_compile(
         // vertex => 1
         // fragment => 2
         // rasterization => 3
-        vertex_stage: wgpu::ProgrammableStageDescriptor {
+        vertex: wgpu::VertexState {
             module: &vs_module,
             // The name of the method in shader.vert to use
             entry_point: "main",
+            buffers: &vertex_binding_desc[..],
         },
         // Notice how the fragment and rasterization parts are optional
-        fragment_stage: Some(wgpu::ProgrammableStageDescriptor {
+        fragment: Some(wgpu::FragmentState {
             module: &fs_module,
             // The name of the method in shader.frag to use
             entry_point: "main",
-        }),
-        // Lays out how to process our primitives(See primitive_topology)
-        rasterization_state: Some(wgpu::RasterizationStateDescriptor {
-            // Counter Clockwise facing(Basically back-facing)
-            front_face: wgpu::FrontFace::Ccw,
-            // Specify that we don't want to toss any of our primitives(triangles) based on which way they face. Useful for getting rid of shapes that aren't shown to the viewer
-            // Alternatives include Front and Back culling
-            // We are currently back-facing so CullMode::Front does nothing and Back gets rid of the triangle
-            cull_mode: wgpu::CullMode::Back,
-            depth_bias: match pipe_type {
-                PipelineType::Stencil => 2,
-                PipelineType::ColorWithStencil | PipelineType::Color => 0,
-            },
-            /// TODO We may want to adjust the depth bias and scaling during stencilling
-            depth_bias_slope_scale: match pipe_type {
-                PipelineType::Stencil => 2.0,
-                PipelineType::ColorWithStencil | PipelineType::Color => 0.0,
-            },
-            depth_bias_clamp: 0.0,
-            clamp_depth: device.features().contains(wgpu::Features::DEPTH_CLAMPING),
+            targets: &[wgpu::ColorTargetState{
+                format: wgpu::TextureFormat::Bgra8UnormSrgb,
+                alpha_blend: wgpu::BlendState::default(),
+                color_blend: wgpu::BlendState::default(),
+                write_mask: wgpu::ColorWrite::default(),
+
+            }]
         }),
         // Use Triangles
-        primitive_topology: wgpu::PrimitiveTopology::TriangleList,
+        primitive: wgpu::PrimitiveState {
+            cull_mode: wgpu::CullMode::Back,
+            ..Default::default()
+        },
+
+        /* wgpu::PrimitiveTopology::TriangleList,
         color_states: match pipe_type {
             PipelineType::Stencil => &[],
             PipelineType::ColorWithStencil | PipelineType::Color => &[wgpu::ColorStateDescriptor {
@@ -464,35 +456,34 @@ pub async fn graphics_compile(
                 write_mask: wgpu::ColorWrite::ALL,
             }],
         },
-
+ */
         // We can add an optional stencil descriptor which allows for effects that you would see in Microsoft Powerpoint like fading/swiping to the next slide
-        depth_stencil_state: match pipe_type {
+        depth_stencil: match pipe_type {
             // The first two cases are from the shadow example for the shadow pass and forward pass.
             // The last type is for typical graphics programs with no stencil
-            PipelineType::Stencil => Some(wgpu::DepthStencilStateDescriptor {
+            PipelineType::Stencil => Some(wgpu::DepthStencilState {
                 format: wgpu::TextureFormat::Depth32Float,
                 depth_write_enabled: true,
                 depth_compare: wgpu::CompareFunction::LessEqual,
-                stencil: wgpu::StencilStateDescriptor::default(),
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState {
+                    constant:2,
+                    slope_scale: 2.0,
+                    clamp: 0.0
+                },
+                clamp_depth: device.features().contains(wgpu::Features::DEPTH_CLAMPING)
             }),
-            PipelineType::ColorWithStencil => Some(wgpu::DepthStencilStateDescriptor {
+            PipelineType::ColorWithStencil => Some(wgpu::DepthStencilState {
                 format: wgpu::TextureFormat::Depth32Float,
                 depth_write_enabled: true,
                 depth_compare: wgpu::CompareFunction::Less,
-                stencil: wgpu::StencilStateDescriptor::default(),
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+                clamp_depth: false,
             }),
             PipelineType::Color => None,
         },
-        vertex_state: wgpu::VertexStateDescriptor {
-            index_format: wgpu::IndexFormat::Uint16,
-            vertex_buffers: &vertex_binding_desc[..],
-        },
-        // Number of samples to use per pixel(Use more than one for some fancy multisampling)
-        sample_count: 1,
-        // Use all available samples(This is a bitmask)
-        sample_mask: !0,
-        // Create a mask using the alpha values for each pixel and combine it with the sample mask to limit what samples are used
-        alpha_to_coverage_enabled: false,
+        multisample: wgpu::MultisampleState::default()
     });
 
     GraphicsProgram {
@@ -555,7 +546,7 @@ pub fn graphics_run_indices<'a>(
     indices: &'a Indices,
     num_instances: u32,
 ) -> wgpu::RenderPass<'a> {
-    rpass.set_index_buffer(indices.buffer.slice(..));
+    rpass.set_index_buffer(indices.buffer.slice(..), wgpu::IndexFormat::Uint16);
 
     draw_indexed(&mut rpass, 0..indices.len, 0..num_instances);
     rpass
@@ -603,6 +594,7 @@ pub fn setup_render_pass<'a>(
     frame: &'a wgpu::SwapChainTexture,
 ) -> wgpu::RenderPass<'a> {
     let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+        label: None,
         color_attachments: &[wgpu::RenderPassColorAttachmentDescriptor {
             attachment: &frame.view,
             resolve_target: None,
@@ -624,6 +616,7 @@ pub fn setup_render_pass_depth<'a>(
     texture: &'a wgpu::TextureView,
 ) -> wgpu::RenderPass<'a> {
     let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+        label : None,
         // color_attachments is literally where we draw the colors to
         color_attachments: &[],
         depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachmentDescriptor {
@@ -647,6 +640,7 @@ pub fn setup_render_pass_color_depth<'a>(
     texture: &'a wgpu::TextureView,
 ) -> wgpu::RenderPass<'a> {
     let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+        label: None,
         // color_attachments is literally where we draw the colors to
         color_attachments: &[wgpu::RenderPassColorAttachmentDescriptor {
             attachment: &frame.view,
@@ -720,7 +714,7 @@ macro_rules! graphics_shader {
 #[macro_export]
 macro_rules! compile_valid_graphics_program {
     ($device:tt, $context:tt, $vertex:tt, $fragment:tt, $pipe_type:path) => {{
-        let mut compile_buffer: [wgpu::VertexAttributeDescriptor; 32] =
+        let mut compile_buffer: [wgpu::VertexAttribute; 32] =
             pipeline::wgpu_graphics_header::compile_buffer();
 
         const _: () = pipeline::wgpu_graphics_header::valid_vertex_shader(&$vertex);
@@ -791,15 +785,15 @@ pub const fn graphics_starting_context(
 // This is a crazy hack
 // -- I need to be able to create VertexAttributeDescriptors in compile and save a reference to them when creating the pipeline
 // -- I need to somehow coerce out a 32 array from a non-copyable struct
-pub fn compile_buffer() -> [wgpu::VertexAttributeDescriptor; 32] {
-    let x: Box<[wgpu::VertexAttributeDescriptor]> = vec![0; 32]
+pub fn compile_buffer() -> [wgpu::VertexAttribute; 32] {
+    let x: Box<[wgpu::VertexAttribute]> = vec![0; 32]
         .into_iter()
-        .map(|_| wgpu::VertexAttributeDescriptor {
+        .map(|_| wgpu::VertexAttribute {
             offset: 0,
             shader_location: 0,
             format: wgpu::VertexFormat::Float,
         })
         .collect();
-    let y: Box<[wgpu::VertexAttributeDescriptor; 32]> = x.try_into().unwrap();
+    let y: Box<[wgpu::VertexAttribute; 32]> = x.try_into().unwrap();
     *y
 }
