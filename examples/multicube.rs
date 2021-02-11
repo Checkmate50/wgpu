@@ -67,7 +67,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         {{
             void main() {
                 fragmentColor = vertexColor;
-                gl_Position = u_proj * u_view * vec4(0.7 * a_position, 1.0);
+                gl_Position = u_proj * u_view * u_model * vec4(0.7 * a_position, 1.0);
             }
         }}
     }}
