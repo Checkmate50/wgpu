@@ -12,7 +12,8 @@ use winit::{
 };
 
 pub use pipeline::wgpu_graphics_header::{
-    generate_swap_chain, graphics_run_indices, setup_render_pass, GraphicsShader, PipelineType,
+    generate_swap_chain, graphics_run_indices, setup_render_pass, GraphicsCompileArgs,
+    GraphicsShader,
 };
 
 use crate::pipeline::AbstractBind;
@@ -30,7 +31,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     let surface = unsafe { instance.create_surface(&window) };
     let adapter = instance
         .request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::Default,
+            power_preference: wgpu::PowerPreference::default(),
             // Request an adapter which can render to our surface
             compatible_surface: Some(&surface),
         })
@@ -42,9 +43,9 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     let (device, queue) = adapter
         .request_device(
             &wgpu::DeviceDescriptor {
+                label: None,
                 features: wgpu::Features::empty(),
                 limits: wgpu::Limits::default(),
-                shader_validation: true,
             },
             None,
         )
@@ -95,7 +96,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     eager_binding! {context = vertex!(), fragment!()};
 
     let (program, _) =
-        compile_valid_graphics_program!(device, context, S_V, S_F, PipelineType::Color);
+        compile_valid_graphics_program!(device, context, S_V, S_F, GraphicsCompileArgs::default());
 
     let (positions, normals, index_data) = load_model("src/models/teapot.obj");
 
@@ -117,7 +118,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     let bind_group_view_proj = BindGroup2::new(&device, &view_mat, &proj_mat);
 
     // A "chain" of buffers that we render on to the display
-    let mut swap_chain = generate_swap_chain(&surface, &window, &device);
+    let swap_chain = generate_swap_chain(&surface, &window, &device);
 
     event_loop.run(move |event, _, control_flow: &mut ControlFlow| {
         *control_flow = ControlFlow::Poll;
@@ -139,7 +140,22 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                 model_mat = rotation_y(model_mat, 0.05);
                 let bind_group_model = BindGroup1::new(&device, &model_mat);
                 {
-                    let mut rpass = setup_render_pass(&program, &mut init_encoder, &frame);
+                    let mut rpass = setup_render_pass(
+                        &program,
+                        &mut init_encoder,
+                        wgpu::RenderPassDescriptor {
+                            label: None,
+                            color_attachments: &[wgpu::RenderPassColorAttachmentDescriptor {
+                                attachment: &frame.view,
+                                resolve_target: None,
+                                ops: wgpu::Operations {
+                                    load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                                    store: true,
+                                },
+                            }],
+                            depth_stencil_attachment: None,
+                        },
+                    );
 
                     {
                         let context1 = (&context).set_a_position(&mut rpass, &vertex_position);

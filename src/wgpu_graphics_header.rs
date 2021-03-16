@@ -1,5 +1,4 @@
 use glsl_to_spirv::ShaderType;
-use wgpu::ColorWrite;
 
 use std::collections::HashMap;
 use std::convert::TryInto;
@@ -64,14 +63,14 @@ fn stringify_shader(
     }
     for i in &b.textures[..] {
         buffer.push(format!(
-            "layout(binding = {}) uniform {} {};\n",
-            i.binding_number, i.gtype, i.name
+            "layout(set = {}, binding = {}) uniform {} {};\n",
+            i.group_number, i.binding_number, i.gtype, i.name
         ));
     }
     for i in &b.samplers[..] {
         buffer.push(format!(
-            "layout(binding = {}) uniform {} {};\n",
-            i.binding_number, i.gtype, i.name
+            "layout(set = {}, binding = {}) uniform {} {};\n",
+            i.group_number, i.binding_number, i.gtype, i.name
         ));
     }
     for i in &b_out.bindings[..] {
@@ -138,6 +137,7 @@ fn create_bindings(
     let mut vertex_to_fragment_map = HashMap::new();
     let mut uniform_map = HashMap::new();
     let mut uniform_binding_number_map = HashMap::new();
+    let mut uniform_binding_number_fragment_map = HashMap::new();
     let mut fragment_out_binding_number = 0;
     let mut group_map: HashMap<&str, u32> = HashMap::new();
     let mut group_set_number = 0;
@@ -219,28 +219,50 @@ fn create_bindings(
             // Bindings that are kept between runs
             if i.qual.contains(&QUALIFIER::UNIFORM) {
                 if i.gtype == GLSLTYPE::Sampler || i.gtype == GLSLTYPE::SamplerShadow {
+                    let group_number = match group_map.get(i.group.unwrap()) {
+                        Some(i) => *i,
+                        None => {
+                            let x = group_set_number;
+                            group_map.insert(i.group.unwrap(), x);
+                            group_set_number += 1;
+                            x
+                        }
+                    };
+                    let binding_number =
+                        uniform_binding_number_fragment_map.entry(group_number).or_insert(0);
                     samplers_struct.push(SamplerBinding {
-                        binding_number: *uniform_binding_number_map
-                            .get(group_map.get(&i.group.unwrap()).unwrap())
-                            .unwrap(),
+                        binding_number: *binding_number,
+                        group_number,
                         name: i.name.to_string(),
                         data: None,
                         gtype: i.gtype.clone(),
                         qual: i.qual.to_vec(),
                     });
+                    *binding_number += 1;
                 } else if i.gtype == GLSLTYPE::Texture2D
                     || i.gtype == GLSLTYPE::Texture2DArray
                     || i.gtype == GLSLTYPE::TextureCube
                 {
+                    let group_number = match group_map.get(i.group.unwrap()) {
+                        Some(i) => *i,
+                        None => {
+                            let x = group_set_number;
+                            group_map.insert(i.group.unwrap(), x);
+                            group_set_number += 1;
+                            x
+                        }
+                    };
+                    let binding_number =
+                        uniform_binding_number_fragment_map.entry(group_number).or_insert(0);
                     textures_struct.push(TextureBinding {
-                        binding_number: *uniform_binding_number_map
-                            .get(group_map.get(&i.group.unwrap()).unwrap())
-                            .unwrap(),
+                        binding_number: *binding_number,
+                        group_number,
                         name: i.name.to_string(),
                         data: None,
                         gtype: i.gtype.clone(),
                         qual: i.qual.to_vec(),
                     });
+                    *binding_number += 1;
                 } else {
                     let group_number = match group_map.get(i.group.unwrap()) {
                         Some(i) => *i,
@@ -251,17 +273,20 @@ fn create_bindings(
                             x
                         }
                     };
-                    let num = if uniform_map.get(i.name).is_some() {
+                    let binding_number =
+                        uniform_binding_number_fragment_map.entry(group_number).or_insert(0);
+                    /* let num = if uniform_map.get(i.name).is_some() {
                         *uniform_map.get(i.name).unwrap()
                     } else {
+                        uniform_map
                         0
                         /* let x = uniform_binding_number;
                         uniform_map.insert(i.name, x);
                         uniform_binding_number += 1;
                         x */
-                    };
+                    }; */
                     fragment_binding_struct.push(DefaultBinding {
-                        binding_number: num,
+                        binding_number: *binding_number,
                         group_number,
                         name: i.name.to_string(),
                         data: None,
@@ -269,6 +294,7 @@ fn create_bindings(
                         gtype: i.gtype.clone(),
                         qual: i.qual.to_vec(),
                     });
+                    *binding_number += 1;
                 }
             } else if i.qual.contains(&QUALIFIER::IN) && !i.qual.contains(&QUALIFIER::OUT) {
                 fragment_binding_struct.push(DefaultBinding {
@@ -324,10 +350,30 @@ fn create_bindings(
     )
 }
 
-pub enum PipelineType {
-    Stencil,
-    ColorWithStencil,
-    Color,
+pub struct GraphicsCompileArgs {
+    pub color_target_state: Option<wgpu::ColorTargetState>,
+    pub primitive_state: wgpu::PrimitiveState,
+    pub depth_stencil_state: Option<wgpu::DepthStencilState>,
+    pub multisample_state: wgpu::MultisampleState,
+}
+
+impl Default for GraphicsCompileArgs {
+    fn default() -> Self {
+        GraphicsCompileArgs {
+            color_target_state: Some(wgpu::ColorTargetState {
+                format: wgpu::TextureFormat::Bgra8UnormSrgb,
+                alpha_blend: wgpu::BlendState::default(),
+                color_blend: wgpu::BlendState::default(),
+                write_mask: wgpu::ColorWrite::default(),
+            }),
+            primitive_state: wgpu::PrimitiveState {
+                cull_mode: wgpu::CullMode::Back,
+                ..Default::default()
+            },
+            depth_stencil_state: None,
+            multisample_state: wgpu::MultisampleState::default(),
+        }
+    }
 }
 
 pub async fn graphics_compile(
@@ -336,7 +382,7 @@ pub async fn graphics_compile(
     bind_group_layout: Vec<wgpu::BindGroupLayout>,
     vertex: &GraphicsShader,
     fragment: &GraphicsShader,
-    pipe_type: PipelineType,
+    args: GraphicsCompileArgs,
 ) -> GraphicsProgram {
     // the adapter is the handler to the physical graphics unit
 
@@ -407,6 +453,13 @@ pub async fn graphics_compile(
     //debug!(pipeline_layout);
     debug!(vertex_binding_desc);
 
+    let mut color_target_state = Vec::new();
+
+    match args.color_target_state {
+        Some(cts) => color_target_state.push(cts),
+        None => {}
+    };
+
     // The part where we actually bring it all together
     let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: None,
@@ -427,38 +480,31 @@ pub async fn graphics_compile(
             module: &fs_module,
             // The name of the method in shader.frag to use
             entry_point: "main",
-            targets: &[wgpu::ColorTargetState{
-                format: wgpu::TextureFormat::Bgra8UnormSrgb,
-                alpha_blend: wgpu::BlendState::default(),
-                color_blend: wgpu::BlendState::default(),
-                write_mask: wgpu::ColorWrite::default(),
-
-            }]
+            targets: &color_target_state,
         }),
         // Use Triangles
-        primitive: wgpu::PrimitiveState {
-            cull_mode: wgpu::CullMode::Back,
-            ..Default::default()
-        },
+        primitive: args.primitive_state,
 
         /* wgpu::PrimitiveTopology::TriangleList,
-        color_states: match pipe_type {
-            PipelineType::Stencil => &[],
-            PipelineType::ColorWithStencil | PipelineType::Color => &[wgpu::ColorStateDescriptor {
-                // Specify the size of the color data in the buffer
-                // Bgra8UnormSrgb is specifically used since it is guaranteed to work on basically all browsers (32bit)
-                format: wgpu::TextureFormat::Bgra8UnormSrgb,
-                // Here is where you can do some fancy stuff for transitioning colors/brightness between frames. Replace defaults to taking all of the current frame and none of the next frame.
-                // This can be changed by specifying the modifier for either of the values from src/dest frames or changing the operation used to combine them(instead of addition maybe Max/Min)
-                color_blend: wgpu::BlendDescriptor::REPLACE,
-                alpha_blend: wgpu::BlendDescriptor::REPLACE,
-                // We can adjust the mask to only include certain colors if we want to
-                write_mask: wgpu::ColorWrite::ALL,
-            }],
-        },
- */
+               color_states: match pipe_type {
+                   PipelineType::Stencil => &[],
+                   PipelineType::ColorWithStencil | PipelineType::Color => &[wgpu::ColorStateDescriptor {
+                       // Specify the size of the color data in the buffer
+                       // Bgra8UnormSrgb is specifically used since it is guaranteed to work on basically all browsers (32bit)
+                       format: wgpu::TextureFormat::Bgra8UnormSrgb,
+                       // Here is where you can do some fancy stuff for transitioning colors/brightness between frames. Replace defaults to taking all of the current frame and none of the next frame.
+                       // This can be changed by specifying the modifier for either of the values from src/dest frames or changing the operation used to combine them(instead of addition maybe Max/Min)
+                       color_blend: wgpu::BlendDescriptor::REPLACE,
+                       alpha_blend: wgpu::BlendDescriptor::REPLACE,
+                       // We can adjust the mask to only include certain colors if we want to
+                       write_mask: wgpu::ColorWrite::ALL,
+                   }],
+               },
+        */
         // We can add an optional stencil descriptor which allows for effects that you would see in Microsoft Powerpoint like fading/swiping to the next slide
-        depth_stencil: match pipe_type {
+        depth_stencil: args.depth_stencil_state,
+
+        /* match pipe_type {
             // The first two cases are from the shadow example for the shadow pass and forward pass.
             // The last type is for typical graphics programs with no stencil
             PipelineType::Stencil => Some(wgpu::DepthStencilState {
@@ -467,11 +513,11 @@ pub async fn graphics_compile(
                 depth_compare: wgpu::CompareFunction::LessEqual,
                 stencil: wgpu::StencilState::default(),
                 bias: wgpu::DepthBiasState {
-                    constant:2,
+                    constant: 2,
                     slope_scale: 2.0,
-                    clamp: 0.0
+                    clamp: 0.0,
                 },
-                clamp_depth: device.features().contains(wgpu::Features::DEPTH_CLAMPING)
+                clamp_depth: device.features().contains(wgpu::Features::DEPTH_CLAMPING),
             }),
             PipelineType::ColorWithStencil => Some(wgpu::DepthStencilState {
                 format: wgpu::TextureFormat::Depth32Float,
@@ -482,8 +528,8 @@ pub async fn graphics_compile(
                 clamp_depth: false,
             }),
             PipelineType::Color => None,
-        },
-        multisample: wgpu::MultisampleState::default()
+        }, */
+        multisample: args.multisample_state,
     });
 
     GraphicsProgram {
@@ -588,12 +634,18 @@ pub fn graphics_pipe(
     graphics_run(program, rpass, bind_group, &in_bindings, out_bindings);
 } */
 
-pub fn setup_render_pass<'a>(
+pub fn setup_render_pass<'a, 'b>(
     program: &'a GraphicsProgram,
     encoder: &'a mut wgpu::CommandEncoder,
-    frame: &'a wgpu::SwapChainTexture,
+    desc: wgpu::RenderPassDescriptor<'a, 'b>,
 ) -> wgpu::RenderPass<'a> {
-    let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+    let mut rpass = encoder.begin_render_pass(&desc);
+    rpass.set_pipeline(&program.pipeline);
+    rpass
+}
+
+/*
+wgpu::RenderPassDescriptor {
         label: None,
         color_attachments: &[wgpu::RenderPassColorAttachmentDescriptor {
             attachment: &frame.view,
@@ -604,19 +656,12 @@ pub fn setup_render_pass<'a>(
             },
         }],
         depth_stencil_attachment: None,
-    });
+    }
+*/
 
-    rpass.set_pipeline(&program.pipeline);
-    rpass
-}
-
-pub fn setup_render_pass_depth<'a>(
-    program: &'a GraphicsProgram,
-    encoder: &'a mut wgpu::CommandEncoder,
-    texture: &'a wgpu::TextureView,
-) -> wgpu::RenderPass<'a> {
-    let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-        label : None,
+/*
+wgpu::RenderPassDescriptor {
+        label: None,
         // color_attachments is literally where we draw the colors to
         color_attachments: &[],
         depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachmentDescriptor {
@@ -627,19 +672,11 @@ pub fn setup_render_pass_depth<'a>(
             }),
             stencil_ops: None,
         }),
-    });
+    }
+*/
 
-    rpass.set_pipeline(&program.pipeline);
-    rpass
-}
-
-pub fn setup_render_pass_color_depth<'a>(
-    program: &'a GraphicsProgram,
-    encoder: &'a mut wgpu::CommandEncoder,
-    frame: &'a wgpu::SwapChainTexture,
-    texture: &'a wgpu::TextureView,
-) -> wgpu::RenderPass<'a> {
-    let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+/*
+wgpu::RenderPassDescriptor {
         label: None,
         // color_attachments is literally where we draw the colors to
         color_attachments: &[wgpu::RenderPassColorAttachmentDescriptor {
@@ -663,11 +700,8 @@ pub fn setup_render_pass_color_depth<'a>(
             }),
             stencil_ops: None,
         }),
-    });
-
-    rpass.set_pipeline(&program.pipeline);
-    rpass
-}
+    }
+*/
 
 #[derive(Debug)]
 pub struct GraphicsShader {
@@ -713,7 +747,7 @@ macro_rules! graphics_shader {
 
 #[macro_export]
 macro_rules! compile_valid_graphics_program {
-    ($device:tt, $context:tt, $vertex:tt, $fragment:tt, $pipe_type:path) => {{
+    ($device:tt, $context:tt, $vertex:tt, $fragment:tt, $args:expr) => {{
         let mut compile_buffer: [wgpu::VertexAttribute; 32] =
             pipeline::wgpu_graphics_header::compile_buffer();
 
@@ -725,7 +759,7 @@ macro_rules! compile_valid_graphics_program {
             $context.get_layout(&$device),
             &$vertex,
             &$fragment,
-            $pipe_type,
+            $args,
         )
         .await;
         (x, compile_buffer)
@@ -734,17 +768,20 @@ macro_rules! compile_valid_graphics_program {
 
 #[macro_export]
 macro_rules! compile_valid_stencil_program {
-    ($device:tt, $vertex:tt, $fragment:tt, $pipe_type:path) => {{
-        let mut compile_buffer: [wgpu::VertexAttributeDescriptor; 32] =
+    ($device:tt, $context:tt, $vertex:tt, $fragment:tt, $args:expr) => {{
+        let mut compile_buffer: [wgpu::VertexAttribute; 32] =
             pipeline::wgpu_graphics_header::compile_buffer();
 
         const _: () = pipeline::wgpu_graphics_header::valid_vertex_shader(&$vertex);
+        //todo maybe some validation for a fragment stencil shader?
+        //todo make sure these are running at compile time
         let x = pipeline::wgpu_graphics_header::graphics_compile(
             &mut compile_buffer,
             &$device,
+            $context.get_layout(&$device),
             &$vertex,
             &$fragment,
-            $pipe_type,
+            $args,
         )
         .await;
         (x, compile_buffer)

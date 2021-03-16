@@ -4,6 +4,7 @@ extern crate pipeline;
 
 #[macro_use]
 extern crate eager;
+use std::rc::Rc;
 
 use winit::{
     event::{Event, WindowEvent},
@@ -12,13 +13,14 @@ use winit::{
 };
 
 pub use pipeline::wgpu_graphics_header::{
-    generate_swap_chain, graphics_run_indices, setup_render_pass, GraphicsShader, PipelineType,
+    generate_swap_chain, graphics_run_indices, setup_render_pass, GraphicsCompileArgs,
+    GraphicsShader,
 };
 
 pub use wgpu_macros::generic_bindings;
 
 use crate::pipeline::AbstractBind;
-pub use pipeline::bind::{BindGroup2, Indices, Vertex};
+pub use pipeline::bind::{BindGroup2, Indices, SamplerData, TextureData, Vertex};
 
 pub use pipeline::helper::{
     create_texels, generate_projection_matrix, generate_view_matrix, load_cube,
@@ -31,7 +33,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     let surface = unsafe { instance.create_surface(&window) };
     let adapter = instance
         .request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::Default,
+            power_preference: wgpu::PowerPreference::default(),
             // Request an adapter which can render to our surface
             compatible_surface: Some(&surface),
         })
@@ -43,9 +45,9 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     let (device, queue) = adapter
         .request_device(
             &wgpu::DeviceDescriptor {
+                label: None,
                 features: wgpu::Features::empty(),
                 limits: wgpu::Limits::default(),
-                shader_validation: true,
             },
             None,
         )
@@ -88,7 +90,10 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 
     eager_binding! {context = vertex!(), fragment!()};
 
-    let (program, _) = compile_valid_graphics_program!(device, S_V, S_F, PipelineType::Color);
+    let (program, _) =
+        compile_valid_graphics_program!(device, context, S_V, S_F, GraphicsCompileArgs::default());
+
+    let queue = Rc::new(queue);
 
     let (positions, _, index_data) = load_cube();
     let texture_coordinates: Vec<[f32; 2]> = vec![
@@ -126,8 +131,43 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     let proj_mat = generate_projection_matrix(size.width as f32 / size.height as f32);
     let bind_group_view_proj = BindGroup2::new(&device, &view_mat, &proj_mat);
 
+    let sampler = SamplerData::new(wgpu::SamplerDescriptor {
+        label: Some("sampler"),
+        address_mode_u: wgpu::AddressMode::ClampToEdge,
+        address_mode_v: wgpu::AddressMode::ClampToEdge,
+        address_mode_w: wgpu::AddressMode::ClampToEdge,
+        mag_filter: wgpu::FilterMode::Nearest,
+        min_filter: wgpu::FilterMode::Linear,
+        mipmap_filter: wgpu::FilterMode::Nearest,
+        lod_min_clamp: -100.0,
+        lod_max_clamp: 100.0,
+        ..Default::default()
+    });
+
+    let tex_size = 256u32;
+    let texture = TextureData::new(
+        create_texels(tex_size as usize),
+        wgpu::TextureDescriptor {
+            size: wgpu::Extent3d {
+                width: tex_size,
+                height: tex_size,
+                depth: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsage::SAMPLED | wgpu::TextureUsage::COPY_DST,
+            label: None,
+        },
+        wgpu::TextureViewDescriptor::default(),
+        queue.clone(),
+    );
+
+    let bind_group_t_s_map = BindGroup2::new(&device, &texture, &sampler);
+
     // A "chain" of buffers that we render on to the display
-    let mut swap_chain = generate_swap_chain(&surface, &window, &device);
+    let swap_chain = generate_swap_chain(&surface, &window, &device);
 
     event_loop.run(move |event, _, control_flow: &mut ControlFlow| {
         *control_flow = ControlFlow::Poll;
@@ -135,88 +175,31 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
             // Everything that can be processed has been so we can now redraw the image on our window
             Event::MainEventsCleared => window.request_redraw(),
             Event::RedrawRequested(_) => {
-                let mut init_encoder = program
-                    .device
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+                let mut init_encoder =
+                    device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
-                let mut frame = swap_chain
+                let frame = swap_chain
                     .get_current_frame()
                     .expect("Timeout when acquiring next swap chain texture")
                     .output;
 
-                let multisampled_texture_extent = wgpu::Extent3d {
-                    width: sc_desc.width,
-                    height: sc_desc.height,
-                    depth: 1,
-                };
-                let multisampled_frame_descriptor = &wgpu::TextureDescriptor {
-                    size: multisampled_texture_extent,
-                    array_layer_count: 1,
-                    mip_level_count: 1,
-                    sample_count: 4,
-                    dimension: wgpu::TextureDimension::D2,
-                    format: sc_desc.format,
-                    usage: wgpu::TextureUsage::OUTPUT_ATTACHMENT,
-                    label: None,
-                };
-
-                let mut multi_sampled_view = program
-                    .device
-                    .create_texture(multisampled_frame_descriptor)
-                    .create_default_view();
-
-                let sampler_desc = wgpu::SamplerDescriptor {
-                    label: Some("sampler"),
-                    address_mode_u: wgpu::AddressMode::ClampToEdge,
-                    address_mode_v: wgpu::AddressMode::ClampToEdge,
-                    address_mode_w: wgpu::AddressMode::ClampToEdge,
-                    mag_filter: wgpu::FilterMode::Nearest,
-                    min_filter: wgpu::FilterMode::Linear,
-                    mipmap_filter: wgpu::FilterMode::Nearest,
-                    lod_min_clamp: -100.0,
-                    lod_max_clamp: 100.0,
-                    compare: wgpu::CompareFunction::Undefined,
-                    ..Default::default()
-                };
-
-                let tex_size = 256u32;
-                let texels = create_texels(tex_size as usize);
-                let texture_extent = wgpu::Extent3d {
-                    width: tex_size,
-                    height: tex_size,
-                    depth: 1,
-                };
-                let texture = program.device.create_texture(&wgpu::TextureDescriptor {
-                    size: texture_extent,
-                    array_layer_count: 1,
-                    mip_level_count: 1,
-                    sample_count: 1,
-                    dimension: wgpu::TextureDimension::D2,
-                    format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                    usage: wgpu::TextureUsage::SAMPLED | wgpu::TextureUsage::COPY_DST,
-                    label: None,
-                });
-                let texture_view = texture.create_default_view();
-                let temp_buf = program
-                    .device
-                    .create_buffer_with_data(texels.as_slice(), wgpu::BufferUsage::COPY_SRC);
-                init_encoder.copy_buffer_to_texture(
-                    wgpu::BufferCopyView {
-                        buffer: &temp_buf,
-                        offset: 0,
-                        bytes_per_row: 4 * tex_size,
-                        rows_per_image: 0,
-                    },
-                    wgpu::TextureCopyView {
-                        texture: &texture,
-                        mip_level: 0,
-                        array_layer: 0,
-                        origin: wgpu::Origin3d::ZERO,
-                    },
-                    texture_extent,
-                );
                 {
-                    let mut rpass = setup_render_pass(&program, &mut init_encoder, &frame);
+                    let mut rpass = setup_render_pass(
+                        &program,
+                        &mut init_encoder,
+                        wgpu::RenderPassDescriptor {
+                            label: None,
+                            color_attachments: &[wgpu::RenderPassColorAttachmentDescriptor {
+                                attachment: &frame.view,
+                                resolve_target: None,
+                                ops: wgpu::Operations {
+                                    load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                                    store: true,
+                                },
+                            }],
+                            depth_stencil_attachment: None,
+                        },
+                    );
 
                     let context1 = (&context).set_a_Pos(&mut rpass, &vertex_position);
 
@@ -228,7 +211,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 
                             {
                                 let context4 =
-                                    context3.set_t_Color_s_Color(&mut rpass, &texture_buffer);
+                                    context3.set_t_Color_s_Color(&mut rpass, &bind_group_t_s_map);
 
                                 {
                                     let _ = context4
@@ -238,7 +221,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                         }
                     }
                 }
-                queue.submit(&[init_encoder.finish()]);
+                queue.submit(Some(init_encoder.finish()));
             }
             // When the window closes we are done. Change the status
             Event::WindowEvent {

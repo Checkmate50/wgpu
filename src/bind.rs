@@ -1,5 +1,7 @@
 use crate::shared::{GLSLTYPE, QUALIFIER};
+use core::panic;
 use std::marker::PhantomData;
+use wgpu_macros::create_get_view_func;
 use zerocopy::AsBytes as _;
 
 use std::rc::Rc;
@@ -18,7 +20,14 @@ pub trait WgpuType {
 
 impl WgpuType for f32 {
     fn bind(&self, device: &wgpu::Device, qual: QUALIFIER) -> BoundData {
-        bind_helper(device, self.as_bytes(), 1, Some(qual))
+        bind_helper(
+            device,
+            self.as_bytes(),
+            1,
+            Self::size_of(),
+            Some(qual),
+            Self::create_binding_type(),
+        )
     }
     fn size_of() -> usize {
         std::mem::size_of::<f32>()
@@ -26,7 +35,7 @@ impl WgpuType for f32 {
     fn create_binding_type() -> wgpu::BindingType {
         wgpu::BindingType::Buffer {
             ty: wgpu::BufferBindingType::Uniform,
-                has_dynamic_offset: false,
+            has_dynamic_offset: false,
             min_binding_size: wgpu::BufferSize::new(Self::size_of() as u64),
         }
     }
@@ -38,7 +47,9 @@ impl WgpuType for Vec<u32> {
             device,
             self.as_slice().as_bytes(),
             self.len() as u64,
+            Self::size_of(),
             Some(qual),
+            Self::create_binding_type(),
         )
     }
     fn size_of() -> usize {
@@ -47,7 +58,7 @@ impl WgpuType for Vec<u32> {
     fn create_binding_type() -> wgpu::BindingType {
         wgpu::BindingType::Buffer {
             ty: wgpu::BufferBindingType::Uniform,
-                has_dynamic_offset: false,
+            has_dynamic_offset: false,
             min_binding_size: wgpu::BufferSize::new(Self::size_of() as u64),
         }
     }
@@ -59,7 +70,9 @@ impl WgpuType for Vec<f32> {
             device,
             self.as_slice().as_bytes(),
             self.len() as u64,
+            Self::size_of(),
             Some(qual),
+            Self::create_binding_type(),
         )
     }
     fn size_of() -> usize {
@@ -68,7 +81,7 @@ impl WgpuType for Vec<f32> {
     fn create_binding_type() -> wgpu::BindingType {
         wgpu::BindingType::Buffer {
             ty: wgpu::BufferBindingType::Uniform,
-                has_dynamic_offset: false,
+            has_dynamic_offset: false,
             min_binding_size: wgpu::BufferSize::new(Self::size_of() as u64),
         }
     }
@@ -86,7 +99,9 @@ impl WgpuType for Vec<[f32; 2]> {
             device,
             numbers.as_slice().as_bytes(),
             self.len() as u64,
+            Self::size_of(),
             Some(qual),
+            Self::create_binding_type(),
         )
     }
 
@@ -96,7 +111,7 @@ impl WgpuType for Vec<[f32; 2]> {
     fn create_binding_type() -> wgpu::BindingType {
         wgpu::BindingType::Buffer {
             ty: wgpu::BufferBindingType::Uniform,
-                has_dynamic_offset: false,
+            has_dynamic_offset: false,
             min_binding_size: wgpu::BufferSize::new(Self::size_of() as u64),
         }
     }
@@ -114,7 +129,9 @@ impl WgpuType for Vec<[f32; 3]> {
             device,
             numbers.as_slice().as_bytes(),
             self.len() as u64,
+            Self::size_of(),
             Some(qual),
+            Self::create_binding_type(),
         )
     }
 
@@ -124,7 +141,7 @@ impl WgpuType for Vec<[f32; 3]> {
     fn create_binding_type() -> wgpu::BindingType {
         wgpu::BindingType::Buffer {
             ty: wgpu::BufferBindingType::Uniform,
-                has_dynamic_offset: false,
+            has_dynamic_offset: false,
             min_binding_size: wgpu::BufferSize::new(Self::size_of() as u64),
         }
     }
@@ -142,7 +159,9 @@ impl WgpuType for Vec<[f32; 4]> {
             device,
             numbers.as_slice().as_bytes(),
             self.len() as u64,
+            Self::size_of(),
             Some(qual),
+            Self::create_binding_type(),
         )
     }
 
@@ -152,7 +171,7 @@ impl WgpuType for Vec<[f32; 4]> {
     fn create_binding_type() -> wgpu::BindingType {
         wgpu::BindingType::Buffer {
             ty: wgpu::BufferBindingType::Uniform,
-                has_dynamic_offset: false,
+            has_dynamic_offset: false,
             min_binding_size: wgpu::BufferSize::new(Self::size_of() as u64),
         }
     }
@@ -165,26 +184,62 @@ impl WgpuType for cgmath::Matrix4<f32> {
             device,
             bytemuck::cast_slice(mat_slice.as_bytes()),
             64,
+            Self::size_of(),
             Some(qual),
+            Self::create_binding_type(),
         )
     }
 
     fn size_of() -> usize {
         64
     }
+
     fn create_binding_type() -> wgpu::BindingType {
         wgpu::BindingType::Buffer {
             ty: wgpu::BufferBindingType::Uniform,
-                has_dynamic_offset: false,
+            has_dynamic_offset: false,
             min_binding_size: wgpu::BufferSize::new(Self::size_of() as u64),
         }
     }
 }
 
-impl WgpuType for wgpu::SamplerDescriptor<'_> {
+#[derive(PartialEq, Eq)]
+pub enum SamplerComparison {
+    True,
+    False,
+}
+
+#[derive(PartialEq, Eq)]
+pub enum SamplerFiltering {
+    True,
+    False,
+}
+
+pub struct SamplerData<'a, const COMPARABLE: SamplerComparison, const FILTERABLE: SamplerFiltering>
+{
+    desc: wgpu::SamplerDescriptor<'a>,
+}
+
+impl<'a, const COMPARABLE: SamplerComparison, const FILTERABLE: SamplerFiltering>
+    SamplerData<'a, COMPARABLE, FILTERABLE>
+{
+    pub fn new(desc: wgpu::SamplerDescriptor<'a>) -> Self {
+        if (desc.compare.is_some() && COMPARABLE == SamplerComparison::False)
+            || (desc.compare.is_none() && COMPARABLE == SamplerComparison::True)
+        {
+            panic!("The descriptor compare field does not match up with the type of this SamplerData struct")
+        };
+        SamplerData { desc }
+    }
+}
+
+impl<'a, const COMPARABLE: SamplerComparison, const FILTERABLE: SamplerFiltering> WgpuType
+    for SamplerData<'a, COMPARABLE, FILTERABLE>
+{
     fn bind(&self, device: &wgpu::Device, _: QUALIFIER) -> BoundData {
         BoundData::Sampler {
-            data: device.create_sampler(self),
+            data: device.create_sampler(&self.desc),
+            binding_type: Self::create_binding_type(),
         }
     }
     fn size_of() -> usize {
@@ -193,16 +248,83 @@ impl WgpuType for wgpu::SamplerDescriptor<'_> {
 
     fn create_binding_type() -> wgpu::BindingType {
         wgpu::BindingType::Sampler {
-            comparison: false,
-            filtering: true,
+            comparison: COMPARABLE == SamplerComparison::True,
+            filtering: FILTERABLE == SamplerFiltering::True,
         }
     }
 }
 
-impl WgpuType for wgpu::Texture {
-    fn bind(&self, _device: &wgpu::Device, _: QUALIFIER) -> BoundData {
+#[derive(PartialEq, Eq)]
+pub enum TextureMultisampled {
+    True,
+    False,
+}
+
+pub struct TextureData<
+    'a,
+    const MULTISAMPLE: TextureMultisampled,
+    const SAMPLETYPE: wgpu::TextureSampleType,
+    const VIEWDIMENSION: wgpu::TextureViewDimension,
+> {
+    data: Option<Vec<u8>>,
+    desc: wgpu::TextureDescriptor<'a>,
+    view_desc: wgpu::TextureViewDescriptor<'a>,
+    queue: Rc<wgpu::Queue>,
+}
+
+impl<
+        'a,
+        const MULTISAMPLE: TextureMultisampled,
+        const SAMPLETYPE: wgpu::TextureSampleType,
+        const VIEWDIMENSION: wgpu::TextureViewDimension,
+    > TextureData<'a, MULTISAMPLE, SAMPLETYPE, VIEWDIMENSION>
+{
+    pub fn new(
+        data: Vec<u8>,
+        desc: wgpu::TextureDescriptor<'a>,
+        view_desc: wgpu::TextureViewDescriptor<'a>,
+        queue: Rc<wgpu::Queue>,
+    ) -> Self {
+        //todo check the view dimension lines up
+        TextureData {
+            data: Some(data),
+            desc,
+            view_desc,
+            queue,
+        }
+    }
+    pub fn new_without_data(
+        desc: wgpu::TextureDescriptor<'a>,
+        view_desc: wgpu::TextureViewDescriptor<'a>,
+        queue: Rc<wgpu::Queue>,
+    ) -> Self {
+        //todo check the view dimension lines up
+        TextureData {
+            data: None,
+            desc,
+            view_desc,
+            queue,
+        }
+    }
+}
+
+impl<
+        'a,
+        const MULTISAMPLE: TextureMultisampled,
+        const SAMPLETYPE: wgpu::TextureSampleType,
+        const VIEWDIMENSION: wgpu::TextureViewDimension,
+    > WgpuType for TextureData<'a, MULTISAMPLE, SAMPLETYPE, VIEWDIMENSION>
+{
+    fn bind(&self, device: &wgpu::Device, _: QUALIFIER) -> BoundData {
+        let texture = match &self.data {
+            Some(data) => device.create_texture_with_data(&self.queue, &self.desc, data),
+            None => device.create_texture(&self.desc),
+        };
+        let view = texture.create_view(&self.view_desc);
         BoundData::Texture {
-            data: self.create_view(&wgpu::TextureViewDescriptor::default()),
+            data: texture,
+            view,
+            binding_type: Self::create_binding_type(),
         }
     }
     fn size_of() -> usize {
@@ -211,35 +333,49 @@ impl WgpuType for wgpu::Texture {
 
     fn create_binding_type() -> wgpu::BindingType {
         wgpu::BindingType::Texture {
-            multisampled: false,
-            sample_type: wgpu::TextureSampleType::Float { filterable: true },
-            view_dimension: wgpu::TextureViewDimension::D2,
+            multisampled: MULTISAMPLE == TextureMultisampled::True,
+            sample_type: SAMPLETYPE,
+            view_dimension: VIEWDIMENSION,
         }
     }
 }
 
 pub enum BoundData {
-    Buffer { data: wgpu::Buffer, len: u64 },
-    Texture { data: wgpu::TextureView },
-    Sampler { data: wgpu::Sampler },
+    Buffer {
+        data: wgpu::Buffer,
+        len: u64,
+        size: usize,
+        binding_type: wgpu::BindingType,
+    },
+    Texture {
+        data: wgpu::Texture,
+        view: wgpu::TextureView,
+        binding_type: wgpu::BindingType,
+    },
+    Sampler {
+        data: wgpu::Sampler,
+        binding_type: wgpu::BindingType,
+    },
 }
 
 impl BoundData {
-    pub fn get_buffer(self) -> (wgpu::Buffer, u64) {
+    pub fn get_buffer(self) -> (wgpu::Buffer, u64, usize) {
         match self {
-            BoundData::Buffer { data, len } => (data, len),
+            BoundData::Buffer {
+                data, len, size, ..
+            } => (data, len, size),
             _ => unreachable!(),
         }
     }
     pub fn get_texture(self) -> wgpu::TextureView {
         match self {
-            BoundData::Texture { data } => data,
+            BoundData::Texture { view, .. } => view,
             _ => unreachable!(),
         }
     }
     pub fn get_sampler(self) -> wgpu::Sampler {
         match self {
-            BoundData::Sampler { data } => (data),
+            BoundData::Sampler { data, .. } => (data),
             _ => unreachable!(),
         }
     }
@@ -248,6 +384,7 @@ impl BoundData {
 #[derive(Debug, Clone)]
 pub struct TextureBinding {
     pub binding_number: u32,
+    pub group_number: u32,
     pub name: String,
     pub data: Option<Rc<wgpu::TextureView>>,
     pub gtype: GLSLTYPE,
@@ -257,6 +394,7 @@ pub struct TextureBinding {
 #[derive(Debug, Clone)]
 pub struct SamplerBinding {
     pub binding_number: u32,
+    pub group_number: u32,
     pub name: String,
     pub data: Option<Rc<wgpu::Sampler>>,
     pub gtype: GLSLTYPE,
@@ -298,7 +436,9 @@ fn bind_helper(
     device: &wgpu::Device,
     data: &[u8],
     length: u64,
+    size: usize,
     qual: Option<QUALIFIER>,
+    binding_type: wgpu::BindingType,
 ) -> BoundData {
     let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: None,
@@ -319,6 +459,8 @@ fn bind_helper(
     BoundData::Buffer {
         data: buffer,
         len: length,
+        size,
+        binding_type,
     }
 }
 
@@ -340,19 +482,23 @@ impl<'a, A: WgpuType> Vertex<A> {
     }
 }
 
-fn create_bind_group(device: &wgpu::Device, buffers: Vec<(wgpu::Buffer, u64)>) -> wgpu::BindGroup {
+fn create_bind_group(device: &wgpu::Device, buffers: &Vec<BoundData>) -> wgpu::BindGroup {
     let bind_entry: Vec<_> = buffers
         .iter()
         .enumerate()
-        .map(|(i, buf)| wgpu::BindGroupLayoutEntry {
-            binding: i as u32,
-            visibility: wgpu::ShaderStage::VERTEX | wgpu::ShaderStage::FRAGMENT, // can check which stage
-            ty: wgpu::BindingType::Buffer {
-                ty: wgpu::BufferBindingType::Uniform,
-                has_dynamic_offset: false,
-                min_binding_size: wgpu::BufferSize::new(buf.1),
-            },
-            count: None,
+        .map(|(i, buf)| {
+            wgpu::BindGroupLayoutEntry {
+                binding: i as u32,
+                visibility: wgpu::ShaderStage::VERTEX | wgpu::ShaderStage::FRAGMENT, // can check which stage
+                ty: match buf {
+                    BoundData::Buffer { binding_type, .. } => *binding_type,
+                    //todo check that these are good
+                    BoundData::Texture { binding_type, .. } => *binding_type,
+                    BoundData::Sampler { binding_type, .. } => *binding_type,
+                },
+
+                count: None,
+            }
         })
         .collect();
 
@@ -366,7 +512,11 @@ fn create_bind_group(device: &wgpu::Device, buffers: Vec<(wgpu::Buffer, u64)>) -
         .enumerate()
         .map(|(i, buf)| wgpu::BindGroupEntry {
             binding: i as u32,
-            resource: buf.0.as_entire_binding(),
+            resource: match buf {
+                BoundData::Buffer { data, .. } => data.as_entire_binding(),
+                BoundData::Texture { view, .. } => wgpu::BindingResource::TextureView(&view),
+                BoundData::Sampler { data, .. } => wgpu::BindingResource::Sampler(data),
+            },
         })
         .collect();
     let bgd = &wgpu::BindGroupDescriptor {
@@ -380,6 +530,7 @@ fn create_bind_group(device: &wgpu::Device, buffers: Vec<(wgpu::Buffer, u64)>) -
 // todo generate with a macro
 pub struct BindGroup1<B: WgpuType> {
     typ1: PhantomData<B>,
+    data: Vec<BoundData>,
     bind_group: wgpu::BindGroup,
 }
 
@@ -406,11 +557,14 @@ impl<'a, B: WgpuType> BindGroup1<B> {
     }
 
     pub fn new(device: &wgpu::Device, data0: &B) -> Self {
-        let buffers = vec![data0.bind(device, QUALIFIER::UNIFORM).get_buffer()];
+        let data = vec![data0.bind(device, QUALIFIER::UNIFORM)];
+
+        let bind_group = create_bind_group(device, &data);
 
         BindGroup1 {
             typ1: PhantomData,
-            bind_group: create_bind_group(device, buffers),
+            data,
+            bind_group,
         }
     }
 }
@@ -418,7 +572,7 @@ impl<'a, B: WgpuType> BindGroup1<B> {
 pub struct BindGroup2<B: WgpuType, C: WgpuType> {
     typ1: PhantomData<B>,
     typ2: PhantomData<C>,
-
+    data: Vec<BoundData>,
     bind_group: wgpu::BindGroup,
 }
 
@@ -453,15 +607,18 @@ impl<'a, B: WgpuType, C: WgpuType> BindGroup2<B, C> {
     }
 
     pub fn new(device: &wgpu::Device, data0: &B, data1: &C) -> Self {
-        let buffers = vec![
-            data0.bind(device, QUALIFIER::UNIFORM).get_buffer(),
-            data1.bind(device, QUALIFIER::UNIFORM).get_buffer(),
+        let data = vec![
+            data0.bind(device, QUALIFIER::UNIFORM),
+            data1.bind(device, QUALIFIER::UNIFORM),
         ];
+
+        let bind_group = create_bind_group(device, &data);
 
         BindGroup2 {
             typ1: PhantomData,
             typ2: PhantomData,
-            bind_group: create_bind_group(device, buffers),
+            data,
+            bind_group,
         }
     }
 }
@@ -470,7 +627,7 @@ pub struct BindGroup3<B: WgpuType, C: WgpuType, D: WgpuType> {
     typ1: PhantomData<B>,
     typ2: PhantomData<C>,
     typ3: PhantomData<D>,
-
+    data: Vec<BoundData>,
     bind_group: wgpu::BindGroup,
 }
 
@@ -478,18 +635,75 @@ impl<'a, B: WgpuType, C: WgpuType, D: WgpuType> BindGroup3<B, C, D> {
     pub fn get_bind_group(&'a self) -> &'a wgpu::BindGroup {
         &self.bind_group
     }
-    pub fn new(device: &wgpu::Device, data0: &B, data1: &C, data2: &D) -> Self {
-        let buffers = vec![
-            data0.bind(device, QUALIFIER::UNIFORM).get_buffer(),
-            data1.bind(device, QUALIFIER::UNIFORM).get_buffer(),
-            data2.bind(device, QUALIFIER::UNIFORM).get_buffer(),
+
+    pub fn get_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+        let bind_entry_vec = vec![
+            wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStage::VERTEX | wgpu::ShaderStage::FRAGMENT, // TODO I've made uniforms visible to both stages even if they are only used in one. Find out if this is a bad thing
+                ty: B::create_binding_type(),
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 1,
+                visibility: wgpu::ShaderStage::VERTEX | wgpu::ShaderStage::FRAGMENT, // TODO I've made uniforms visible to both stages even if they are only used in one. Find out if this is a bad thing
+                ty: C::create_binding_type(),
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 2,
+                visibility: wgpu::ShaderStage::VERTEX | wgpu::ShaderStage::FRAGMENT, // TODO I've made uniforms visible to both stages even if they are only used in one. Find out if this is a bad thing
+                ty: D::create_binding_type(),
+                count: None,
+            },
         ];
+
+        debug!(bind_entry_vec);
+
+        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            // The layout of for each binding specify a number to connect with the bind_group, a visibility to specify for which stage it's for and a type
+            entries: &bind_entry_vec,
+            label: None,
+        })
+    }
+
+    /// Initializes data on the device and returns it as a group
+    pub fn new(device: &wgpu::Device, data0: &B, data1: &C, data2: &D) -> Self {
+        let data = vec![
+            data0.bind(device, QUALIFIER::UNIFORM),
+            data1.bind(device, QUALIFIER::UNIFORM),
+            data2.bind(device, QUALIFIER::UNIFORM),
+        ];
+
+        let bind_group = create_bind_group(device, &data);
 
         BindGroup3 {
             typ1: PhantomData,
             typ2: PhantomData,
             typ3: PhantomData,
-            bind_group: create_bind_group(device, buffers),
+            data,
+            bind_group,
         }
     }
 }
+
+/* impl<
+        'a,
+        const MULTISAMPLE: TextureMultisampled,
+        const SAMPLETYPE: wgpu::TextureSampleType,
+        const VIEWDIMENSION: wgpu::TextureViewDimension,
+        C: WgpuType,
+        D: WgpuType,
+    > BindGroup3<TextureData<'a, MULTISAMPLE, SAMPLETYPE, VIEWDIMENSION>, C, D>
+{
+    pub fn get_view_0(self, desc: &wgpu::TextureViewDescriptor) -> wgpu::TextureView {
+        match self.data.get(0).unwrap() {
+            BoundData::Texture { data, .. } => data.create_view(desc),
+            _ => panic!("not a texture"),
+        }
+    }
+} */
+
+create_get_view_func!(1);
+create_get_view_func!(2);
+create_get_view_func!(3);

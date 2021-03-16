@@ -12,7 +12,7 @@ use winit::{
 };
 
 pub use pipeline::wgpu_graphics_header::{
-    generate_swap_chain, graphics_run, setup_render_pass, GraphicsShader, PipelineType,
+    generate_swap_chain, graphics_run, setup_render_pass, GraphicsCompileArgs, GraphicsShader,
 };
 
 use crate::pipeline::AbstractBind;
@@ -79,7 +79,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     eager_binding! {context = vertex!(), fragment!()};
 
     let (program, _) =
-        compile_valid_graphics_program!(device, context, S_V, S_F, PipelineType::Color);
+        compile_valid_graphics_program!(device, context, S_V, S_F, GraphicsCompileArgs::default());
 
     let positions = vec![[0.0, 0.7, 0.0], [-0.5, 0.5, 0.0], [0.5, -0.5, 0.0]];
     let brightness = vec![0.5, 0.5, 0.9];
@@ -88,7 +88,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     let vertex_brightness = Vertex::new(&device, &brightness);
 
     // A "chain" of buffers that we render on to the display
-    let mut swap_chain = generate_swap_chain(&surface, &window, &device);
+    let swap_chain = generate_swap_chain(&surface, &window, &device);
 
     event_loop.run(move |event, _, control_flow: &mut ControlFlow| {
         *control_flow = ControlFlow::Poll;
@@ -104,7 +104,22 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                     .output;
 
                 {
-                    let mut rpass = setup_render_pass(&program, &mut init_encoder, &frame);
+                    let mut rpass = setup_render_pass(
+                        &program,
+                        &mut init_encoder,
+                        wgpu::RenderPassDescriptor {
+                            label: None,
+                            color_attachments: &[wgpu::RenderPassColorAttachmentDescriptor {
+                                attachment: &frame.view,
+                                resolve_target: None,
+                                ops: wgpu::Operations {
+                                    load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                                    store: true,
+                                },
+                            }],
+                            depth_stencil_attachment: None,
+                        },
+                    );
 
                     let context1 = (&context).set_a_position(&mut rpass, &vertex_position);
                     {

@@ -1,5 +1,10 @@
+#![recursion_limit = "1024"]
 #[macro_use]
 extern crate pipeline;
+
+#[macro_use]
+extern crate eager;
+use std::rc::Rc;
 
 use winit::{
     event::{Event, WindowEvent},
@@ -7,19 +12,13 @@ use winit::{
     window::Window,
 };
 
-pub use static_assertions::const_assert;
-
-pub use pipeline::wgpu_graphics_header;
 pub use pipeline::wgpu_graphics_header::{
-    compile_buffer, default_bind_group, generate_swap_chain, graphics_run_indices,
-    setup_render_pass, valid_fragment_shader, valid_vertex_shader, GraphicsBindings,
-    GraphicsShader, OutGraphicsBindings,
+    generate_swap_chain, graphics_run_indices, setup_render_pass, GraphicsCompileArgs,
+    GraphicsShader,
 };
 
-pub use pipeline::shared;
-pub use pipeline::shared::{
-    bind_fvec, bind_mat4, bind_vec3, is_gl_builtin, ready_to_run, update_bind_context, Bindings,
-};
+use crate::pipeline::AbstractBind;
+pub use pipeline::bind::{BindGroup1, BindGroup2, Indices, Vertex};
 
 pub use pipeline::helper::{
     generate_identity_matrix, generate_projection_matrix, generate_view_matrix, load_model,
@@ -29,11 +28,36 @@ pub use pipeline::helper::{
 async fn run(event_loop: EventLoop<()>, window: Window) {
     let size = window.inner_size();
 
-    const VERTEXT: (GraphicsShader, [&str; 32], [&str; 32]) = graphics_shader! {
+    let instance = wgpu::Instance::new(wgpu::BackendBit::PRIMARY);
+    let surface = unsafe { instance.create_surface(&window) };
+    let adapter = instance
+        .request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::default(),
+            // Request an adapter which can render to our surface
+            compatible_surface: Some(&surface),
+        })
+        .await
+        .expect("Failed to find an appropriate adapter");
+
+    // The device manages the connection and resources of the adapter
+    // The queue is a literal queue of tasks for the gpu
+    let (device, queue) = adapter
+        .request_device(
+            &wgpu::DeviceDescriptor {
+                label: None,
+                features: wgpu::Features::empty(),
+                limits: wgpu::Limits::default(),
+            },
+            None,
+        )
+        .await
+        .expect("Failed to create device");
+
+    my_shader! { vertex = {
         [[vertex in] vec3] a_position;
-        [[uniform in] mat4] u_view;
-        [[uniform in] mat4] u_proj;
-        [[uniform in] mat4] u_model;
+        [group1 [uniform in] mat4] u_view;
+        [group1 [uniform in] mat4] u_proj;
+        [group2 [uniform in] mat4] u_model;
 
         [[out] vec4] gl_Position;
         {{
@@ -41,45 +65,40 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                 gl_Position = u_proj * u_view * u_model * vec4( a_position, 1.0);
             }
         }}
-    };
+    }}
 
-    const FRAGMENT: (GraphicsShader, [&str; 32], [&str; 32]) = graphics_shader! {
+    my_shader! { fragment = {
         [[out] vec4] color;
         {{
             void main() {
                 color = vec4(1.0, 0.4, 0.25, 1.0);
             }
         }}
-    };
+    }}
 
-    const S_V: GraphicsShader = VERTEXT.0;
-    const STARTING_BIND_CONTEXT: [&str; 32] = VERTEXT.1;
-    const S_F: GraphicsShader = FRAGMENT.0;
+    const S_V: GraphicsShader = eager_graphics_shader! {vertex!()};
+    const S_F: GraphicsShader = eager_graphics_shader! {fragment!()};
 
-    let (program, template_bindings, template_out_bindings, _) =
-        compile_valid_graphics_program!(window, S_V, S_F);
+    eager_binding! {context = vertex!(), fragment!()};
 
-    let (positions, normals, indices) = load_model("src/models/teapot.obj");
+    let (program, _) =
+        compile_valid_graphics_program!(device, context, S_V, S_F, GraphicsCompileArgs::default());
 
-    /*     println!("{:?}", positions); */
+    let (position_data, _, index_data) = load_model("src/models/teapot.obj");
 
-    let mut view_mat = generate_view_matrix();
-    /* view_mat = translate(view_mat, 0.0, -1.0, 0.1); */
+    let positions = Vertex::new(&device, &position_data);
+    let indices = Indices::new(&device, &index_data);
 
-    /*     println!("{:?}", generate_view_matrix()); */
+    let view_mat = generate_view_matrix();
 
-    println!("View mat: {:?}", view_mat);
-
-    let mut proj_mat = generate_projection_matrix(size.width as f32 / size.height as f32);
-
-    /*     proj_mat = rotation_x(proj_mat, 34.0);
-    proj_mat = rotation_y(proj_mat, 3.0); */
+    let proj_mat = generate_projection_matrix(size.width as f32 / size.height as f32);
 
     let mut model_mat = generate_identity_matrix();
-    /*     model_mat = scale(model_mat, 0.5); */
+
+    let bind_group_view_proj = BindGroup2::new(&device, &view_mat, &proj_mat);
 
     // A "chain" of buffers that we render on to the display
-    let mut swap_chain = generate_swap_chain(&program, &window);
+    let swap_chain = generate_swap_chain(&surface, &window, &device);
 
     event_loop.run(move |event, _, control_flow: &mut ControlFlow| {
         *control_flow = ControlFlow::Poll;
@@ -87,78 +106,50 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
             // Everything that can be processed has been so we can now redraw the image on our window
             Event::MainEventsCleared => window.request_redraw(),
             Event::RedrawRequested(_) => {
-                let mut init_encoder = program
-                    .device
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-
                 let mut frame = swap_chain
-                    .get_next_texture()
-                    .expect("Timeout when acquiring next swap chain texture");
+                    .get_current_frame()
+                    .expect("Timeout when acquiring next swap chain texture")
+                    .output;
 
-                let mut rpass = setup_render_pass(&program, &mut init_encoder, &frame);
-                let mut bind_group = default_bind_group(&program);
-
-                let mut bindings: GraphicsBindings = template_bindings.clone();
-                let mut out_bindings: OutGraphicsBindings = template_out_bindings.clone();
+                let mut init_encoder =
+                    device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
                 model_mat = rotation_y(model_mat, 0.05);
+                let bind_group_model = BindGroup1::new(&device, &model_mat);
 
-                const BIND_CONTEXT_1: [&str; 32] =
-                    update_bind_context(&STARTING_BIND_CONTEXT, "a_position");
-                bind_vec3(
-                    &program,
-                    &mut bindings,
-                    &mut out_bindings,
-                    &positions,
-                    "a_position".to_string(),
-                );
                 {
-                    const BIND_CONTEXT_2: [&str; 32] =
-                        update_bind_context(&BIND_CONTEXT_1, "u_view");
-                    bind_mat4(
+                    let mut rpass = setup_render_pass(
                         &program,
-                        &mut bindings,
-                        &mut out_bindings,
-                        view_mat,
-                        "u_view".to_string(),
+                        &mut init_encoder,
+                        wgpu::RenderPassDescriptor {
+                            label: None,
+                            color_attachments: &[wgpu::RenderPassColorAttachmentDescriptor {
+                                attachment: &frame.view,
+                                resolve_target: None,
+                                ops: wgpu::Operations {
+                                    load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                                    store: true,
+                                },
+                            }],
+                            depth_stencil_attachment: None,
+                        },
                     );
+                    let context1 = (&context).set_a_position(&mut rpass, &positions);
+
                     {
+                        let context2 =
+                            (&context1).set_u_view_u_proj(&mut rpass, &bind_group_view_proj);
+
                         {
-                            const BIND_CONTEXT_3: [&str; 32] =
-                                update_bind_context(&BIND_CONTEXT_2, "u_proj");
-                            bind_mat4(
-                                &program,
-                                &mut bindings,
-                                &mut out_bindings,
-                                proj_mat,
-                                "u_proj".to_string(),
-                            );
+                            let context3 = (&context2).set_u_model(&mut rpass, &bind_group_model);
                             {
-                                const BIND_CONTEXT_4: [&str; 32] =
-                                    update_bind_context(&BIND_CONTEXT_3, "u_model");
-                                bind_mat4(
-                                    &program,
-                                    &mut bindings,
-                                    &mut out_bindings,
-                                    model_mat,
-                                    "u_model".to_string(),
-                                );
-                                {
-                                    ready_to_run(BIND_CONTEXT_4);
-                                    graphics_run_indices(
-                                        &program,
-                                        rpass,
-                                        &mut bind_group,
-                                        &mut bindings,
-                                        &out_bindings,
-                                        &indices,
-                                    );
-                                }
+                                let _ =
+                                    context3.runnable(|| graphics_run_indices(rpass, &indices, 1));
                             }
                         }
                     }
+                    queue.submit(Some(init_encoder.finish()));
                 }
-                program.queue.submit(&[init_encoder.finish()]);
             }
             // When the window closes we are done. Change the status
             Event::WindowEvent {

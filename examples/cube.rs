@@ -13,10 +13,11 @@ use winit::{
 };
 
 pub use pipeline::wgpu_graphics_header::{
-    generate_swap_chain, graphics_run_indices, setup_render_pass, GraphicsShader, PipelineType,
+    generate_swap_chain, graphics_run_indices, setup_render_pass, GraphicsCompileArgs,
+    GraphicsShader,
 };
 
-use crate::pipeline::AbstractBind;
+pub use pipeline::AbstractBind;
 pub use pipeline::bind::{BindGroup2, Indices, Vertex};
 
 pub use pipeline::helper::{generate_projection_matrix, generate_view_matrix, load_cube};
@@ -86,7 +87,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     eager_binding! {context = vertex!(), fragment!()};
 
     let (program, _) =
-        compile_valid_graphics_program!(device, context, S_V, S_F, PipelineType::Color);
+        compile_valid_graphics_program!(device, context, S_V, S_F, GraphicsCompileArgs::default());
 
     let (positions, _, index_data) = load_cube();
 
@@ -139,7 +140,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     let bind_group_view_proj = BindGroup2::new(&device, &view_mat, &proj_mat);
 
     // A "chain" of buffers that we render on to the display
-    let mut swap_chain = generate_swap_chain(&surface, &window, &device);
+    let swap_chain = generate_swap_chain(&surface, &window, &device);
 
     event_loop.run(move |event, _, control_flow: &mut ControlFlow| {
         *control_flow = ControlFlow::Poll;
@@ -154,7 +155,22 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                     .expect("Timeout when acquiring next swap chain texture")
                     .output;
                 {
-                    let mut rpass = setup_render_pass(&program, &mut init_encoder, &frame);
+                    let mut rpass = setup_render_pass(
+                        &program,
+                        &mut init_encoder,
+                        wgpu::RenderPassDescriptor {
+                            label: None,
+                            color_attachments: &[wgpu::RenderPassColorAttachmentDescriptor {
+                                attachment: &frame.view,
+                                resolve_target: None,
+                                ops: wgpu::Operations {
+                                    load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                                    store: true,
+                                },
+                            }],
+                            depth_stencil_attachment: None,
+                        },
+                    );
 
                     //
                     // Handle the setup for the pipeline

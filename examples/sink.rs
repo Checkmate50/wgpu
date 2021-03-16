@@ -1,6 +1,10 @@
 // Everything but the kitchen sink
+#![recursion_limit = "1024"]
 #[macro_use]
 extern crate pipeline;
+
+#[macro_use]
+extern crate eager;
 
 use winit::{
     event::{Event, WindowEvent},
@@ -8,37 +12,60 @@ use winit::{
     window::Window,
 };
 
-pub use static_assertions::const_assert;
-
-pub use pipeline::wgpu_graphics_header;
 pub use pipeline::wgpu_graphics_header::{
-    bind_sampler, bind_texture, compile_buffer, default_bind_group, generate_swap_chain,
-    graphics_starting_context, setup_render_pass, valid_fragment_shader, valid_vertex_shader,
-    GraphicsBindings, GraphicsShader, OutGraphicsBindings,
+    generate_swap_chain, graphics_run_indices, setup_render_pass, GraphicsCompileArgs,
+    GraphicsShader,
 };
 
-pub use pipeline::shared;
-pub use pipeline::shared::{
-    bind_fvec, bind_mat4, bind_vec2, bind_vec3, is_gl_builtin, ready_to_run, update_bind_context,
-    Bindings,
-};
+pub use pipeline::bind::{BindGroup1, BindGroup2, Indices, SamplerData, TextureData, Vertex};
+pub use pipeline::AbstractBind;
 
 pub use pipeline::helper::{
     create_texels, generate_identity_matrix, generate_projection_matrix, generate_view_matrix,
-    load_cube, load_model, rotation_x, rotation_y, rotation_z, translate,
+    load_cube, load_model, rotate_vec3, rotation_x, rotation_y, rotation_z, translate,
 };
 
 async fn run(event_loop: EventLoop<()>, window: Window) {
     let size = window.inner_size();
 
-    const VERTEXT: (GraphicsShader, [&str; 32], [&str; 32]) = graphics_shader! {
+    let instance = wgpu::Instance::new(wgpu::BackendBit::PRIMARY);
+    let surface = unsafe { instance.create_surface(&window) };
+    let adapter = instance
+        .request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::default(),
+            // Request an adapter which can render to our surface
+            compatible_surface: Some(&surface),
+        })
+        .await
+        .expect("Failed to find an appropriate adapter");
+
+    // The device manages the connection and resources of the adapter
+    // The queue is a literal queue of tasks for the gpu
+    let (device, queue) = adapter
+        .request_device(
+            &wgpu::DeviceDescriptor {
+                label: None,
+                features: wgpu::Features::empty(),
+                limits: wgpu::Limits {
+                    max_bind_groups: 5,
+                    ..Default::default()
+                },
+            },
+            None,
+        )
+        .await
+        .expect("Failed to create device");
+
+    let queue = std::rc::Rc::new(queue);
+
+    my_shader! {VERTEX = {
         [[vertex in] vec3] a_position;
         [[vertex in] vec3] a_normal;
-        [[uniform in] vec3] Ambient;
-        [[uniform in] vec3] LightDirection;
-        [[uniform in] mat4] u_view;
-        [[uniform in] mat4] u_proj;
-        [[uniform in] mat4] u_model;
+        [group1 [uniform in] vec3] Ambient;
+        [group2 [uniform in] vec3] LightDirection;
+        [group3 [uniform in] mat4] u_view;
+        [group3 [uniform in] mat4] u_proj;
+        [group4 [uniform in] mat4] u_model;
 
         [[out] vec3] fragmentNormal;
         [[out] vec4] gl_Position;
@@ -52,12 +79,12 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                 gl_Position = u_proj * u_view * u_model * vec4(0.7 * a_position, 1.0);
             }
         }}
-    };
+    }}
 
-    const FRAGMENT: (GraphicsShader, [&str; 32], [&str; 32]) = graphics_shader! {
+    my_shader! { FRAGMENT = {
         [[in] vec3] fragmentNormal;
-        [[uniform in] vec3] Ambient;
-        [[uniform in] vec3] LightDirection;
+        [group1 [uniform in] vec3] Ambient;
+        [group2 [uniform in] vec3] LightDirection;
         [[out] vec4] color;
         {{
             void main() {
@@ -65,19 +92,19 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                 color = vec4(Ambient + fragColor * max(dot(normalize(fragmentNormal), normalize(LightDirection)), 0.0), 1.0);
             }
         }}
-    };
+    }}
 
-    const S_V: GraphicsShader = VERTEXT.0;
-    const STARTING_BIND_CONTEXT: [&str; 32] = VERTEXT.1;
-    const S_F: GraphicsShader = FRAGMENT.0;
+    const S_V: GraphicsShader = eager_graphics_shader! {VERTEX!()};
+    const S_F: GraphicsShader = eager_graphics_shader! {FRAGMENT!()};
+    eager_binding! {context = VERTEX!(), FRAGMENT!()};
 
-    let (program, template_bindings, template_out_bindings, _) =
-        compile_valid_graphics_program!(window, S_V, S_F);
+    let (program, _) =
+        compile_valid_graphics_program!(device, context, S_V, S_F, GraphicsCompileArgs::default());
 
-    const VERTEXT_CUBE: (GraphicsShader, [&str; 32], [&str; 32]) = graphics_shader! {
+    my_shader! { VERTEX_CUBE = {
         [[vertex in] vec3] a_Pos;
         [[vertex in] vec2] a_TexCoord;
-        [[uniform in] mat4] u_Transform;
+        [group1 [uniform in] mat4] u_Transform;
 
         [[out] vec2] v_TexCoord;
         [[out] vec4] gl_Position;
@@ -87,13 +114,13 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                 gl_Position = u_Transform * vec4(a_Pos, 1.0);
             }
         }}
-    };
+    }}
 
-    const FRAGMENT_CUBE: (GraphicsShader, [&str; 32], [&str; 32]) = graphics_shader! {
+    my_shader! { FRAGMENT_CUBE = {
         [[in] vec2] v_TexCoord;
         [[out] vec4] color;
-        [[uniform in] texture2D] t_Color;
-        [[uniform in] sampler] s_Color;
+        [group2 [uniform in] texture2D] t_Color;
+        [group2 [uniform in] sampler] s_Color;
         {{
             void main() {
                 vec4 tex = texture(sampler2D(t_Color, s_Color), v_TexCoord);
@@ -101,22 +128,34 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                 color = mix(tex, vec4(0.0), mag*mag);
             }
         }}
-    };
+    }}
 
-    const S_V_CUBE: GraphicsShader = VERTEXT_CUBE.0;
-    const VERTEXT_STARTING_BIND_CONTEXT_CUBE: [&str; 32] = VERTEXT_CUBE.1;
-    const S_F_CUBE: GraphicsShader = FRAGMENT_CUBE.0;
-    const STARTING_BIND_CONTEXT_CUBE: [&str; 32] =
-        graphics_starting_context(VERTEXT_STARTING_BIND_CONTEXT_CUBE, S_F_CUBE);
+    const S_V_CUBE: GraphicsShader = eager_graphics_shader! {VERTEX_CUBE!()};
+    const S_F_CUBE: GraphicsShader = eager_graphics_shader! {FRAGMENT_CUBE!()};
+    eager_binding! {context_cube = VERTEX_CUBE!(), FRAGMENT_CUBE!()};
 
-    let (program_CUBE, template_bindings_CUBE, template_out_bindings_CUBE, _) =
-        compile_valid_graphics_program!(window, S_V_CUBE, S_F_CUBE);
+    let (program_CUBE, _) = compile_valid_graphics_program!(
+        device,
+        context_cube,
+        S_V_CUBE,
+        S_F_CUBE,
+        GraphicsCompileArgs::default()
+    );
 
-    let (positions, normals, indices) = load_model("src/models/teapot.obj");
+    let (positions_data, normals_data, indices_data) = load_model("src/models/teapot.obj");
+    let positions = Vertex::new(&device, &positions_data);
+    let normals = Vertex::new(&device, &normals_data);
+    let indices = Indices::new(&device, &indices_data);
 
-    let (positions2, normals2, indices2) = load_model("src/models/caiman.obj");
+    let (positions2_data, normals2_data, indices2_data) = load_model("src/models/caiman.obj");
+    let positions2 = Vertex::new(&device, &positions2_data);
+    let normals2 = Vertex::new(&device, &normals_data);
+    let indices2 = Indices::new(&device, &indices2_data);
 
-    let (positions_cube, normals_cube, index_data_cube) = load_cube();
+    let (positions_cube_data, normals_cube_data, index_cube_data) = load_cube();
+    let positions_cube = Vertex::new(&device, &positions_cube_data);
+    let normals_cube = Vertex::new(&device, &normals_cube_data);
+    let index_cube = Indices::new(&device, &index_cube_data);
 
     let texture_coordinates_cube: Vec<[f32; 2]> = vec![
         [0.0, 0.0],
@@ -144,26 +183,67 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         [1.0, 1.0],
         [0.0, 1.0],
     ];
+    let texture_coords = Vertex::new(&device, &texture_coordinates_cube);
 
     let mut light_direction = vec![[20.0, 0.0, 0.0]];
 
-    let light_ambient = vec![[0.1, 0.0, 0.0]];
+    let light_ambient_data = vec![[0.1, 0.0, 0.0]];
+    let light_ambient = BindGroup1::new(&device, &light_ambient_data);
 
     let view_mat = generate_view_matrix();
 
     let proj_mat = generate_projection_matrix(size.width as f32 / size.height as f32);
 
-    let mut model_mat = generate_identity_matrix();
+    let bg_view_proj = BindGroup2::new(&device, &view_mat, &proj_mat);
 
-    let mut model_mat2 = rotation_x(translate(model_mat, 0.5, -3.0, 2.0), 2.0);
+    let mut model_mat_data = generate_identity_matrix();
 
-    let mut model_mat3 = translate(model_mat, 0.5, 0.0, -0.5);
+    let model_mat2_data = rotation_x(translate(model_mat_data, 0.5, -3.0, 2.0), 2.0);
+    let model_mat2 = BindGroup1::new(&device, &model_mat2_data);
+
+    let model_mat3_data = translate(model_mat_data, 0.5, 0.0, -0.5);
+    let model_mat3 = BindGroup1::new(&device, &model_mat3_data);
 
     // rust is going the reverse of the order we want for matrix multiplication
-    let trans_mat = model_mat3 * proj_mat * view_mat;
+    let trans_mat_data = model_mat3_data * proj_mat * view_mat;
+    let trans_mat = BindGroup1::new(&device, &trans_mat_data);
+
+    let sampler = SamplerData::new(wgpu::SamplerDescriptor {
+        address_mode_u: wgpu::AddressMode::ClampToEdge,
+        address_mode_v: wgpu::AddressMode::ClampToEdge,
+        address_mode_w: wgpu::AddressMode::ClampToEdge,
+        mag_filter: wgpu::FilterMode::Nearest,
+        min_filter: wgpu::FilterMode::Linear,
+        mipmap_filter: wgpu::FilterMode::Nearest,
+        lod_min_clamp: -100.0,
+        lod_max_clamp: 100.0,
+        compare: None,
+        ..Default::default()
+    });
+
+    let texture = TextureData::new(
+        create_texels(256u32 as usize),
+        wgpu::TextureDescriptor {
+            size: wgpu::Extent3d {
+                width: 256u32,
+                height: 256u32,
+                depth: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsage::SAMPLED | wgpu::TextureUsage::COPY_DST,
+            label: None,
+        },
+        wgpu::TextureViewDescriptor::default(),
+        queue.clone()
+    );
+
+    let bind_group_t_s = BindGroup2::new(&device, &texture, &sampler);
 
     // A "chain" of buffers that we render on to the display
-    let mut swap_chain = generate_swap_chain(&program, &window);
+    let swap_chain = generate_swap_chain(&surface, &window, &device);
 
     event_loop.run(move |event, _, control_flow: &mut ControlFlow| {
         *control_flow = ControlFlow::Poll;
@@ -171,355 +251,117 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
             // Everything that can be processed has been so we can now redraw the image on our window
             Event::MainEventsCleared => window.request_redraw(),
             Event::RedrawRequested(_) => {
-                let mut init_encoder = program
-                    .device
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+                let mut init_encoder =
+                    device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
-                let mut frame = swap_chain
-                    .get_next_texture()
-                    .expect("Timeout when acquiring next swap chain texture");
+                let frame = swap_chain
+                    .get_current_frame()
+                    .expect("Timeout when acquiring next swap chain texture")
+                    .output;
 
-                let mut bind_group = default_bind_group(&program);
-                let mut bindings: GraphicsBindings = template_bindings.clone();
-                let mut out_bindings: OutGraphicsBindings = template_out_bindings.clone();
-
-                let mut bind_group2 = default_bind_group(&program);
-                let mut bindings2: GraphicsBindings = template_bindings.clone();
-                let mut out_bindings2: OutGraphicsBindings = template_out_bindings.clone();
-
-                let mut bind_group3 = default_bind_group(&program_CUBE);
-                let mut bindings3: GraphicsBindings = template_bindings_CUBE.clone();
-                let mut out_bindings3: OutGraphicsBindings = template_out_bindings_CUBE.clone();
-
-                let sc_desc = wgpu::SwapChainDescriptor {
-                    usage: wgpu::TextureUsage::OUTPUT_ATTACHMENT,
-                    format: wgpu::TextureFormat::Bgra8UnormSrgb,
-                    // Window dimensions
-                    width: size.width,
-                    height: size.height,
-                    // Only update during the "vertical blanking interval"
-                    // As opposed to Immediate where it is possible to see visual tearing(where multiple frames are visible at once)
-                    present_mode: wgpu::PresentMode::Mailbox,
-                };
-
-                let multisampled_texture_extent = wgpu::Extent3d {
-                    width: sc_desc.width,
-                    height: sc_desc.height,
-                    depth: 1,
-                };
-                let multisampled_frame_descriptor = &wgpu::TextureDescriptor {
-                    size: multisampled_texture_extent,
-                    array_layer_count: 1,
-                    mip_level_count: 1,
-                    sample_count: 4,
-                    dimension: wgpu::TextureDimension::D2,
-                    format: sc_desc.format,
-                    usage: wgpu::TextureUsage::OUTPUT_ATTACHMENT,
-                    label: None,
-                };
-
-                let mut multi_sampled_view = program
-                    .device
-                    .create_texture(multisampled_frame_descriptor)
-                    .create_default_view();
-
-                let sampler = program.device.create_sampler(&wgpu::SamplerDescriptor {
-                    address_mode_u: wgpu::AddressMode::ClampToEdge,
-                    address_mode_v: wgpu::AddressMode::ClampToEdge,
-                    address_mode_w: wgpu::AddressMode::ClampToEdge,
-                    mag_filter: wgpu::FilterMode::Nearest,
-                    min_filter: wgpu::FilterMode::Linear,
-                    mipmap_filter: wgpu::FilterMode::Nearest,
-                    lod_min_clamp: -100.0,
-                    lod_max_clamp: 100.0,
-                    compare: wgpu::CompareFunction::Undefined,
-                });
-
-                let tex_size = 256u32;
-                let texels = create_texels(tex_size as usize);
-                let texture_extent = wgpu::Extent3d {
-                    width: tex_size,
-                    height: tex_size,
-                    depth: 1,
-                };
-                let texture = program.device.create_texture(&wgpu::TextureDescriptor {
-                    size: texture_extent,
-                    array_layer_count: 1,
-                    mip_level_count: 1,
-                    sample_count: 1,
-                    dimension: wgpu::TextureDimension::D2,
-                    format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                    usage: wgpu::TextureUsage::SAMPLED | wgpu::TextureUsage::COPY_DST,
-                    label: None,
-                });
-                let texture_view = texture.create_default_view();
-                let temp_buf = program
-                    .device
-                    .create_buffer_with_data(texels.as_slice(), wgpu::BufferUsage::COPY_SRC);
-                init_encoder.copy_buffer_to_texture(
-                    wgpu::BufferCopyView {
-                        buffer: &temp_buf,
-                        offset: 0,
-                        bytes_per_row: 4 * tex_size,
-                        rows_per_image: 0,
-                    },
-                    wgpu::TextureCopyView {
-                        texture: &texture,
-                        mip_level: 0,
-                        array_layer: 0,
-                        origin: wgpu::Origin3d::ZERO,
-                    },
-                    texture_extent,
-                );
-
-                let mut rpass = setup_render_pass(&program, &mut init_encoder, &frame);
-
-                model_mat = rotation_y(model_mat, 0.05);
+                model_mat_data = rotation_y(model_mat_data, 0.05);
+                let model_mat = BindGroup1::new(&device, &model_mat_data);
 
                 light_direction = rotate_vec3(&light_direction, 0.05);
+                let light_dir = BindGroup1::new(&device, &light_direction);
 
-                const BIND_CONTEXT_1: [&str; 32] =
-                    update_bind_context(&STARTING_BIND_CONTEXT, "u_view");
-                bind_mat4(
-                    &program,
-                    &mut bindings,
-                    &mut out_bindings,
-                    view_mat,
-                    "u_view".to_string(),
-                );
                 {
-                    const BIND_CONTEXT_2: [&str; 32] =
-                        update_bind_context(&BIND_CONTEXT_1, "a_normal");
-                    bind_vec3(
+                    let mut rpass = setup_render_pass(
                         &program,
-                        &mut bindings,
-                        &mut out_bindings,
-                        &normals,
-                        "a_normal".to_string(),
+                        &mut init_encoder,
+                        wgpu::RenderPassDescriptor {
+                            label: None,
+                            color_attachments: &[wgpu::RenderPassColorAttachmentDescriptor {
+                                attachment: &frame.view,
+                                resolve_target: None,
+                                ops: wgpu::Operations {
+                                    load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                                    store: true,
+                                },
+                            }],
+                            depth_stencil_attachment: None,
+                        },
                     );
                     {
-                        const BIND_CONTEXT_3: [&str; 32] =
-                            update_bind_context(&BIND_CONTEXT_2, "u_model");
-                        bind_mat4(
-                            &program,
-                            &mut bindings,
-                            &mut out_bindings,
-                            model_mat,
-                            "u_model".to_string(),
-                        );
-                        {
-                            const BIND_CONTEXT_4: [&str; 32] =
-                                update_bind_context(&BIND_CONTEXT_3, "u_proj");
-                            bind_mat4(
-                                &program,
-                                &mut bindings,
-                                &mut out_bindings,
-                                proj_mat,
-                                "u_proj".to_string(),
-                            );
-                            {
-                                const BIND_CONTEXT_5: [&str; 32] =
-                                    update_bind_context(&BIND_CONTEXT_4, "Ambient");
-                                bind_vec3(
-                                    &program,
-                                    &mut bindings,
-                                    &mut out_bindings,
-                                    &light_ambient,
-                                    "Ambient".to_string(),
-                                );
-                                {
-                                    const BIND_CONTEXT_6: [&str; 32] =
-                                        update_bind_context(&BIND_CONTEXT_5, "LightDirection");
-                                    bind_vec3(
-                                        &program,
-                                        &mut bindings,
-                                        &mut out_bindings,
-                                        &light_direction,
-                                        "LightDirection".to_string(),
-                                    );
-                                    {
-                                        const BIND_CONTEXT_7: [&str; 32] =
-                                            update_bind_context(&BIND_CONTEXT_6, "a_position");
+                        let context1 = (&context).set_u_view_u_proj(&mut rpass, &bg_view_proj);
 
-                                        bind_vec3(
-                                            &program,
-                                            &mut bindings,
-                                            &mut out_bindings,
-                                            &positions,
-                                            "a_position".to_string(),
-                                        );
+                        {
+                            let context2 = context1.set_Ambient(&mut rpass, &light_ambient);
+                            {
+                                let context3 = context2.set_LightDirection(&mut rpass, &light_dir);
+                                {
+                                    let context4 = (&context3).set_a_normal(&mut rpass, &normals);
+                                    {
+                                        let context5 = context4.set_u_model(&mut rpass, &model_mat);
                                         {
-                                            ready_to_run(BIND_CONTEXT_7);
-                                            rpass = wgpu_graphics_header::graphics_run_indices(
-                                                &program,
-                                                rpass,
-                                                &mut bind_group,
-                                                &mut bindings,
-                                                &out_bindings,
-                                                &indices,
-                                            );
+                                            let context6 =
+                                                context5.set_a_position(&mut rpass, &positions);
+                                            {
+                                                rpass = context6.runnable(|| {
+                                                    graphics_run_indices(rpass, &indices, 1)
+                                                });
+                                            }
+                                        }
+                                    }
+                                }
+                                {
+                                    let context4 = (&context3).set_a_normal(&mut rpass, &normals2);
+                                    {
+                                        let context5 =
+                                            context4.set_u_model(&mut rpass, &model_mat2);
+                                        {
+                                            let context6 =
+                                                context5.set_a_position(&mut rpass, &positions2);
+                                            {
+                                                rpass = context6.runnable(|| {
+                                                    graphics_run_indices(rpass, &indices2, 1)
+                                                });
+                                            }
                                         }
                                     }
                                 }
                             }
                         }
                     }
-                }
-                const BIND_CONTEXT_1_1: [&str; 32] =
-                    update_bind_context(&STARTING_BIND_CONTEXT, "u_view");
-                bind_mat4(
-                    &program,
-                    &mut bindings2,
-                    &mut out_bindings2,
-                    view_mat,
-                    "u_view".to_string(),
-                );
-                {
-                    const BIND_CONTEXT_2_1: [&str; 32] =
-                        update_bind_context(&BIND_CONTEXT_1_1, "a_normal");
-                    bind_vec3(
-                        &program,
-                        &mut bindings2,
-                        &mut out_bindings2,
-                        &normals2,
-                        "a_normal".to_string(),
-                    );
-                    {
-                        const BIND_CONTEXT_3_1: [&str; 32] =
-                            update_bind_context(&BIND_CONTEXT_2_1, "u_model");
-                        bind_mat4(
-                            &program,
-                            &mut bindings2,
-                            &mut out_bindings2,
-                            model_mat2,
-                            "u_model".to_string(),
-                        );
-                        {
-                            const BIND_CONTEXT_4_1: [&str; 32] =
-                                update_bind_context(&BIND_CONTEXT_3_1, "u_proj");
-                            bind_mat4(
-                                &program,
-                                &mut bindings2,
-                                &mut out_bindings2,
-                                proj_mat,
-                                "u_proj".to_string(),
-                            );
-                            {
-                                const BIND_CONTEXT_5_1: [&str; 32] =
-                                    update_bind_context(&BIND_CONTEXT_4_1, "Ambient");
-                                bind_vec3(
-                                    &program,
-                                    &mut bindings2,
-                                    &mut out_bindings2,
-                                    &light_ambient,
-                                    "Ambient".to_string(),
-                                );
-                                {
-                                    const BIND_CONTEXT_6_1: [&str; 32] =
-                                        update_bind_context(&BIND_CONTEXT_5_1, "LightDirection");
-                                    bind_vec3(
-                                        &program,
-                                        &mut bindings2,
-                                        &mut out_bindings2,
-                                        &light_direction,
-                                        "LightDirection".to_string(),
-                                    );
-                                    {
-                                        const BIND_CONTEXT_7_1: [&str; 32] =
-                                            update_bind_context(&BIND_CONTEXT_6_1, "a_position");
 
-                                        bind_vec3(
-                                            &program,
-                                            &mut bindings2,
-                                            &mut out_bindings2,
-                                            &positions2,
-                                            "a_position".to_string(),
-                                        );
-                                        {
-                                            ready_to_run(BIND_CONTEXT_7_1);
-                                            rpass = wgpu_graphics_header::graphics_run_indices(
-                                                &program,
-                                                rpass,
-                                                &mut bind_group2,
-                                                &mut bindings2,
-                                                &out_bindings2,
-                                                &indices2,
-                                            );
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                rpass.set_pipeline(&program_CUBE.pipeline);
-
-                const BIND_CONTEXT_1_2: [&str; 32] =
-                    update_bind_context(&STARTING_BIND_CONTEXT_CUBE, "a_Pos");
-                bind_vec3(
-                    &program_CUBE,
-                    &mut bindings3,
-                    &mut out_bindings3,
-                    &positions_cube,
-                    "a_Pos".to_string(),
-                );
-                {
-                    const BIND_CONTEXT_2_2: [&str; 32] =
-                        update_bind_context(&BIND_CONTEXT_1_2, "u_Transform");
-                    bind_mat4(
+                    rpass.set_pipeline(&program_CUBE.pipeline);
+                    /* let mut rpass = setup_render_pass(
                         &program_CUBE,
-                        &mut bindings3,
-                        &mut out_bindings3,
-                        trans_mat,
-                        "u_Transform".to_string(),
-                    );
+                        &mut init_encoder,
+                        wgpu::RenderPassDescriptor {
+                            label: None,
+                            color_attachments: &[wgpu::RenderPassColorAttachmentDescriptor {
+                                attachment: &frame.view,
+                                resolve_target: None,
+                                ops: wgpu::Operations {
+                                    load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                                    store: true,
+                                },
+                            }],
+                            depth_stencil_attachment: None,
+                        },
+                    ); */
+
+                    let context2_cube = (&context_cube).set_a_Pos(&mut rpass, &positions_cube);
+
                     {
-                        const BIND_CONTEXT_3_2: [&str; 32] =
-                            update_bind_context(&BIND_CONTEXT_2_2, "a_TexCoord");
-                        bind_vec2(
-                            &program_CUBE,
-                            &mut bindings3,
-                            &mut out_bindings3,
-                            &texture_coordinates_cube,
-                            "a_TexCoord".to_string(),
-                        );
+                        let context3_cube = context2_cube.set_u_Transform(&mut rpass, &trans_mat);
                         {
-                            const BIND_CONTEXT_4_2: [&str; 32] =
-                                update_bind_context(&BIND_CONTEXT_3_2, "t_Color");
-                            bind_texture(
-                                &program_CUBE,
-                                &mut bindings3,
-                                &mut out_bindings3,
-                                texture_view,
-                                "t_Color".to_string(),
-                            );
+                            let context4_cube =
+                                context3_cube.set_a_TexCoord(&mut rpass, &texture_coords);
                             {
-                                const BIND_CONTEXT_5_2: [&str; 32] =
-                                    update_bind_context(&BIND_CONTEXT_4_2, "s_Color");
-                                bind_sampler(
-                                    &program_CUBE,
-                                    &mut bindings3,
-                                    &mut out_bindings3,
-                                    sampler,
-                                    "s_Color".to_string(),
-                                );
+                                let context5_cube =
+                                    context4_cube.set_t_Color_s_Color(&mut rpass, &bind_group_t_s);
+
                                 {
-                                    ready_to_run(BIND_CONTEXT_5_2);
-                                    wgpu_graphics_header::graphics_run_indices(
-                                        &program_CUBE,
-                                        rpass,
-                                        &mut bind_group3,
-                                        &mut bindings3,
-                                        &out_bindings3,
-                                        &index_data_cube,
-                                    );
+                                    let _ = context5_cube
+                                        .runnable(|| graphics_run_indices(rpass, &index_cube, 1));
                                 }
                             }
                         }
                     }
                 }
-
-                program.queue.submit(&[init_encoder.finish()]);
+                queue.submit(Some(init_encoder.finish()));
             }
             // When the window closes we are done. Change the status
             Event::WindowEvent {

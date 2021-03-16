@@ -12,14 +12,12 @@ use winit::{
 };
 
 pub use pipeline::wgpu_graphics_header::{
-    default_bind_group, generate_swap_chain, graphics_run_indices, graphics_starting_context,
-    setup_render_pass, setup_render_pass_color_depth, setup_render_pass_depth, BindingPreprocess,
-    GraphicsBindings, GraphicsShader, OutGraphicsBindings, PipelineType,
+    generate_swap_chain, graphics_run_indices, setup_render_pass, GraphicsCompileArgs,
+    GraphicsShader,
 };
 
-pub use pipeline::bind::Bindings;
-
-pub use wgpu_macros::{generic_bindings, init};
+pub use pipeline::AbstractBind;
+pub use pipeline::bind::{BindGroup1, BindGroup2, Indices, SamplerData, TextureData, Vertex};
 
 pub use pipeline::helper::{
     create_texels, generate_identity_matrix, generate_light_projection, generate_projection_matrix,
@@ -28,42 +26,43 @@ pub use pipeline::helper::{
 };
 
 async fn run(event_loop: EventLoop<()>, window: Window) {
-    init!();
-
     let size = window.inner_size();
 
-    // Create a surface to draw images on
-    let surface = wgpu::Surface::create(&window);
-    let adapter = wgpu::Adapter::request(
-        &wgpu::RequestAdapterOptions {
-            // Can specify Low/High power usage
-            power_preference: wgpu::PowerPreference::Default,
+    let instance = wgpu::Instance::new(wgpu::BackendBit::PRIMARY);
+    let surface = unsafe { instance.create_surface(&window) };
+    let adapter = instance
+        .request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::default(),
+            // Request an adapter which can render to our surface
             compatible_surface: Some(&surface),
-        },
-        // Map to Vulkan/Metal/Direct3D 12
-        wgpu::BackendBit::PRIMARY,
-    )
-    .await
-    .unwrap();
+        })
+        .await
+        .expect("Failed to find an appropriate adapter");
 
     // The device manages the connection and resources of the adapter
     // The queue is a literal queue of tasks for the gpu
     let (device, queue) = adapter
-        .request_device(&wgpu::DeviceDescriptor {
-            extensions: wgpu::Extensions {
-                anisotropic_filtering: false,
+        .request_device(
+            &wgpu::DeviceDescriptor {
+                label: None,
+                features: wgpu::Features::empty(),
+                limits: wgpu::Limits {
+                    max_bind_groups: 5,
+                    ..Default::default()
+                },
             },
-            limits: wgpu::Limits::default(),
-        })
-        .await;
+            None,
+        )
+        .await
+        .expect("Failed to create device");
+
+    let queue = std::rc::Rc::new(queue);
 
     my_shader! {BAKE_VERTEXT = {
         [[vertex in] vec3] a_position;
 
-        group {
-            [[uniform in] mat4] u_viewProj;
-            [[uniform in] mat4] u_World;
-        }
+        [group1 [uniform in] mat4] u_viewProj;
+        [group1 [uniform in] mat4] u_World;
 
         [[out] vec4] gl_Position;
 
@@ -89,12 +88,12 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         [[out] vec3] v_Normal;
         [[out] vec4] gl_Position;
 
-        group {
-            [[uniform in] mat4] u_viewProj;
-            //[[uniform in] mat4] u_proj;
-            [[uniform in] mat4] u_World;
-        }
-        [[uniform in] vec4] u_Color;
+
+        [group1 [uniform in] mat4] u_viewProj;
+        //[[uniform in] mat4] u_proj;
+        [group1 [uniform in] mat4] u_World;
+
+        [group2 [uniform in] vec4] u_Color;
 
         {{
             void main() {
@@ -111,18 +110,18 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 
         [[out] vec4] color; // This is o_Target in the docs
 
-        [[uniform in] mat4] u_viewProj;
+        [group1 [uniform in] mat4] u_viewProj;
         //[[uniform in] mat4] u_proj;
 
         // We are starting with just one light
-        [[uniform in] mat4] light_proj;
-        [[uniform in] vec4] light_pos;
-        [[uniform in] vec4] light_color;
+        [group4 [uniform in] mat4] light_proj;
+        [group4 [uniform in] vec4] light_pos;
+        [group5 [uniform in] vec4] light_color;
 
-        [[uniform in] texture2DArray] t_Shadow;
-        [[uniform in] samplerShadow] s_Shadow;
-        [[uniform in] mat4] u_World;
-        [[uniform in] vec4] u_Color;
+        [group3 [uniform in] texture2DArray] t_Shadow;
+        [group3 [uniform in compare] samplerShadow] s_Shadow;
+        [group1 [uniform in] mat4] u_World;
+        [group2 [uniform in] vec4] u_Color;
         {{
             float fetch_shadow(int light_id, vec4 homogeneous_coords) {
                 if (homogeneous_coords.w <= 0.0) {
@@ -153,7 +152,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                 vec3 light_dir = normalize(light_pos.xyz - v_Position.xyz);
                 float diffuse = max(0.0, dot(normal, light_dir));
                 // add light contribution
-                o_Target += shadow /* * diffuse */ * light_color.xyz;
+                o_Target += shadow * diffuse * light_color.xyz;
                 // multiply the light by material color
                 color = vec4(o_Target, 1.0) * u_Color;
             }
@@ -164,33 +163,101 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     const B_F: GraphicsShader = eager_graphics_shader! {BAKE_FRAGMENT!()};
     eager_binding! {bake_context = BAKE_VERTEXT!(), BAKE_FRAGMENT!()};
 
-    let (stencil_program, stencil_template_bindings, stencil_template_out_bindings, _) =
-        compile_valid_stencil_program!(device, B_V, B_F, PipelineType::Stencil);
+    let (stencil_program, _) = compile_valid_stencil_program!(
+        device,
+        bake_context,
+        B_V,
+        B_F,
+        GraphicsCompileArgs {
+            primitive_state: wgpu::PrimitiveState {
+                cull_mode: wgpu::CullMode::Back,
+                ..Default::default()
+            },
+            color_target_state: None,
+            depth_stencil_state: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth32Float,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::LessEqual,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState {
+                    constant: 2,
+                    slope_scale: 2.0,
+                    clamp: 0.0,
+                },
+                clamp_depth: device.features().contains(wgpu::Features::DEPTH_CLAMPING),
+            }),
+            multisample_state: wgpu::MultisampleState::default(),
+        }
+    );
 
     const S_V: GraphicsShader = eager_graphics_shader! {VERTEXT!()};
     const S_F: GraphicsShader = eager_graphics_shader! {FRAGMENT!()};
     eager_binding! {context = VERTEXT!(), FRAGMENT!()};
 
-    let (program, template_bindings, template_out_bindings, _) =
-        compile_valid_graphics_program!(device, S_V, S_F, PipelineType::ColorWithStencil);
+    let args = GraphicsCompileArgs {
+        primitive_state: wgpu::PrimitiveState {
+            cull_mode: wgpu::CullMode::Back,
+            ..Default::default()
+        },
+        color_target_state: Some(wgpu::ColorTargetState {
+            // Specify the size of the color data in the buffer
+            // Bgra8UnormSrgb is specifically used since it is guaranteed to work on basically all browsers (32bit)
+            format: wgpu::TextureFormat::Bgra8UnormSrgb,
+            // Here is where you can do some fancy stuff for transitioning colors/brightness between frames. Replace defaults to taking all of the current frame and none of the next frame.
+            // This can be changed by specifying the modifier for either of the values from src/dest frames or changing the operation used to combine them(instead of addition maybe Max/Min)
+            color_blend: wgpu::BlendState::REPLACE,
+            alpha_blend: wgpu::BlendState::REPLACE,
+            // We can adjust the mask to only include certain colors if we want to
+            write_mask: wgpu::ColorWrite::ALL,
+        }),
+        depth_stencil_state: Some(wgpu::DepthStencilState {
+            format: wgpu::TextureFormat::Depth32Float,
+            depth_write_enabled: true,
+            depth_compare: wgpu::CompareFunction::Less,
+            stencil: wgpu::StencilState::default(),
+            bias: wgpu::DepthBiasState::default(),
+            clamp_depth: false,
+        }),
+        multisample_state: wgpu::MultisampleState::default(),
+    };
 
-    let view_proj_mat =
+    let (program, _) = compile_valid_graphics_program!(device, context, S_V, S_F, args);
+
+    let view_proj_mat_init =
         generate_projection_matrix(size.width as f32 / size.height as f32) * generate_view_matrix();
+    let view_proj_mat = rotation(view_proj_mat_init, 0.0, 0.0, 0.0);
+    let world_mat = scale(translate(generate_identity_matrix(), 1.0, 3.0, -1.0), 0.5);
 
-    let (positions, normals, index_data) = load_model("src/models/sphere.obj");
+    let bind_group_view_world = BindGroup2::new(&device, &view_proj_mat, &world_mat);
+
+    let (positions_data, normals_data, index_data) = load_model("src/models/sphere.obj");
+
+    let positions = Vertex::new(&device, &positions_data);
+    let normals = Vertex::new(&device, &normals_data);
+    let index = Indices::new(&device, &index_data);
+
     //let (mut positions, mut normals, mut index_data) = load_cube();
     let color_data = vec![[0.583, 0.771, 0.014, 1.0]];
-    let world_mat = scale(translate(generate_identity_matrix(), 0.0, 3.0, -1.0), 0.5);
+    let color = BindGroup1::new(&device, &color_data);
 
-    let (plane_positions, plane_normals, plane_index_data) = load_plane(7);
+    let (plane_positions_data, plane_normals_data, plane_index_data) = load_plane(7);
+
+    let plane_positions = Vertex::new(&device, &plane_positions_data);
+    let plane_normals = Vertex::new(&device, &plane_normals_data);
+    let plane_index = Indices::new(&device, &plane_index_data);
+
     let plane_color_data = vec![[1.0, 1.0, 1.0, 1.0]];
+    let plane_color = BindGroup1::new(&device, &plane_color_data);
+
     let plane_world_mat = generate_identity_matrix();
+    let bind_group_plane_world_mat = BindGroup2::new(&device, &view_proj_mat, &plane_world_mat);
 
     let mut light_pos = vec![[20.0, -30.0, 2.0, 1.0]];
-    let mut light_proj_mat = generate_light_projection(light_pos[0], 60.0);
-    let light_color = vec![[1.0, 0.5, 0.5, 0.5]];
+    //let mut light_proj_mat = generate_light_projection(light_pos[0], 60.0);
+    let light_color_data = vec![[1.0, 0.5, 0.5, 0.5]];
+    let light_color = BindGroup1::new(&device, &light_color_data);
 
-    let shadow_sampler = wgpu::SamplerDescriptor {
+    let shadow_sampler = SamplerData::new(wgpu::SamplerDescriptor {
         label: Some("shadow"),
         address_mode_u: wgpu::AddressMode::ClampToEdge,
         address_mode_v: wgpu::AddressMode::ClampToEdge,
@@ -200,310 +267,68 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         mipmap_filter: wgpu::FilterMode::Nearest,
         lod_min_clamp: -100.0,
         lod_max_clamp: 100.0,
-        compare: wgpu::CompareFunction::LessEqual,
+        compare: Some(wgpu::CompareFunction::LessEqual),
         ..Default::default()
-    };
-
-    let shadow_size = wgpu::Extent3d {
-        width: 512,
-        height: 512,
-        depth: 1,
-    };
-    let shadow_format = wgpu::TextureFormat::Depth32Float;
+    });
 
     // A "chain" of buffers that we render on to the display
-    let mut swap_chain = generate_swap_chain(&surface, &window, &device);
+    let swap_chain = generate_swap_chain(&surface, &window, &device);
 
-    let shadow_texture = device.create_texture(&wgpu::TextureDescriptor {
-        size: shadow_size,
-        array_layer_count: 1, // One light (max lights)
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: shadow_format,
-        usage: wgpu::TextureUsage::OUTPUT_ATTACHMENT | wgpu::TextureUsage::SAMPLED,
-        label: None,
-    });
-
-    let light_target_view = shadow_texture.create_view(&wgpu::TextureViewDescriptor {
-        format: shadow_format,
-        dimension: wgpu::TextureViewDimension::D2,
-        aspect: wgpu::TextureAspect::All,
-        base_mip_level: 0,
-        level_count: 1,
-        base_array_layer: 0, // The first light is at index 0
-        array_layer_count: 1,
-    });
-
-    let depth_texture = device.create_texture(&wgpu::TextureDescriptor {
-        size: wgpu::Extent3d {
-            width: window.inner_size().width,
-            height: window.inner_size().height,
-            depth: 1,
+    let shadow_texture = TextureData::new_without_data(
+        wgpu::TextureDescriptor {
+            size: wgpu::Extent3d {
+                width: 512,
+                height: 512,
+                depth: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Depth32Float,
+            usage: wgpu::TextureUsage::RENDER_ATTACHMENT | wgpu::TextureUsage::SAMPLED,
+            label: None,
         },
-        array_layer_count: 1,
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Depth32Float,
-        usage: wgpu::TextureUsage::OUTPUT_ATTACHMENT,
-        label: None,
-    });
-    let depth_view = depth_texture.create_default_view();
+        wgpu::TextureViewDescriptor {
+            label: None,
+            format: Some(wgpu::TextureFormat::Depth32Float),
+            dimension: Some(wgpu::TextureViewDimension::D2),
+            aspect: wgpu::TextureAspect::All,
+            base_mip_level: 0,
+            level_count: std::num::NonZeroU32::new(1),
+            base_array_layer: 0, // The first light is at index 0
+            array_layer_count: std::num::NonZeroU32::new(1),
+        },
+        queue.clone(),
+    );
 
-    /*
-        param1 : in
-        param2 : in
+    let shadow_t_s = BindGroup2::new(&device, &shadow_texture, &shadow_sampler);
 
-        // todo go with this
-        // todo fix examples
-        // todo fix run
-        //
-        context2
-        context3
-        {
-            context1 = bind a to param1 in context
-            {
-                context2 = bind b to param2 in context1
-            }
-            {
-                context3 = bind c to param2 in context1
-            }
-        }
-
-        render_loop {
-            bind light in context2
-            bind light in context3
-
-            run(context2)
-            run(context3)
-        }
-
-        ///////
-
-        program 1
-        program 2
-
-        context<Bound, Unbound, ...>
-        context<[Bound, Unbound], [Unbound, Unbound], ...>
-
-        bind_param1(data,...)
-
-        bind_param1([Update, Don't Update, ...], data, ...)
-
-        {
-            bind a to param1@1@2
-            {
-                bind b to param2@1
-                {
-                    bind c to param2@2
-                    render_loop {
-                        bind light to paramlight@1@2 {
-                            run(context@1)
-                            run(context@2)
-                        }
-                    }
-                }
-            }
-        }
-
-
-        bind a to param1 { // bindgroup = {a}
-            render_loop {
-                bind b to param2 {
-                    // bindgroup = {b}
-                    run()
-                }
-                bind c to param2 {
-                    // bindgroup = {c}
-                    run()
-                }
-            }
-        }
-    */
-
-    let mut bind_group = default_bind_group(&device);
-    let mut bind_group_p1 = default_bind_group(&device);
-    let mut bind_group_stencil = default_bind_group(&device);
-    let mut bind_group_stencil_p1 = default_bind_group(&device);
-
-    let mut bindings: GraphicsBindings = template_bindings.new();
-    let mut out_bindings: OutGraphicsBindings = template_out_bindings.new();
-    let mut bindings_stencil: GraphicsBindings = stencil_template_bindings.new();
-    let mut out_bindings_stencil: OutGraphicsBindings = stencil_template_out_bindings.new();
-
-    let bake_context_plane;
-    let mut bindings_stencil_plane;
-    let mut out_bindings_stencil_plane;
-
-    let bake_context_sphere;
-    let mut bindings_stencil_sphere;
-    let mut out_bindings_stencil_sphere;
-
-    let context_plane;
-    let mut bindings_plane;
-    let mut out_bindings_plane;
-
-    let context_sphere;
-    let mut bindings_sphere;
-    let mut out_bindings_sphere;
-
-    {
-        let bake_context1 = (&bake_context).bind_a_position(
-            &plane_positions,
-            &device,
-            &mut bindings_stencil,
-            &mut out_bindings_stencil,
-        );
-        {
-            bake_context_plane = (&bake_context1).bind_u_World(
-                &plane_world_mat,
-                &device,
-                &mut bindings_stencil,
-                &mut out_bindings_stencil,
-            );
-            bindings_stencil_plane = bindings_stencil.clone();
-            out_bindings_stencil_plane = out_bindings_stencil.clone();
-        }
-    }
-
-    {
-        let bake_context1 = (&bake_context).bind_a_position(
-            &positions,
-            &device,
-            &mut bindings_stencil,
-            &mut out_bindings_stencil,
-        );
-        {
-            bake_context_sphere = bake_context1.bind_u_World(
-                &world_mat,
-                &device,
-                &mut bindings_stencil,
-                &mut out_bindings_stencil,
-            );
-            bindings_stencil_sphere = bindings_stencil.clone();
-            out_bindings_stencil_sphere = out_bindings_stencil.clone();
-        }
-    }
-
-    {
-        let context1 =
-            (&context).bind_u_viewProj(&view_proj_mat, &device, &mut bindings, &mut out_bindings);
-
-        {
-            let context2 =
-                context1.bind_light_color(&light_color, &device, &mut bindings, &mut out_bindings);
-
-            {
-                let context3 = context2.bind_s_Shadow(
-                    &shadow_sampler,
-                    &device,
-                    &mut bindings,
-                    &mut out_bindings,
-                );
-
-                {
-                    let context4 = context3.bind_t_Shadow(
-                        &shadow_texture,
-                        &device,
-                        &mut bindings,
-                        &mut out_bindings,
-                    );
-
-                    {
-                        let context5 = (&context4).bind_a_position(
-                            &plane_positions,
-                            &device,
-                            &mut bindings,
-                            &mut out_bindings,
-                        );
-
-                        {
-                            let context6 = context5.bind_u_Color(
-                                &plane_color_data,
-                                &device,
-                                &mut bindings,
-                                &mut out_bindings,
-                            );
-
-                            {
-                                let context7 = context6.bind_u_World(
-                                    &plane_world_mat,
-                                    &device,
-                                    &mut bindings,
-                                    &mut out_bindings,
-                                );
-
-                                {
-                                    context_plane = context7.bind_a_normal(
-                                        &plane_normals,
-                                        &device,
-                                        &mut bindings,
-                                        &mut out_bindings,
-                                    );
-                                    bindings_plane = bindings.clone();
-                                    out_bindings_plane = out_bindings.clone();
-                                }
-                            }
-                        }
-                    }
-                    {
-                        let context5 = (&context4).bind_a_position(
-                            &positions,
-                            &device,
-                            &mut bindings,
-                            &mut out_bindings,
-                        );
-                        {
-                            let context6 = context5.bind_u_Color(
-                                &color_data,
-                                &device,
-                                &mut bindings,
-                                &mut out_bindings,
-                            );
-
-                            {
-                                let context7 = context6.bind_u_World(
-                                    &world_mat,
-                                    &device,
-                                    &mut bindings,
-                                    &mut out_bindings,
-                                );
-
-                                {
-                                    context_sphere = context7.bind_a_normal(
-                                        &normals,
-                                        &device,
-                                        &mut bindings,
-                                        &mut out_bindings,
-                                    );
-                                    bindings_sphere = bindings.clone();
-                                    out_bindings_sphere = out_bindings.clone();
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    /* {bind param2
-        render_loop {
-        bind param1
-    run()}
-        }
-
-    bind param2 {
-        bind param1 {
-            run()
-        }
-    }
-
-    most common -> least common
-
-
-    non-changing -> changing */
+    let depth_texture = BindGroup1::<
+        TextureData<
+            { pipeline::bind::TextureMultisampled::False },
+            { wgpu::TextureSampleType::Depth },
+            { wgpu::TextureViewDimension::D2 },
+        >,
+    >::new(
+        &device,
+        &TextureData::new_without_data(
+            wgpu::TextureDescriptor {
+                size: wgpu::Extent3d {
+                    width: window.inner_size().width,
+                    height: window.inner_size().height,
+                    depth: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Depth32Float,
+                usage: wgpu::TextureUsage::RENDER_ATTACHMENT | wgpu::TextureUsage::SAMPLED,
+                label: None,
+            },
+            wgpu::TextureViewDescriptor::default(),
+            queue.clone(),
+        ),
+    );
 
     event_loop.run(move |event, _, control_flow: &mut ControlFlow| {
         *control_flow = ControlFlow::Poll;
@@ -514,155 +339,191 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                 let mut init_encoder =
                     device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
                 let frame = swap_chain
-                    .get_next_texture()
-                    .expect("Timeout when acquiring next swap chain texture");
+                    .get_current_frame()
+                    .expect("Timeout when acquiring next swap chain texture")
+                    .output;
                 {
-                    let mut bind_prerun_stencil_p1;
-                    let mut bind_prerun_stencil;
-                    let mut bind_prerun;
-                    let mut bind_prerun_p1;
-
                     light_pos = rotate_vec4(&light_pos, -0.05);
-                    light_proj_mat = generate_light_projection(light_pos[0], 60.0);
+                    let light_proj_mat = generate_light_projection(light_pos[0], 60.0);
+
+                    let bind_group_light_proj_pos =
+                        BindGroup2::new(&device, &light_proj_mat, &light_pos);
 
                     dbg!(&light_pos);
 
                     {
-                        let mut rpass_stencil = setup_render_pass_depth(
+                        let shadow_view = shadow_t_s.get_view_0(&wgpu::TextureViewDescriptor {
+                            label: None,
+                            format: Some(wgpu::TextureFormat::Depth32Float),
+                            dimension: Some(wgpu::TextureViewDimension::D2),
+                            aspect: wgpu::TextureAspect::All,
+                            base_mip_level: 0,
+                            level_count: std::num::NonZeroU32::new(1),
+                            base_array_layer: 0, // The first light is at index 0
+                            array_layer_count: std::num::NonZeroU32::new(1),
+                        });
+                        let mut rpass_stencil = setup_render_pass(
                             &stencil_program,
                             &mut init_encoder,
-                            &light_target_view,
+                            wgpu::RenderPassDescriptor {
+                                label: None,
+                                // color_attachments is literally where we draw the colors to
+                                color_attachments: &[],
+                                depth_stencil_attachment: Some(
+                                    wgpu::RenderPassDepthStencilAttachmentDescriptor {
+                                        attachment: &shadow_view,
+                                        depth_ops: Some(wgpu::Operations {
+                                            load: wgpu::LoadOp::Clear(1.0),
+                                            store: true,
+                                        }),
+                                        stencil_ops: None,
+                                    },
+                                ),
+                            },
                         );
-
                         {
-                            let bake_context3 = (&bake_context_plane).bind_u_viewProj(
-                                &light_proj_mat,
-                                &device,
-                                &mut bindings_stencil_plane,
-                                &mut out_bindings_stencil_plane,
-                            );
-
+                            let bake_context1 = (&bake_context)
+                                .set_a_position(&mut rpass_stencil, &plane_positions);
                             {
-                                bind_prerun_stencil_p1 = BindingPreprocess::bind(
-                                    &mut bindings_stencil_plane,
-                                    &out_bindings_stencil_plane,
+                                let bake_context_plane = (&bake_context1).set_u_viewProj_u_World(
+                                    &mut rpass_stencil,
+                                    &bind_group_plane_world_mat,
                                 );
-                                rpass_stencil = bake_context3.runnable(|| {
-                                    graphics_run_indices(
-                                        &stencil_program,
-                                        &device,
-                                        rpass_stencil,
-                                        &mut bind_group_stencil_p1,
-                                        &mut bind_prerun_stencil_p1,
-                                        &plane_index_data,
-                                    )
-                                });
+                                {
+                                    rpass_stencil = bake_context_plane.runnable(|| {
+                                        graphics_run_indices(rpass_stencil, &plane_index, 1)
+                                    });
+                                }
                             }
                         }
+
                         {
-                            let bake_context3 = (&bake_context_sphere).bind_u_viewProj(
-                                &light_proj_mat,
-                                &device,
-                                &mut bindings_stencil_sphere,
-                                &mut out_bindings_stencil_sphere,
-                            );
+                            let bake_context1 =
+                                (&bake_context).set_a_position(&mut rpass_stencil, &positions);
                             {
-                                bind_prerun_stencil = BindingPreprocess::bind(
-                                    &mut bindings_stencil_sphere,
-                                    &out_bindings_stencil_sphere,
+                                let bake_context_sphere = bake_context1.set_u_viewProj_u_World(
+                                    &mut rpass_stencil,
+                                    &bind_group_view_world,
                                 );
-                                rpass_stencil = bake_context3.runnable(|| {
-                                    graphics_run_indices(
-                                        &stencil_program,
-                                        &device,
-                                        rpass_stencil,
-                                        &mut bind_group_stencil,
-                                        &mut bind_prerun_stencil,
-                                        &index_data,
-                                    )
-                                });
+
+                                {
+                                    let _ = bake_context_sphere.runnable(|| {
+                                        graphics_run_indices(rpass_stencil, &index, 1)
+                                    });
+                                }
                             }
                         }
                     }
 
                     {
-                        let mut rpass = setup_render_pass_color_depth(
+                        let depth_view =
+                            depth_texture.get_view_0(&wgpu::TextureViewDescriptor::default());
+                        let mut rpass = setup_render_pass(
                             &program,
                             &mut init_encoder,
-                            &frame,
-                            &depth_view,
+                            wgpu::RenderPassDescriptor {
+                                label: None,
+                                // color_attachments is literally where we draw the colors to
+                                color_attachments: &[wgpu::RenderPassColorAttachmentDescriptor {
+                                    attachment: &frame.view,
+                                    resolve_target: None,
+                                    ops: wgpu::Operations {
+                                        load: wgpu::LoadOp::Clear(wgpu::Color {
+                                            r: 0.1,
+                                            g: 0.2,
+                                            b: 0.3,
+                                            a: 1.0,
+                                        }),
+                                        store: true,
+                                    },
+                                }],
+                                depth_stencil_attachment: Some(
+                                    wgpu::RenderPassDepthStencilAttachmentDescriptor {
+                                        attachment: &depth_view,
+                                        depth_ops: Some(wgpu::Operations {
+                                            load: wgpu::LoadOp::Clear(1.0),
+                                            store: true,
+                                        }),
+                                        stencil_ops: None,
+                                    },
+                                ),
+                            },
                         );
 
                         {
-                            let context9 = (&context_plane).bind_light_proj(
-                                &light_proj_mat,
-                                &device,
-                                &mut bindings_plane,
-                                &mut out_bindings_plane,
-                            );
+                            let context1 = (&context)
+                                .set_u_viewProj_u_World(&mut rpass, &bind_group_view_world);
 
                             {
-                                let context10 = context9.bind_light_pos(
-                                    &light_pos,
-                                    &device,
-                                    &mut bindings_plane,
-                                    &mut out_bindings_plane,
-                                );
-                                {
-                                    bind_prerun_p1 = BindingPreprocess::bind(
-                                        &mut bindings_plane,
-                                        &out_bindings_plane,
-                                    );
-                                    rpass = context10.runnable(|| {
-                                        graphics_run_indices(
-                                            &program,
-                                            &device,
-                                            rpass,
-                                            &mut bind_group_p1,
-                                            &mut bind_prerun_p1,
-                                            &plane_index_data,
-                                        )
-                                    });
-                                }
-                            }
-                        }
+                                let context2 = context1.set_light_color(&mut rpass, &light_color);
 
-                        {
-                            let context9 = (&context_sphere).bind_light_proj(
-                                &light_proj_mat,
-                                &device,
-                                &mut bindings_sphere,
-                                &mut out_bindings_sphere,
-                            );
-
-                            {
-                                let context10 = context9.bind_light_pos(
-                                    &light_pos,
-                                    &device,
-                                    &mut bindings_sphere,
-                                    &mut out_bindings_sphere,
-                                );
                                 {
-                                    bind_prerun = BindingPreprocess::bind(
-                                        &mut bindings_sphere,
-                                        &out_bindings_sphere,
-                                    );
-                                    rpass = context10.runnable(|| {
-                                        graphics_run_indices(
-                                            &program,
-                                            &device,
-                                            rpass,
-                                            &mut bind_group,
-                                            &mut bind_prerun,
-                                            &index_data,
-                                        )
-                                    });
+                                    let context3 =
+                                        context2.set_t_Shadow_s_Shadow(&mut rpass, &shadow_t_s);
+                                    //shadow_texture
+
+                                    {
+                                        let context5 = (&context3)
+                                            .set_a_position(&mut rpass, &plane_positions);
+
+                                        {
+                                            let context6 =
+                                                context5.set_u_Color(&mut rpass, &plane_color);
+
+                                            {
+                                                let context_plane = context6
+                                                    .set_a_normal(&mut rpass, &plane_normals);
+                                                {
+                                                    let context9 = (&context_plane)
+                                                        .set_light_proj_light_pos(
+                                                            &mut rpass,
+                                                            &bind_group_light_proj_pos,
+                                                        );
+
+                                                    {
+                                                        rpass = context9.runnable(|| {
+                                                            graphics_run_indices(
+                                                                rpass,
+                                                                &plane_index,
+                                                                1,
+                                                            )
+                                                        });
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    {
+                                        let context5 =
+                                            (&context3).set_a_position(&mut rpass, &positions);
+                                        {
+                                            let context6 = context5.set_u_Color(&mut rpass, &color);
+
+                                            {
+                                                let context_sphere =
+                                                    context6.set_a_normal(&mut rpass, &normals);
+                                                {
+                                                    let context9 = (&context_sphere)
+                                                        .set_light_proj_light_pos(
+                                                            &mut rpass,
+                                                            &bind_group_light_proj_pos,
+                                                        );
+
+                                                    {
+                                                        let _ = context9.runnable(|| {
+                                                            graphics_run_indices(rpass, &index, 1)
+                                                        });
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
 
-                    queue.submit(&[init_encoder.finish()]);
+                    queue.submit(Some(init_encoder.finish()));
                 }
             }
             // When the window closes we are done. Change the status

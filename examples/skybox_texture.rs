@@ -4,7 +4,8 @@ extern crate pipeline;
 
 #[macro_use]
 extern crate eager;
-use pipeline::wgpu_graphics_header::graphics_run;
+use std::rc::Rc;
+
 use winit::{
     event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
@@ -12,11 +13,11 @@ use winit::{
 };
 
 pub use pipeline::wgpu_graphics_header::{
-    generate_swap_chain, graphics_run_indices, setup_render_pass, GraphicsShader, PipelineType,
+    generate_swap_chain, graphics_run, setup_render_pass, GraphicsCompileArgs, GraphicsShader,
 };
 
 use crate::pipeline::AbstractBind;
-pub use pipeline::bind::{BindGroup2, Indices, Vertex};
+pub use pipeline::bind::{BindGroup2, SamplerData, TextureData};
 
 pub use pipeline::helper::{generate_projection_matrix, generate_view_matrix};
 
@@ -27,21 +28,21 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     let surface = unsafe { instance.create_surface(&window) };
     let adapter = instance
         .request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::Default,
+            power_preference: wgpu::PowerPreference::default(),
             // Request an adapter which can render to our surface
             compatible_surface: Some(&surface),
         })
         .await
-        .expect("Failed to find an appropiate adapter");
+        .expect("Failed to find an appropriate adapter");
 
     // The device manages the connection and resources of the adapter
     // The queue is a literal queue of tasks for the gpu
     let (device, queue) = adapter
         .request_device(
             &wgpu::DeviceDescriptor {
+                label: None,
                 features: wgpu::Features::empty(),
                 limits: wgpu::Limits::default(),
-                shader_validation: true,
             },
             None,
         )
@@ -89,7 +90,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     eager_binding! {context = vertex!(), fragment!()};
 
     let (program, _) =
-        compile_valid_graphics_program!(device, context, S_V, S_F, PipelineType::Color);
+        compile_valid_graphics_program!(device, context, S_V, S_F, GraphicsCompileArgs::default());
 
     let proj_mat = generate_projection_matrix(size.width as f32 / size.height as f32);
 
@@ -108,19 +109,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         ..Default::default()
     };
 
-    let texture = device.create_texture(&wgpu::TextureDescriptor {
-        size: wgpu::Extent3d {
-            width: IMAGE_SIZE,
-            height: IMAGE_SIZE,
-            depth: 6,
-        },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba8Unorm,
-        usage: wgpu::TextureUsage::SAMPLED | wgpu::TextureUsage::COPY_DST,
-        label: None,
-    });
+    /* let texture = device.create_texture(&); */
 
     let paths: [&'static [u8]; 6] = [
         &include_bytes!("images/posx.png")[..],
@@ -145,41 +134,68 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         })
         .collect::<Vec<_>>();
 
-    for (i, image) in faces.iter().enumerate() {
-        queue.write_texture(
-            wgpu::TextureCopyView {
-                texture: &texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d {
-                    x: 0,
-                    y: 0,
-                    z: i as u32,
-                },
-            },
-            &image,
-            wgpu::TextureDataLayout {
-                offset: 0,
-                bytes_per_row: 4 * IMAGE_SIZE,
-                rows_per_image: 0,
-            },
-            wgpu::Extent3d {
-                width: IMAGE_SIZE,
-                height: IMAGE_SIZE,
-                depth: 1,
-            },
-        );
-    }
-
-    let texture_view = texture.create_view(&wgpu::TextureViewDescriptor {
+    /* for (i, image) in faces.iter().enumerate() {
+           queue.write_texture(
+               wgpu::TextureCopyView {
+                   texture: &texture,
+                   mip_level: 0,
+                   origin: wgpu::Origin3d {
+                       x: 0,
+                       y: 0,
+                       z: i as u32,
+                   },
+               },
+               &image,
+               wgpu::TextureDataLayout {
+                   offset: 0,
+                   bytes_per_row: 4 * IMAGE_SIZE,
+                   rows_per_image: 0,
+               },
+               wgpu::Extent3d {
+                   width: IMAGE_SIZE,
+                   height: IMAGE_SIZE,
+                   depth: 1,
+               },
+           );
+       }
+    */
+    /* let texture_view = texture.create_view(&wgpu::TextureViewDescriptor {
         label: None,
         dimension: Some(wgpu::TextureViewDimension::Cube),
         ..wgpu::TextureViewDescriptor::default()
-    });
+    }); */
 
-    let bind_group_t_s_cubemap = BindGroup2::new(&device, &texture_view, &sampler_desc);
+    let queue = Rc::new(queue);
+
+    let tex = TextureData::new(
+        faces.into_iter().flatten().collect(),
+        wgpu::TextureDescriptor {
+            size: wgpu::Extent3d {
+                width: IMAGE_SIZE,
+                height: IMAGE_SIZE,
+                depth: 6,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsage::SAMPLED | wgpu::TextureUsage::COPY_DST,
+            label: None,
+        },
+        wgpu::TextureViewDescriptor {
+            label: None,
+            dimension: Some(wgpu::TextureViewDimension::Cube),
+            ..wgpu::TextureViewDescriptor::default()
+        },
+        queue.clone(),
+    );
+
+    let sample = SamplerData::new(sampler_desc);
+
+    let bind_group_t_s_cubemap = BindGroup2::new(&device, &tex, &sample);
 
     // A "chain" of buffers that we render on to the display
-    let mut swap_chain = generate_swap_chain(&surface, &window, &device);
+    let swap_chain = generate_swap_chain(&surface, &window, &device);
 
     event_loop.run(move |event, _, control_flow: &mut ControlFlow| {
         *control_flow = ControlFlow::Poll;
@@ -187,14 +203,29 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
             // Everything that can be processed has been so we can now redraw the image on our window
             Event::MainEventsCleared => window.request_redraw(),
             Event::RedrawRequested(_) => {
-                let mut frame = swap_chain
+                let frame = swap_chain
                     .get_current_frame()
                     .expect("Timeout when acquiring next swap chain texture")
                     .output;
                 let mut init_encoder =
                     device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
-                let mut rpass = setup_render_pass(&program, &mut init_encoder, &frame);
+                let mut rpass = setup_render_pass(
+                    &program,
+                    &mut init_encoder,
+                    wgpu::RenderPassDescriptor {
+                        label: None,
+                        color_attachments: &[wgpu::RenderPassColorAttachmentDescriptor {
+                            attachment: &frame.view,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                                store: true,
+                            },
+                        }],
+                        depth_stencil_attachment: None,
+                    },
+                );
 
                 let context1 =
                     (&context).set_t_Cubemap_s_Cubemap(&mut rpass, &bind_group_t_s_cubemap);

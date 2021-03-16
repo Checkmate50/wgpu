@@ -1,5 +1,6 @@
 #![crate_type = "lib"]
 #![feature(const_fn, const_panic)]
+#![feature(const_generics)]
 #[macro_use]
 pub mod debug;
 pub mod bind;

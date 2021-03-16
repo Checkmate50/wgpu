@@ -76,10 +76,6 @@ cube4:
 flat_color:
 	cargo +nightly run --example flat_color
 
-.PHONY: shadow
-shadow:
-	cargo +nightly run --example shadow
-
 .PHONY: sink
 sink:
 	cargo +nightly run --example sink

@@ -4,8 +4,6 @@ use std::fmt;
 use std::io::Read;
 use wgpu::ShaderModule;
 
-use std::borrow::Cow;
-
 // Remove spaces between tokens that should be one token
 // Strip off the starting and ending { }
 pub fn process_body(body: &str) -> String {
@@ -201,6 +199,8 @@ pub enum QUALIFIER {
     IN,
     OUT,
     LOOP,
+    // things for samplers/textures
+    COMPARE,
 }
 
 // I assume there will only be one gl builtin qualifier so find that one and the match should return true
@@ -273,6 +273,10 @@ macro_rules! qualifying {
     (loop) => {
         pipeline::shared::QUALIFIER::LOOP
     };
+    (compare) => {
+        pipeline::shared::QUALIFIER::COMPARE
+    };
+    //todo add all the others
 }
 
 #[macro_export]

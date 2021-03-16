@@ -6,8 +6,6 @@ extern crate pipeline;
 #[macro_use]
 extern crate eager;
 
-use pipeline::helper::generate_identity_matrix;
-use pipeline::helper::translate;
 use winit::{
     event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
@@ -15,13 +13,17 @@ use winit::{
 };
 
 pub use pipeline::wgpu_graphics_header::{
-    generate_swap_chain, graphics_run_indices, setup_render_pass, GraphicsShader, PipelineType,
+    generate_swap_chain, graphics_run_indices, setup_render_pass, GraphicsCompileArgs,
+    GraphicsShader,
 };
 
 use crate::pipeline::AbstractBind;
-pub use pipeline::bind::{BindGroup1, Indices, Vertex};
+pub use pipeline::bind::{BindGroup1, Indices, SamplerData, TextureData, Vertex};
 
-pub use pipeline::helper::{generate_projection_matrix, generate_view_matrix, load_cube};
+pub use pipeline::helper::{
+    generate_identity_matrix, generate_projection_matrix, generate_view_matrix, load_cube,
+    translate,
+};
 
 async fn run(event_loop: EventLoop<()>, window: Window) {
     let size = window.inner_size();
@@ -88,7 +90,8 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 
     eager_binding! {context = vertex!(), fragment!()};
 
-    let (program, _) = compile_valid_graphics_program!(device, context, S_V, S_F, PipelineType::Color);
+    let (program, _) =
+        compile_valid_graphics_program!(device, context, S_V, S_F, GraphicsCompileArgs::default());
 
     let (positions, _, index_data) = load_cube();
 
@@ -143,11 +146,12 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 
     let bind_view_mat = BindGroup1::new(&device, &view_mat);
     let bind_proj_mat = BindGroup1::new(&device, &proj_mat);
+    // let texture = BindGroup1::new(&device, &(data, descriptor, queue));
     let bind_model_mat = BindGroup1::new(&device, &model_mat);
     let bind_model_mat2 = BindGroup1::new(&device, &model_mat2);
 
     // A "chain" of buffers that we render on to the display
-    let mut swap_chain = generate_swap_chain(&surface, &window, &device);
+    let swap_chain = generate_swap_chain(&surface, &window, &device);
 
     event_loop.run(move |event, _, control_flow: &mut ControlFlow| {
         *control_flow = ControlFlow::Poll;
@@ -162,7 +166,22 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                     .expect("Timeout when acquiring next swap chain texture")
                     .output;
                 {
-                    let mut rpass = setup_render_pass(&program, &mut init_encoder, &frame);
+                    let mut rpass = setup_render_pass(
+                        &program,
+                        &mut init_encoder,
+                        wgpu::RenderPassDescriptor {
+                            label: None,
+                            color_attachments: &[wgpu::RenderPassColorAttachmentDescriptor {
+                                attachment: &frame.view,
+                                resolve_target: None,
+                                ops: wgpu::Operations {
+                                    load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                                    store: true,
+                                },
+                            }],
+                            depth_stencil_attachment: None,
+                        },
+                    );
 
                     //
                     // Handle the setup for the pipeline
@@ -176,15 +195,17 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                             {
                                 let context4 = (&context3).set_u_proj(&mut rpass, &bind_proj_mat);
                                 {
-                                    let context5 = (&context4).set_u_model(&mut rpass, &bind_model_mat);
+                                    let context5 =
+                                        (&context4).set_u_model(&mut rpass, &bind_model_mat);
                                     {
-                                        rpass =
-                                            context5.runnable(|| graphics_run_indices(rpass, &indices, 1));
+                                        rpass = context5
+                                            .runnable(|| graphics_run_indices(rpass, &indices, 1));
                                     }
-                                    let context5_1 = (&context4).set_u_model(&mut rpass, &bind_model_mat2);
+                                    let context5_1 =
+                                        (&context4).set_u_model(&mut rpass, &bind_model_mat2);
                                     {
-                                        let _ =
-                                            context5_1.runnable(|| graphics_run_indices(rpass, &indices, 1));
+                                        let _ = context5_1
+                                            .runnable(|| graphics_run_indices(rpass, &indices, 1));
                                     }
                                 }
                             }

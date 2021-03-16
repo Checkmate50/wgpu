@@ -1,7 +1,6 @@
 use glsl_to_spirv::ShaderType;
 
 use std::collections::HashMap;
-
 use std::convert::TryInto;
 use std::rc::Rc;
 
@@ -11,6 +10,10 @@ use crate::bind::{
     new_bindings, Bindings, DefaultBinding, OutProgramBindings, ProgramBindings, SamplerBinding,
     TextureBinding,
 };
+
+pub struct ComputeProgram {
+    pub pipeline: wgpu::ComputePipeline,
+}
 
 #[derive(Debug)]
 pub struct ComputeBindings {
@@ -22,6 +25,8 @@ pub struct OutComputeBindings {
     pub bindings: Vec<DefaultBinding>,
 }
 
+
+//todo is this still needed??
 impl OutComputeBindings {
     pub fn move_buffers(&mut self) -> OutComputeBindings {
         let mut new_binds = new_bindings(&self.bindings);
@@ -77,13 +82,7 @@ impl OutProgramBindings for OutComputeBindings {
     }
 }
 
-pub struct ComputeProgram {
-    pub device: wgpu::Device,
-    queue: wgpu::Queue,
-    pipeline: wgpu::ComputePipeline,
-    bind_group_layout: wgpu::BindGroupLayout,
-}
-
+//todo unify this with the graphics version into shared
 fn stringify_shader(s: &ComputeShader, b: &ComputeBindings, b_out: &OutComputeBindings) -> String {
     let mut buffer = Vec::new();
     for i in &b.bindings[..] {
@@ -124,6 +123,7 @@ fn stringify_shader(s: &ComputeShader, b: &ComputeBindings, b_out: &OutComputeBi
     )
 }
 
+//todo remove bindgroup layout from this
 fn create_bindings(
     compute: &ComputeShader,
     device: &wgpu::Device,
@@ -212,25 +212,9 @@ fn create_bindings(
 
 pub async fn compile(
     compute: &ComputeShader,
+    device: &wgpu::Device,
+    //todo bind_group_layout: Vec<wgpu::BindGroupLayout>,
 ) -> (ComputeProgram, ComputeBindings, OutComputeBindings) {
-    let adapter = wgpu::Adapter::request(
-        &wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::Default,
-            compatible_surface: None,
-        },
-        wgpu::BackendBit::PRIMARY,
-    )
-    .await
-    .unwrap();
-
-    let (device, queue) = adapter
-        .request_device(&wgpu::DeviceDescriptor {
-            extensions: wgpu::Extensions {
-                anisotropic_filtering: false,
-            },
-            limits: wgpu::Limits::default(),
-        })
-        .await;
 
     let (bind_group_layout, program_bindings, out_program_bindings) =
         create_bindings(&compute, &device);
@@ -242,12 +226,15 @@ pub async fn compile(
     );
 
     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: None,
         bind_group_layouts: &[&bind_group_layout],
+        push_constant_ranges: &[],
     });
 
     // The part where we actually bring it all together
     let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        layout: &pipeline_layout,
+        label: None,
+        layout: Some(&pipeline_layout),
         compute_stage: wgpu::ProgrammableStageDescriptor {
             module: &cs_module,
             entry_point: "main",
@@ -266,9 +253,7 @@ pub async fn compile(
     )
 }
 
-pub fn compute(cpass: &mut wgpu::ComputePass, length: u32) {
-    cpass.dispatch(length, 1, 1);
-}
+
 
 fn buffer_map_setup<'a>(
     bindings: &'a ComputeBindings,
@@ -371,6 +356,10 @@ pub fn run(
     program.queue.submit(&[encoder.finish()]);
 
     out_bindings.bindings
+}
+
+pub fn compute(cpass: &mut wgpu::ComputePass, length: u32) {
+    cpass.dispatch(length, 1, 1);
 }
 
 pub async fn read_uvec(
