@@ -35,6 +35,7 @@ pub fn compile_shader(contents: String, shader: ShaderType, device: &wgpu::Devic
     })
 }
 
+//todo phase out glsltype infavor of WgpuType
 #[derive(Debug, Clone, PartialEq)]
 #[allow(dead_code)]
 pub enum GLSLTYPE {
@@ -71,7 +72,7 @@ impl GLSLTYPE {
             GLSLTYPE::Vec1 => std::mem::size_of::<f32>(),
             GLSLTYPE::Vec2 => std::mem::size_of::<[f32; 2]>(),
             GLSLTYPE::Uvec3 => std::mem::size_of::<[u32; 3]>(),
-            GLSLTYPE::Vec3 => std::mem::size_of::<[f32; 3]>(),
+            GLSLTYPE::Vec3 => std::mem::size_of::<[f32; 4]>(),
             GLSLTYPE::Vec4 => std::mem::size_of::<[f32; 4]>(),
             GLSLTYPE::Mat4 => 64,
             GLSLTYPE::ArrayInt => panic!("TODO: I haven't checked the size of this yet"),

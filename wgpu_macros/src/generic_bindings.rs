@@ -10,7 +10,7 @@ use std::iter;
 use rand::Rng;
 
 // For Types like `vec` which can have dimensions `vec2`, `vec3`, and `vec4`
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 enum GLSLDimension {
     Two,
     Three,
@@ -46,9 +46,11 @@ enum GLSLType {
     Mat(GLSLDimension, GLSLDimension),
     DMat(GLSLDimension, GLSLDimension),
     // todo I think I need to describe arrays somehow?
+    ArrayBool,
     ArrayInt,
     ArrayUint,
     ArrayFloat,
+    ArrayDouble,
     ArrayVec(GLSLDimension),
     // Sampler types todo add more https://www.khronos.org/opengl/wiki/Sampler_(GLSL)
     Sampler,
@@ -58,6 +60,37 @@ enum GLSLType {
     TextureCube,
     Texture2D,
     Texture2DArray,
+}
+
+impl GLSLType {
+    // For vertex parameters, you bind an array of values but the pipeline give the vertex/fragment shader one value at a time so even if the parameter is of type `float`, you need to bind `float[]`
+    fn arrayify(&self) -> Self {
+        match self {
+            GLSLType::Bool => GLSLType::ArrayBool,
+            GLSLType::Int => GLSLType::ArrayInt,
+            GLSLType::Uint => GLSLType::ArrayUint,
+            GLSLType::Float => GLSLType::ArrayFloat,
+            GLSLType::Double => GLSLType::ArrayDouble,
+            GLSLType::BVec(_) => {todo!()}
+            GLSLType::IVec(_) => {todo!()}
+            GLSLType::UVec(_) => {todo!()}
+            GLSLType::Vec(dim) => {GLSLType::ArrayVec(*dim)}
+            GLSLType::DVec(_) => {todo!()}
+            GLSLType::Mat(_, _) => {todo!()}
+            GLSLType::DMat(_, _) => {todo!()}
+            GLSLType::ArrayBool => {todo!()}
+            GLSLType::ArrayInt => {todo!()}
+            GLSLType::ArrayUint => {todo!()}
+            GLSLType::ArrayFloat => {todo!()}
+            GLSLType::ArrayDouble => {todo!()}
+            GLSLType::ArrayVec(_) => {todo!()}
+            GLSLType::Sampler => {todo!()}
+            GLSLType::SamplerShadow => {todo!()}
+            GLSLType::TextureCube => {todo!()}
+            GLSLType::Texture2D => {todo!()}
+            GLSLType::Texture2DArray => {todo!()}
+        }
+    }
 }
 
 impl Parse for GLSLType {
@@ -144,7 +177,12 @@ impl Parse for Parameters {
             }
         }
 
-        let glsl_type = qual_and_type.parse::<GLSLType>()?;
+        let mut glsl_type = qual_and_type.parse::<GLSLType>()?;
+
+        // Then the input into the parameter is from an array and we need to promote it to an array
+        if quals.contains(&format_ident!("vertex")) {
+            glsl_type = glsl_type.arrayify();
+        }
 
         let name = input.parse::<Ident>()?;
         Ok(Parameters {
@@ -707,6 +745,15 @@ fn create_base_type(ty: &GLSLType, qualifiers: &Vec<Ident>) -> syn::GenericArgum
             // Vec<u32>
             let mut generic_type = syn::punctuated::Punctuated::new();
             create_vec_type(&mut generic_type, format_ident!("u32"));
+            create_buffer_type(
+                &mut data_type,
+                generic_type,
+                qualifiers.contains(&format_ident!("buffer")),
+            );
+        }
+        GLSLType::ArrayFloat => {
+            let mut generic_type = syn::punctuated::Punctuated::new();
+            create_vec_type(&mut generic_type, format_ident!("f32"));
             create_buffer_type(
                 &mut data_type,
                 generic_type,
