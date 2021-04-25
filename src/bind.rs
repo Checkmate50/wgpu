@@ -1,5 +1,7 @@
+pub use crate::read::MyBufferView;
+pub use crate::write::MyBufferViewMut;
 use crate::shared::{GLSLTYPE, QUALIFIER};
-use core::panic;
+pub use crate::write;
 use std::marker::PhantomData;
 use wgpu_macros::create_get_view_func;
 use zerocopy::AsBytes as _;
@@ -8,22 +10,37 @@ use std::rc::Rc;
 
 use wgpu::util::DeviceExt;
 
+/// This trait describes the general methods that are needed to convert a rust type into valid data bound on the device.
 pub trait WgpuType {
+    /// Sends the data to the device and a handler to that data is returned as `BoundData`.
     fn bind(&self, device: &wgpu::Device, qual: QUALIFIER) -> BoundData;
 
-    // This is the size of the type for the purposes of layout
-    // This is not the size of the underlying data
+    /// This is the size of the type for the purposes of layout
+    /// This is not the size of the underlying data
     fn size_of() -> usize;
 
+    /// This is used to convert the compile time type into a valid layout on the device without knowing what the value of the data will be.
     fn create_binding_type() -> wgpu::BindingType;
+
+    /// Sometimes the usage of the underlying data is described by how it is bound. For example, a Vertex will always have `wgpu::BufferUsage::VERTEX`. However, for other buffers the value depends on it's compile time type. For example, whether we are creating a uniform or storage buffer. In this second case, I've added this convenience function to get the appropriate qualifiers from the type.
+    fn get_qualifiers() -> Option<QUALIFIER>;
+}
+pub struct BufferData<const BINDINGTYPE: wgpu::BufferBindingType, T> {
+    data: T,
 }
 
-impl WgpuType for f32 {
+impl<const BINDINGTYPE: wgpu::BufferBindingType, T> BufferData<BINDINGTYPE, T> {
+    pub fn new(data: T) -> Self {
+        BufferData { data }
+    }
+}
+
+impl<const BINDINGTYPE: wgpu::BufferBindingType> WgpuType for BufferData<BINDINGTYPE, f32> {
     fn bind(&self, device: &wgpu::Device, qual: QUALIFIER) -> BoundData {
-        bind_helper(
+        BoundData::new_buffer(
             device,
-            self.as_bytes(),
-            1,
+            self.data.as_bytes(),
+            1 as u64,
             Self::size_of(),
             Some(qual),
             Self::create_binding_type(),
@@ -34,19 +51,25 @@ impl WgpuType for f32 {
     }
     fn create_binding_type() -> wgpu::BindingType {
         wgpu::BindingType::Buffer {
-            ty: wgpu::BufferBindingType::Uniform,
+            ty: BINDINGTYPE,
             has_dynamic_offset: false,
             min_binding_size: wgpu::BufferSize::new(Self::size_of() as u64),
         }
     }
+    fn get_qualifiers() -> Option<QUALIFIER> {
+        match BINDINGTYPE {
+            wgpu::BufferBindingType::Uniform => Some(QUALIFIER::UNIFORM),
+            wgpu::BufferBindingType::Storage { read_only: _ } => Some(QUALIFIER::BUFFER),
+        }
+    }
 }
 
-impl WgpuType for Vec<u32> {
+impl<const BINDINGTYPE: wgpu::BufferBindingType> WgpuType for BufferData<BINDINGTYPE, Vec<u32>> {
     fn bind(&self, device: &wgpu::Device, qual: QUALIFIER) -> BoundData {
-        bind_helper(
+        BoundData::new_buffer(
             device,
-            self.as_slice().as_bytes(),
-            self.len() as u64,
+            self.data.as_slice().as_bytes(),
+            self.data.len() as u64,
             Self::size_of(),
             Some(qual),
             Self::create_binding_type(),
@@ -57,19 +80,25 @@ impl WgpuType for Vec<u32> {
     }
     fn create_binding_type() -> wgpu::BindingType {
         wgpu::BindingType::Buffer {
-            ty: wgpu::BufferBindingType::Uniform,
+            ty: BINDINGTYPE,
             has_dynamic_offset: false,
             min_binding_size: wgpu::BufferSize::new(Self::size_of() as u64),
         }
     }
+    fn get_qualifiers() -> Option<QUALIFIER> {
+        match BINDINGTYPE {
+            wgpu::BufferBindingType::Uniform => Some(QUALIFIER::UNIFORM),
+            wgpu::BufferBindingType::Storage { read_only: _ } => Some(QUALIFIER::BUFFER),
+        }
+    }
 }
 
-impl WgpuType for Vec<f32> {
+impl<const BINDINGTYPE: wgpu::BufferBindingType> WgpuType for BufferData<BINDINGTYPE, Vec<f32>> {
     fn bind(&self, device: &wgpu::Device, qual: QUALIFIER) -> BoundData {
-        bind_helper(
+        BoundData::new_buffer(
             device,
-            self.as_slice().as_bytes(),
-            self.len() as u64,
+            self.data.as_slice().as_bytes(),
+            self.data.len() as u64,
             Self::size_of(),
             Some(qual),
             Self::create_binding_type(),
@@ -80,25 +109,34 @@ impl WgpuType for Vec<f32> {
     }
     fn create_binding_type() -> wgpu::BindingType {
         wgpu::BindingType::Buffer {
-            ty: wgpu::BufferBindingType::Uniform,
+            ty: BINDINGTYPE,
             has_dynamic_offset: false,
             min_binding_size: wgpu::BufferSize::new(Self::size_of() as u64),
         }
     }
+    fn get_qualifiers() -> Option<QUALIFIER> {
+        match BINDINGTYPE {
+            wgpu::BufferBindingType::Uniform => Some(QUALIFIER::UNIFORM),
+            wgpu::BufferBindingType::Storage { read_only: _ } => Some(QUALIFIER::BUFFER),
+        }
+    }
 }
 
-impl WgpuType for Vec<[f32; 2]> {
+impl<const BINDINGTYPE: wgpu::BufferBindingType> WgpuType
+    for BufferData<BINDINGTYPE, Vec<[f32; 2]>>
+{
     fn bind(&self, device: &wgpu::Device, qual: QUALIFIER) -> BoundData {
         let numbers: Vec<f32> = self
+            .data
             .clone()
             .into_iter()
             .map(|x| x.to_vec())
             .flatten()
             .collect();
-        bind_helper(
+        BoundData::new_buffer(
             device,
             numbers.as_slice().as_bytes(),
-            self.len() as u64,
+            self.data.len() as u64,
             Self::size_of(),
             Some(qual),
             Self::create_binding_type(),
@@ -110,55 +148,33 @@ impl WgpuType for Vec<[f32; 2]> {
     }
     fn create_binding_type() -> wgpu::BindingType {
         wgpu::BindingType::Buffer {
-            ty: wgpu::BufferBindingType::Uniform,
+            ty: BINDINGTYPE,
             has_dynamic_offset: false,
             min_binding_size: wgpu::BufferSize::new(Self::size_of() as u64),
         }
     }
-}
-
-impl WgpuType for Vec<[f32; 3]> {
-    fn bind(&self, device: &wgpu::Device, qual: QUALIFIER) -> BoundData {
-        let numbers: Vec<f32> = self
-            .clone()
-            .into_iter()
-            .map(|x| x.to_vec())
-            .flatten()
-            .collect();
-        bind_helper(
-            device,
-            numbers.as_slice().as_bytes(),
-            self.len() as u64,
-            Self::size_of(),
-            Some(qual),
-            Self::create_binding_type(),
-        )
-    }
-
-    fn size_of() -> usize {
-        std::mem::size_of::<[f32; 3]>()
-    }
-    fn create_binding_type() -> wgpu::BindingType {
-        wgpu::BindingType::Buffer {
-            ty: wgpu::BufferBindingType::Uniform,
-            has_dynamic_offset: false,
-            min_binding_size: wgpu::BufferSize::new(Self::size_of() as u64),
+    fn get_qualifiers() -> Option<QUALIFIER> {
+        match BINDINGTYPE {
+            wgpu::BufferBindingType::Uniform => Some(QUALIFIER::UNIFORM),
+            wgpu::BufferBindingType::Storage { read_only: _ } => Some(QUALIFIER::BUFFER),
         }
     }
 }
-
-impl WgpuType for Vec<[f32; 4]> {
+impl<const BINDINGTYPE: wgpu::BufferBindingType> WgpuType
+    for BufferData<BINDINGTYPE, Vec<[f32; 3]>>
+{
     fn bind(&self, device: &wgpu::Device, qual: QUALIFIER) -> BoundData {
         let numbers: Vec<f32> = self
+            .data
             .clone()
             .into_iter()
-            .map(|x| x.to_vec())
+            .map(|x| {let mut y = x.to_vec(); y.push(0.0); y}) // We need to extend Vec3 -> Vec4 for alignment
             .flatten()
             .collect();
-        bind_helper(
+        BoundData::new_buffer(
             device,
             numbers.as_slice().as_bytes(),
-            self.len() as u64,
+            self.data.len() as u64,
             Self::size_of(),
             Some(qual),
             Self::create_binding_type(),
@@ -170,17 +186,62 @@ impl WgpuType for Vec<[f32; 4]> {
     }
     fn create_binding_type() -> wgpu::BindingType {
         wgpu::BindingType::Buffer {
-            ty: wgpu::BufferBindingType::Uniform,
+            ty: BINDINGTYPE,
             has_dynamic_offset: false,
             min_binding_size: wgpu::BufferSize::new(Self::size_of() as u64),
         }
     }
+    fn get_qualifiers() -> Option<QUALIFIER> {
+        match BINDINGTYPE {
+            wgpu::BufferBindingType::Uniform => Some(QUALIFIER::UNIFORM),
+            wgpu::BufferBindingType::Storage { read_only: _ } => Some(QUALIFIER::BUFFER),
+        }
+    }
 }
-
-impl WgpuType for cgmath::Matrix4<f32> {
+impl<const BINDINGTYPE: wgpu::BufferBindingType> WgpuType
+    for BufferData<BINDINGTYPE, Vec<[f32; 4]>>
+{
     fn bind(&self, device: &wgpu::Device, qual: QUALIFIER) -> BoundData {
-        let mat_slice: &[f32; 16] = self.as_ref();
-        bind_helper(
+        let numbers: Vec<f32> = self
+            .data
+            .clone()
+            .into_iter()
+            .map(|x| x.to_vec())
+            .flatten()
+            .collect();
+        BoundData::new_buffer(
+            device,
+            numbers.as_slice().as_bytes(),
+            self.data.len() as u64,
+            Self::size_of(),
+            Some(qual),
+            Self::create_binding_type(),
+        )
+    }
+
+    fn size_of() -> usize {
+        std::mem::size_of::<[f32; 4]>()
+    }
+    fn create_binding_type() -> wgpu::BindingType {
+        wgpu::BindingType::Buffer {
+            ty: BINDINGTYPE,
+            has_dynamic_offset: false,
+            min_binding_size: wgpu::BufferSize::new(Self::size_of() as u64),
+        }
+    }
+    fn get_qualifiers() -> Option<QUALIFIER> {
+        match BINDINGTYPE {
+            wgpu::BufferBindingType::Uniform => Some(QUALIFIER::UNIFORM),
+            wgpu::BufferBindingType::Storage { read_only: _ } => Some(QUALIFIER::BUFFER),
+        }
+    }
+}
+impl<const BINDINGTYPE: wgpu::BufferBindingType> WgpuType
+    for BufferData<BINDINGTYPE, cgmath::Matrix4<f32>>
+{
+    fn bind(&self, device: &wgpu::Device, qual: QUALIFIER) -> BoundData {
+        let mat_slice: &[f32; 16] = self.data.as_ref();
+        BoundData::new_buffer(
             device,
             bytemuck::cast_slice(mat_slice.as_bytes()),
             64,
@@ -196,9 +257,15 @@ impl WgpuType for cgmath::Matrix4<f32> {
 
     fn create_binding_type() -> wgpu::BindingType {
         wgpu::BindingType::Buffer {
-            ty: wgpu::BufferBindingType::Uniform,
+            ty: BINDINGTYPE,
             has_dynamic_offset: false,
             min_binding_size: wgpu::BufferSize::new(Self::size_of() as u64),
+        }
+    }
+    fn get_qualifiers() -> Option<QUALIFIER> {
+        match BINDINGTYPE {
+            wgpu::BufferBindingType::Uniform => Some(QUALIFIER::UNIFORM),
+            wgpu::BufferBindingType::Storage { read_only: _ } => Some(QUALIFIER::BUFFER),
         }
     }
 }
@@ -251,6 +318,10 @@ impl<'a, const COMPARABLE: SamplerComparison, const FILTERABLE: SamplerFiltering
             comparison: COMPARABLE == SamplerComparison::True,
             filtering: FILTERABLE == SamplerFiltering::True,
         }
+    }
+    fn get_qualifiers() -> Option<QUALIFIER> {
+        //todo Do I need qualifiers here?
+        None
     }
 }
 
@@ -338,11 +409,15 @@ impl<
             view_dimension: VIEWDIMENSION,
         }
     }
+    fn get_qualifiers() -> Option<QUALIFIER> {
+        //todo Do I need qualifiers here?
+        None
+    }
 }
 
 pub enum BoundData {
     Buffer {
-        data: wgpu::Buffer,
+        data: Rc<wgpu::Buffer>,
         len: u64,
         size: usize,
         binding_type: wgpu::BindingType,
@@ -359,12 +434,51 @@ pub enum BoundData {
 }
 
 impl BoundData {
-    pub fn get_buffer(self) -> (wgpu::Buffer, u64, usize) {
+    pub fn new_buffer(
+        device: &wgpu::Device,
+        data: &[u8],
+        length: u64,
+        size: usize,
+        qual: Option<QUALIFIER>,
+        binding_type: wgpu::BindingType,
+    ) -> Self {
+        let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: None,
+            contents: data,
+            usage: match qual {
+                Some(QUALIFIER::VERTEX) => wgpu::BufferUsage::VERTEX | wgpu::BufferUsage::COPY_DST,
+                Some(QUALIFIER::UNIFORM) => {
+                    wgpu::BufferUsage::UNIFORM | wgpu::BufferUsage::COPY_DST
+                }
+                Some(QUALIFIER::BUFFER) | Some(_) | None => {
+                    wgpu::BufferUsage::STORAGE
+                        | wgpu::BufferUsage::COPY_DST
+                        | wgpu::BufferUsage::COPY_SRC
+                }
+            },
+        });
+
+        BoundData::Buffer {
+            data: Rc::new(buffer),
+            len: length,
+            size,
+            binding_type,
+        }
+    }
+
+    pub fn get_buffer_size_bytes(&self) -> Option<u64> {
+        match self {
+            BoundData::Buffer { len, size, .. } => Some(*len * *size as u64),
+            _ => None,
+        }
+    }
+
+    pub fn get_buffer(&self) -> Option<(Rc<wgpu::Buffer>, u64, usize)> {
         match self {
             BoundData::Buffer {
                 data, len, size, ..
-            } => (data, len, size),
-            _ => unreachable!(),
+            } => Some((data.clone(), *len, *size)),
+            _ => None,
         }
     }
     pub fn get_texture(self) -> wgpu::TextureView {
@@ -432,41 +546,9 @@ impl Indices {
     }
 }
 
-fn bind_helper(
-    device: &wgpu::Device,
-    data: &[u8],
-    length: u64,
-    size: usize,
-    qual: Option<QUALIFIER>,
-    binding_type: wgpu::BindingType,
-) -> BoundData {
-    let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: None,
-        contents: data,
-        usage: match qual {
-            Some(QUALIFIER::VERTEX) => wgpu::BufferUsage::VERTEX | wgpu::BufferUsage::COPY_DST,
-            Some(QUALIFIER::UNIFORM) => wgpu::BufferUsage::UNIFORM | wgpu::BufferUsage::COPY_DST,
-            Some(_) | None => {
-                wgpu::BufferUsage::MAP_READ
-                    | wgpu::BufferUsage::COPY_DST
-                    | wgpu::BufferUsage::STORAGE
-                    | wgpu::BufferUsage::COPY_SRC
-                    | wgpu::BufferUsage::VERTEX
-            }
-        },
-    });
-
-    BoundData::Buffer {
-        data: buffer,
-        len: length,
-        size,
-        binding_type,
-    }
-}
-
 pub struct Vertex<A: WgpuType + ?Sized> {
     typ: PhantomData<A>,
-    buffer: wgpu::Buffer,
+    buffer: Rc<wgpu::Buffer>,
 }
 
 impl<'a, A: WgpuType> Vertex<A> {
@@ -477,7 +559,7 @@ impl<'a, A: WgpuType> Vertex<A> {
     pub fn new(device: &wgpu::Device, data: &A) -> Self {
         Vertex {
             typ: PhantomData,
-            buffer: data.bind(device, QUALIFIER::VERTEX).get_buffer().0,
+            buffer: data.bind(device, QUALIFIER::VERTEX).get_buffer().unwrap().0,
         }
     }
 }
@@ -489,7 +571,9 @@ fn create_bind_group(device: &wgpu::Device, buffers: &Vec<BoundData>) -> wgpu::B
         .map(|(i, buf)| {
             wgpu::BindGroupLayoutEntry {
                 binding: i as u32,
-                visibility: wgpu::ShaderStage::VERTEX | wgpu::ShaderStage::FRAGMENT, // can check which stage
+                visibility: wgpu::ShaderStage::VERTEX
+                    | wgpu::ShaderStage::FRAGMENT
+                    | wgpu::ShaderStage::COMPUTE, // can check which stage
                 ty: match buf {
                     BoundData::Buffer { binding_type, .. } => *binding_type,
                     //todo check that these are good
@@ -531,9 +615,11 @@ fn create_bind_group(device: &wgpu::Device, buffers: &Vec<BoundData>) -> wgpu::B
 pub struct BindGroup1<B: WgpuType> {
     typ1: PhantomData<B>,
     data: Vec<BoundData>,
+
     bind_group: wgpu::BindGroup,
 }
 
+//todo also do impl's with macro
 impl<'a, B: WgpuType> BindGroup1<B> {
     pub fn get_bind_group(&'a self) -> &'a wgpu::BindGroup {
         &self.bind_group
@@ -542,12 +628,14 @@ impl<'a, B: WgpuType> BindGroup1<B> {
     pub fn get_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
         let bind_entry_vec = vec![wgpu::BindGroupLayoutEntry {
             binding: 0,
-            visibility: wgpu::ShaderStage::VERTEX | wgpu::ShaderStage::FRAGMENT, // TODO I've made uniforms visible to both stages even if they are only used in one. Find out if this is a bad thing
+            visibility: wgpu::ShaderStage::VERTEX
+                | wgpu::ShaderStage::FRAGMENT
+                | wgpu::ShaderStage::COMPUTE, // TODO I've made uniforms visible to both stages even if they are only used in one. Find out if this is a bad thing
             ty: B::create_binding_type(),
             count: None,
         }];
 
-        debug!(bind_entry_vec);
+        //debug!(bind_entry_vec);
 
         device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             // The layout of for each binding specify a number to connect with the bind_group, a visibility to specify for which stage it's for and a type
@@ -557,7 +645,7 @@ impl<'a, B: WgpuType> BindGroup1<B> {
     }
 
     pub fn new(device: &wgpu::Device, data0: &B) -> Self {
-        let data = vec![data0.bind(device, QUALIFIER::UNIFORM)];
+        let data = vec![data0.bind(device, B::get_qualifiers().unwrap())];
 
         let bind_group = create_bind_group(device, &data);
 
@@ -568,7 +656,6 @@ impl<'a, B: WgpuType> BindGroup1<B> {
         }
     }
 }
-
 pub struct BindGroup2<B: WgpuType, C: WgpuType> {
     typ1: PhantomData<B>,
     typ2: PhantomData<C>,
@@ -585,13 +672,17 @@ impl<'a, B: WgpuType, C: WgpuType> BindGroup2<B, C> {
         let bind_entry_vec = vec![
             wgpu::BindGroupLayoutEntry {
                 binding: 0,
-                visibility: wgpu::ShaderStage::VERTEX | wgpu::ShaderStage::FRAGMENT, // TODO I've made uniforms visible to both stages even if they are only used in one. Find out if this is a bad thing
+                visibility: wgpu::ShaderStage::VERTEX
+                    | wgpu::ShaderStage::FRAGMENT
+                    | wgpu::ShaderStage::COMPUTE, // TODO I've made uniforms visible to both stages even if they are only used in one. Find out if this is a bad thing
                 ty: B::create_binding_type(),
                 count: None,
             },
             wgpu::BindGroupLayoutEntry {
                 binding: 1,
-                visibility: wgpu::ShaderStage::VERTEX | wgpu::ShaderStage::FRAGMENT, // TODO I've made uniforms visible to both stages even if they are only used in one. Find out if this is a bad thing
+                visibility: wgpu::ShaderStage::VERTEX
+                    | wgpu::ShaderStage::FRAGMENT
+                    | wgpu::ShaderStage::COMPUTE, // TODO I've made uniforms visible to both stages even if they are only used in one. Find out if this is a bad thing
                 ty: C::create_binding_type(),
                 count: None,
             },
@@ -608,8 +699,8 @@ impl<'a, B: WgpuType, C: WgpuType> BindGroup2<B, C> {
 
     pub fn new(device: &wgpu::Device, data0: &B, data1: &C) -> Self {
         let data = vec![
-            data0.bind(device, QUALIFIER::UNIFORM),
-            data1.bind(device, QUALIFIER::UNIFORM),
+            data0.bind(device, B::get_qualifiers().unwrap()),
+            data1.bind(device, B::get_qualifiers().unwrap()),
         ];
 
         let bind_group = create_bind_group(device, &data);
@@ -620,6 +711,12 @@ impl<'a, B: WgpuType, C: WgpuType> BindGroup2<B, C> {
             data,
             bind_group,
         }
+    }
+    pub fn get_buffers(&self) -> Vec<Option<Rc<wgpu::Buffer>>> {
+        self.data
+            .iter()
+            .map(|d| d.get_buffer().and_then(|x| Some(x.0)))
+            .collect()
     }
 }
 
@@ -640,19 +737,25 @@ impl<'a, B: WgpuType, C: WgpuType, D: WgpuType> BindGroup3<B, C, D> {
         let bind_entry_vec = vec![
             wgpu::BindGroupLayoutEntry {
                 binding: 0,
-                visibility: wgpu::ShaderStage::VERTEX | wgpu::ShaderStage::FRAGMENT, // TODO I've made uniforms visible to both stages even if they are only used in one. Find out if this is a bad thing
+                visibility: wgpu::ShaderStage::VERTEX
+                    | wgpu::ShaderStage::FRAGMENT
+                    | wgpu::ShaderStage::COMPUTE, // TODO I've made uniforms visible to both stages even if they are only used in one. Find out if this is a bad thing
                 ty: B::create_binding_type(),
                 count: None,
             },
             wgpu::BindGroupLayoutEntry {
                 binding: 1,
-                visibility: wgpu::ShaderStage::VERTEX | wgpu::ShaderStage::FRAGMENT, // TODO I've made uniforms visible to both stages even if they are only used in one. Find out if this is a bad thing
+                visibility: wgpu::ShaderStage::VERTEX
+                    | wgpu::ShaderStage::FRAGMENT
+                    | wgpu::ShaderStage::COMPUTE, // TODO I've made uniforms visible to both stages even if they are only used in one. Find out if this is a bad thing
                 ty: C::create_binding_type(),
                 count: None,
             },
             wgpu::BindGroupLayoutEntry {
                 binding: 2,
-                visibility: wgpu::ShaderStage::VERTEX | wgpu::ShaderStage::FRAGMENT, // TODO I've made uniforms visible to both stages even if they are only used in one. Find out if this is a bad thing
+                visibility: wgpu::ShaderStage::VERTEX
+                    | wgpu::ShaderStage::FRAGMENT
+                    | wgpu::ShaderStage::COMPUTE, // TODO I've made uniforms visible to both stages even if they are only used in one. Find out if this is a bad thing
                 ty: D::create_binding_type(),
                 count: None,
             },
@@ -670,9 +773,9 @@ impl<'a, B: WgpuType, C: WgpuType, D: WgpuType> BindGroup3<B, C, D> {
     /// Initializes data on the device and returns it as a group
     pub fn new(device: &wgpu::Device, data0: &B, data1: &C, data2: &D) -> Self {
         let data = vec![
-            data0.bind(device, QUALIFIER::UNIFORM),
-            data1.bind(device, QUALIFIER::UNIFORM),
-            data2.bind(device, QUALIFIER::UNIFORM),
+            data0.bind(device, B::get_qualifiers().unwrap()),
+            data1.bind(device, B::get_qualifiers().unwrap()),
+            data2.bind(device, B::get_qualifiers().unwrap()),
         ];
 
         let bind_group = create_bind_group(device, &data);
@@ -684,6 +787,12 @@ impl<'a, B: WgpuType, C: WgpuType, D: WgpuType> BindGroup3<B, C, D> {
             data,
             bind_group,
         }
+    }
+    pub fn get_buffers(&self) -> Vec<Option<Rc<wgpu::Buffer>>> {
+        self.data
+            .iter()
+            .map(|d| d.get_buffer().and_then(|x| Some(x.0)))
+            .collect()
     }
 }
 
@@ -707,3 +816,100 @@ impl<'a, B: WgpuType, C: WgpuType, D: WgpuType> BindGroup3<B, C, D> {
 create_get_view_func!(1);
 create_get_view_func!(2);
 create_get_view_func!(3);
+
+//todo redo as a macro like get_view
+impl<'a, const BINDINGTYPE1: wgpu::BufferBindingType, T> BindGroup1<BufferData<BINDINGTYPE1, T>>
+where
+    BufferData<BINDINGTYPE1, T>: WgpuType,
+{
+    pub fn setup_read_0(
+        &self,
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+        bounds: std::ops::Range<u64>,
+    ) -> MyBufferView {
+        MyBufferView::new(
+            device,
+            encoder,
+            &self.data.get(0).unwrap().get_buffer().unwrap().0,
+            bounds,
+        )
+    }
+
+    pub fn setup_write_0(
+        &self,
+        device: &wgpu::Device,
+        bounds: std::ops::Range<u64>,
+    ) -> MyBufferViewMut {
+        MyBufferViewMut::new(
+            device,
+            self.data.get(0).unwrap().get_buffer().unwrap().0,
+            bounds,
+        )
+    }
+}
+
+impl<'a, const BINDINGTYPE: wgpu::BufferBindingType, T, R> BindGroup2<BufferData<BINDINGTYPE, T>, R>
+where
+    BufferData<BINDINGTYPE, T>: WgpuType,
+    R: WgpuType,
+{
+    pub fn setup_read_0(
+        &self,
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+        bounds: std::ops::Range<u64>,
+    ) -> MyBufferView {
+        MyBufferView::new(
+            device,
+            encoder,
+            &self.data.get(0).unwrap().get_buffer().unwrap().0,
+            bounds,
+        )
+    }
+
+    pub fn setup_write_0(
+        &self,
+        device: &wgpu::Device,
+        bounds: std::ops::Range<u64>,
+    ) -> MyBufferViewMut {
+        MyBufferViewMut::new(
+            device,
+            self.data.get(0).unwrap().get_buffer().unwrap().0,
+            bounds,
+        )
+    }
+}
+
+
+impl<'a, const BINDINGTYPE: wgpu::BufferBindingType, T, R> BindGroup2<R, BufferData<BINDINGTYPE, T>>
+where
+    BufferData<BINDINGTYPE, T>: WgpuType,
+    R: WgpuType,
+{
+    pub fn setup_read_1(
+        &self,
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+        bounds: std::ops::Range<u64>,
+    ) -> MyBufferView {
+        MyBufferView::new(
+            device,
+            encoder,
+            &self.data.get(1).unwrap().get_buffer().unwrap().0,
+            bounds,
+        )
+    }
+
+    pub fn setup_write_1(
+        &self,
+        device: &wgpu::Device,
+        bounds: std::ops::Range<u64>,
+    ) -> MyBufferViewMut {
+        MyBufferViewMut::new(
+            device,
+            self.data.get(1).unwrap().get_buffer().unwrap().0,
+            bounds,
+        )
+    }
+}

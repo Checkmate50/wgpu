@@ -5,35 +5,37 @@ extern crate pipeline;
 #[macro_use]
 extern crate eager;
 
-pub use pipeline::wgpu_compute_header::{compile, read_uvec, run, ComputeShader};
+pub use pipeline::wgpu_compute_header::{compile, compute_run, ComputeShader};
 
-pub use wgpu_macros::{generic_bindings, init};
+pub use pipeline::bind::{BindGroup1, BufferData, Indices, Vertex};
+pub use pipeline::AbstractBind;
+
+use std::convert::TryInto;
 
 async fn execute_gpu() {
-    init!();
-
-    let adapter = wgpu::Adapter::request(
-        &wgpu::RequestAdapterOptions {
-            // Can specify Low/High power usage
-            power_preference: wgpu::PowerPreference::Default,
+    let instance = wgpu::Instance::new(wgpu::BackendBit::PRIMARY);
+    let adapter = instance
+        .request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::default(),
+            // Request an adapter which can render to our surface
             compatible_surface: None,
-        },
-        // Map to Vulkan/Metal/Direct3D 12
-        wgpu::BackendBit::PRIMARY,
-    )
-    .await
-    .unwrap();
+        })
+        .await
+        .expect("Failed to find an appropiate adapter");
 
     // The device manages the connection and resources of the adapter
     // The queue is a literal queue of tasks for the gpu
     let (device, queue) = adapter
-        .request_device(&wgpu::DeviceDescriptor {
-            extensions: wgpu::Extensions {
-                anisotropic_filtering: false,
+        .request_device(
+            &wgpu::DeviceDescriptor {
+                label: None,
+                features: wgpu::Features::empty(),
+                limits: wgpu::Limits::default(),
             },
-            limits: wgpu::Limits::default(),
-        })
-        .await;
+            None,
+        )
+        .await
+        .expect("Failed to create device");
 
     // qualifiers
     // buffer: is a buffer?
@@ -47,15 +49,15 @@ async fn execute_gpu() {
     //      the size of any out buffers that need to be created
 
     my_shader! {compute = {
-        [[buffer loop in out] uint[]] indices;
-        [[buffer in] uint[]] indices2;
+        [group1 [buffer loop in] uint[]] indices;
+        [group2 [buffer in out] uint[]] indices2;
         //[[buffer out] uint[]] result;
         //[... uint] xindex;
         {{
             void main() {
                 // uint xindex = gl_GlobalInvocationID.x;
                 uint index = gl_GlobalInvocationID.x;
-                indices[index] = indices[index]+indices2[index];
+                indices2[index] = indices[index]+indices2[index];
             }
         }}
     }}
@@ -64,30 +66,62 @@ async fn execute_gpu() {
 
     eager_binding! {context = compute!()};
 
-    let (program, mut bindings, mut out_bindings) = compile(&S).await;
+    let program = compile(&S, &device, context.get_layout(&device)).await;
 
-    let indices_1: Vec<u32> = vec![1, 2, 3, 4];
-    let indices_2: Vec<u32> = vec![2, 2, 2, 2];
-    let indices2: Vec<u32> = vec![4, 3, 2, 1];
+    let indices_1_data = BufferData::new(vec![1, 2, 3, 4]);
+    let indices_1 = BindGroup1::new(&device, &indices_1_data);
+
+    let indices_2_data = BufferData::new(vec![2, 2, 2, 2]);
+    let indices_2 = BindGroup1::new(&device, &indices_2_data);
+
+    let indices_3_data = BufferData::new(vec![4, 3, 2, 1]);
+    let indices_3 = BindGroup1::new(&device, &indices_3_data);
 
     {
-        let context1 = context.bind_indices2(&indices2, &device, &mut bindings, &mut out_bindings);
-        let context2 =
-            (&context1).bind_indices(&indices_1, &device, &mut bindings, &mut out_bindings);
-        let result_out_bindings = out_bindings.move_buffers();
-
-        let result1 = context2.runnable(|| run(&program, &mut bindings, result_out_bindings));
-
-        println!("{:?}", read_uvec(&program, &result1, "indices").await);
-
+        let mut encoder =
+            device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
         {
-            let context3 =
-                context1.bind_indices(&indices_2, &device, &mut bindings, &mut out_bindings);
+            let mut cpass =
+                encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: None });
+            cpass.set_pipeline(&program.pipeline);
+            let context1 = context.set_indices(&mut cpass, &indices_3);
             {
-                let result1 = context3.runnable(|| run(&program, &mut bindings, out_bindings));
-                println!("{:?}", read_uvec(&program, &result1, "indices").await);
+                let context2 = (&context1).set_indices2(&mut cpass, &indices_1);
+
+                cpass = context2.runnable(|| compute_run(cpass, 4));
+            }
+            {
+                let context3 =
+                    context1.set_indices2(&mut cpass, &indices_2);
+                {
+                    let _ = context3.runnable(|| compute_run(cpass, 4));
+                }
             }
         }
+
+        let x = indices_1.setup_read_0(&device, &mut encoder, 0..16);
+        let y = indices_2.setup_read_0(&device, &mut encoder, 0..16);
+
+        queue.submit(Some(encoder.finish()));
+
+        println!(
+            "{:?}",
+            x.read(&device)
+                .await
+                .unwrap()
+                .chunks_exact(4)
+                .map(|b| u32::from_ne_bytes(b.try_into().unwrap()))
+                .collect::<Vec<u32>>()
+        );
+        println!(
+            "{:?}",
+            y.read(&device)
+                .await
+                .unwrap()
+                .chunks_exact(4)
+                .map(|b| u32::from_ne_bytes(b.try_into().unwrap()))
+                .collect::<Vec<u32>>()
+        );
     }
 }
 

@@ -1,14 +1,17 @@
 #![recursion_limit = "256"]
-
 #[macro_use]
 extern crate pipeline;
 
 #[macro_use]
 extern crate eager;
 
-pub use pipeline::wgpu_compute_header::{compile, pipe, read_uvec, run, ComputeShader};
+pub use pipeline::wgpu_compute_header::{compile, compute_run, ComputeShader};
 
-pub use wgpu_macros::{generic_bindings, init};
+pub use pipeline::bind::{BindGroup1, BufferData, Indices, Vertex};
+pub use pipeline::AbstractBind;
+
+use std::convert::TryInto;
+use std::rc::Rc;
 
 async fn execute_gpu() {
     // qualifiers

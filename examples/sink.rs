@@ -237,7 +237,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
             label: None,
         },
         wgpu::TextureViewDescriptor::default(),
-        queue.clone()
+        queue.clone(),
     );
 
     let bind_group_t_s = BindGroup2::new(&device, &texture, &sampler);

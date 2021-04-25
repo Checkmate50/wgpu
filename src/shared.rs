@@ -275,8 +275,7 @@ macro_rules! qualifying {
     };
     (compare) => {
         pipeline::shared::QUALIFIER::COMPARE
-    };
-    //todo add all the others
+    }; //todo add all the others
 }
 
 #[macro_export]

@@ -1,0 +1,4 @@
+*.aux
+*.log
+*.synctex.gz
+__latexindent_temp.tex

@@ -17,8 +17,8 @@ pub use pipeline::wgpu_graphics_header::{
     GraphicsShader,
 };
 
-pub use pipeline::AbstractBind;
 pub use pipeline::bind::{BindGroup2, Indices, Vertex};
+pub use pipeline::AbstractBind;
 
 pub use pipeline::helper::{generate_projection_matrix, generate_view_matrix, load_cube};
 

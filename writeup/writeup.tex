@@ -1,0 +1,23 @@
+\documentclass{article}
+\begin{document}
+\title{Writeup}
+\author{Patrick LaFontaine}
+\maketitle{}
+\section{Some kind of introduction}
+
+    Graphics bugs are notoriously difficult in both identifying that a program actually has a bug and in debugging what the issue is. One class of graphics bugs relate to data transfer at the boundary between the CPU and GPU. More specifically, this library statically checks that: all of the data needed for a Webgpu pipeline to run is bound on the GPU, that this data is set to the correct location/slot/index in the pipeline, the data is of the correct type expected by the shader, and
+
+\section{An example bug in psuedo code}
+\section{How my library/dsl prevents this bug}
+\subsection{Why is this a real bug/issue? Examples????}
+\section{Background: Rust, WebGPU, GLSL, Compile-time/Macro programming}
+\section{The details}
+\subsection{The shader macro}
+\subsection{Sending data to the gpu(BindGroups/Vertex/Indices)}
+\subsection{The Context and set functions}
+\subsection{Graphics, Compute Header Library}
+\section{Future work}
+\section{Related Work}
+
+
+\end{document}

@@ -5,13 +5,11 @@ use std::convert::TryInto;
 use std::rc::Rc;
 
 use crate::shared::{
-    check_gl_builtin_type, compile_shader, has_in_qual, has_out_qual, has_uniform_qual,
-    is_gl_builtin, process_body, string_compare, GLSLTYPE, PARAMETER, QUALIFIER,
+    check_gl_builtin_type, compile_shader, has_out_qual, is_gl_builtin, process_body,
+    string_compare, GLSLTYPE, PARAMETER, QUALIFIER,
 };
 
 use crate::bind::{DefaultBinding, Indices, SamplerBinding, TextureBinding};
-
-use crate::context::BindingContext;
 
 pub struct GraphicsProgram {
     pub pipeline: wgpu::RenderPipeline,
@@ -118,6 +116,7 @@ pub fn generate_swap_chain(
     device.create_swap_chain(&surface, &sc_desc)
 }
 
+//todo clean this up, or better yet, can this move to proc_macro?
 fn create_bindings(
     vertex: &GraphicsShader,
     fragment: &GraphicsShader,
@@ -228,8 +227,9 @@ fn create_bindings(
                             x
                         }
                     };
-                    let binding_number =
-                        uniform_binding_number_fragment_map.entry(group_number).or_insert(0);
+                    let binding_number = uniform_binding_number_fragment_map
+                        .entry(group_number)
+                        .or_insert(0);
                     samplers_struct.push(SamplerBinding {
                         binding_number: *binding_number,
                         group_number,
@@ -252,8 +252,9 @@ fn create_bindings(
                             x
                         }
                     };
-                    let binding_number =
-                        uniform_binding_number_fragment_map.entry(group_number).or_insert(0);
+                    let binding_number = uniform_binding_number_fragment_map
+                        .entry(group_number)
+                        .or_insert(0);
                     textures_struct.push(TextureBinding {
                         binding_number: *binding_number,
                         group_number,
@@ -273,8 +274,9 @@ fn create_bindings(
                             x
                         }
                     };
-                    let binding_number =
-                        uniform_binding_number_fragment_map.entry(group_number).or_insert(0);
+                    let binding_number = uniform_binding_number_fragment_map
+                        .entry(group_number)
+                        .or_insert(0);
                     /* let num = if uniform_map.get(i.name).is_some() {
                         *uniform_map.get(i.name).unwrap()
                     } else {
@@ -553,29 +555,6 @@ fn draw_indexed(
     rpass.draw_indexed(indexes, 0, instances);
 }
 
-#[derive(Debug)]
-pub struct BindingPreprocess {
-    indices: Option<Rc<wgpu::Buffer>>,
-    index_len: Option<u32>,
-    num_instances: u32,
-    verticies: Vec<(u32, Rc<wgpu::Buffer>)>,
-    num_verts: u32,
-    bind_groups: Vec<Rc<wgpu::BindGroup>>,
-}
-
-impl<'a> Default for BindingPreprocess {
-    fn default() -> Self {
-        BindingPreprocess {
-            indices: None,
-            index_len: None,
-            num_instances: 0,
-            verticies: Vec::new(),
-            num_verts: 0,
-            bind_groups: Vec::new(),
-        }
-    }
-}
-
 pub fn graphics_run(
     mut rpass: wgpu::RenderPass,
     num_verts: u32,
@@ -786,37 +765,6 @@ macro_rules! compile_valid_stencil_program {
         .await;
         (x, compile_buffer)
     }};
-}
-
-// todo This doesn't construct the BindingContext correctly for outs
-pub const fn graphics_starting_context(
-    vertex: BindingContext,
-    fragment: GraphicsShader,
-) -> BindingContext {
-    // Take all of the in's of vertex and add the uniform in's of fragment
-    let mut graphcis_bind_context = vertex;
-    let mut uniforms_to_bind = [""; 32];
-    let mut uniform_acc = 0;
-    let mut acc = 0;
-
-    while acc < fragment.params.len() {
-        if has_in_qual(fragment.params[acc].qual) && has_uniform_qual(fragment.params[acc].qual) {
-            uniforms_to_bind[uniform_acc] = fragment.params[acc].name;
-            uniform_acc += 1;
-        }
-        acc += 1;
-    }
-
-    acc = 0;
-    let mut uniform_pointer = 0; // point at the one to be added up to uniform_acc
-    while acc < 32 && uniform_pointer < uniform_acc {
-        if string_compare(graphcis_bind_context.starting_context[acc], "") {
-            graphcis_bind_context.starting_context[acc] = uniforms_to_bind[uniform_pointer];
-            uniform_pointer += 1;
-        }
-        acc += 1;
-    }
-    graphcis_bind_context
 }
 
 // This is a crazy hack

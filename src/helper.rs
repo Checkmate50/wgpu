@@ -128,7 +128,7 @@ macro_rules! mx_correction {
 
 pub fn generate_light_projection(pos: [f32; 4], fov: f32) -> cgmath::Matrix4<f32> {
     use cgmath::{Deg, EuclideanSpace, Matrix4, PerspectiveFov, Point3, Vector3};
-    let mx_view = Matrix4::look_at(
+    let mx_view = Matrix4::look_at_rh(
         Point3::new(pos[0], pos[1], pos[2]),
         Point3::origin(),
         Vector3::unit_z(),
@@ -144,7 +144,7 @@ pub fn generate_light_projection(pos: [f32; 4], fov: f32) -> cgmath::Matrix4<f32
 }
 
 pub fn generate_view_matrix() -> cgmath::Matrix4<f32> {
-    let mx_view = cgmath::Matrix4::look_at(
+    let mx_view = cgmath::Matrix4::look_at_rh(
         // From this spot
         cgmath::Point3::new(0.05f32, 2.4, -5.0) * 2.0,
         // Look here

@@ -16,9 +16,24 @@ pub use pipeline::wgpu_graphics_header::{
 };
 
 use crate::pipeline::AbstractBind;
-pub use pipeline::bind::Vertex;
+pub use pipeline::bind::{BufferData, Vertex};
 
 pub use wgpu_macros::generic_bindings;
+
+my_shader! {vertex = {
+    [[vertex in] vec3] a_position;
+    [[vertex in] float] in_brightness;
+    [[out] vec3] posColor;
+    [[out] float] brightness;
+    [[out] vec4] gl_Position;
+    {{
+        void main() {
+            posColor = a_position;
+            brightness = in_brightness;
+            gl_Position = vec4(a_position, 1.0);
+        }
+    }}
+}}
 
 async fn run(event_loop: EventLoop<()>, window: Window) {
     let instance = wgpu::Instance::new(wgpu::BackendBit::PRIMARY);
@@ -46,24 +61,9 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         .await
         .expect("Failed to create device");
 
-    my_shader! {vertex = {
-        [[vertex in] vec3] a_position;
-        [[vertex in] vec1] in_brightness;
-        [[out] vec3] posColor;
-        [[out] vec1] brightness;
-        [[out] vec4] gl_Position;
-        {{
-            void main() {
-                posColor = a_position;
-                brightness = in_brightness;
-                gl_Position = vec4(a_position, 1.0);
-            }
-        }}
-    }}
-
     my_shader! {fragment = {
         [[in] vec3] posColor;
-        [[in] vec1] brightness;
+        [[in] float] brightness;
         [[out] vec4] color;
         {{
             void main() {
@@ -84,8 +84,8 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     let positions = vec![[0.0, 0.7, 0.0], [-0.5, 0.5, 0.0], [0.5, -0.5, 0.0]];
     let brightness = vec![0.5, 0.5, 0.9];
 
-    let vertex_position = Vertex::new(&device, &positions);
-    let vertex_brightness = Vertex::new(&device, &brightness);
+    let vertex_position = Vertex::new(&device, &BufferData::new(positions));
+    let vertex_brightness = Vertex::new(&device, &BufferData::new(brightness));
 
     // A "chain" of buffers that we render on to the display
     let swap_chain = generate_swap_chain(&surface, &window, &device);

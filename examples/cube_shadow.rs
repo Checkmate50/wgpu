@@ -16,8 +16,8 @@ pub use pipeline::wgpu_graphics_header::{
     GraphicsShader,
 };
 
-pub use pipeline::AbstractBind;
 pub use pipeline::bind::{BindGroup1, BindGroup2, Indices, SamplerData, TextureData, Vertex};
+pub use pipeline::AbstractBind;
 
 pub use pipeline::helper::{
     create_texels, generate_identity_matrix, generate_light_projection, generate_projection_matrix,
@@ -349,7 +349,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                     let bind_group_light_proj_pos =
                         BindGroup2::new(&device, &light_proj_mat, &light_pos);
 
-                    dbg!(&light_pos);
+                    //dbg!(&light_pos);
 
                     {
                         let shadow_view = shadow_t_s.get_view_0(&wgpu::TextureViewDescriptor {

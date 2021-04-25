@@ -23,6 +23,11 @@ hello:
 	#export RUST_BACKTRACE=1 && cargo +nightly run --example hello_compute
 	cargo +nightly run  --example hello_compute
 
+.PHONY: write
+write:
+	#export RUST_BACKTRACE=1 && cargo +nightly run --example write_compute
+	cargo +nightly run  --example write_compute
+
 .PHONY: boids
 boids:
 	#export RUST_BACKTRACE=1 && cargo +nightly run --example boids_compute

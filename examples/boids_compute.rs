@@ -1,14 +1,46 @@
+#![recursion_limit = "1024"]
 #[macro_use]
 extern crate pipeline;
 
-pub use pipeline::shared::{
-    bind_float, bind_vec, bind_vec3, is_gl_builtin, ready_to_run, update_bind_context,
-};
-pub use pipeline::wgpu_compute_header::{compile, read_fvec3, run, ComputeShader};
+#[macro_use]
+extern crate eager;
 
-pub use static_assertions::const_assert;
+pub use pipeline::wgpu_compute_header::{compile, compute_run, ComputeShader};
+
+pub use pipeline::bind::{BindGroup1, BindGroup2, BindGroup3, BufferData, Indices, Vertex};
+pub use pipeline::AbstractBind;
+
+use std::convert::TryInto;
+use std::rc::Rc;
 
 async fn execute_gpu() {
+    let instance = wgpu::Instance::new(wgpu::BackendBit::PRIMARY);
+    let adapter = instance
+        .request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::default(),
+            // Request an adapter which can render to our surface
+            compatible_surface: None,
+        })
+        .await
+        .expect("Failed to find an appropiate adapter");
+
+    // The device manages the connection and resources of the adapter
+    // The queue is a literal queue of tasks for the gpu
+    let (device, queue) = adapter
+        .request_device(
+            &wgpu::DeviceDescriptor {
+                label: None,
+                features: wgpu::Features::empty(),
+                limits: wgpu::Limits {
+                    max_bind_groups: 5,
+                    ..Default::default()
+                },
+            },
+            None,
+        )
+        .await
+        .expect("Failed to create device");
+
     // qualifiers
     // buffer: is a buffer?
     // in: this parameter must be bound to before the program runs
@@ -21,19 +53,19 @@ async fn execute_gpu() {
     //      the size of any out buffers that need to be created
 
     // TODO how to set a work group larger than 1?
-    const BOIDS: (ComputeShader, [&str; 32], [&str; 32]) = compute_shader! {
-        [[uniform in] float] deltaT;
-        [[uniform in] float] rule1Distance;
-        [[uniform in] float] rule2Distance;
-        [[uniform in] float] rule3Distance;
-        [[uniform in] float] rule1Scale;
-        [[uniform in] float] rule2Scale;
-        [[uniform in] float] rule3Scale;
+    my_shader! {BOIDS = {
+        [group1 [uniform in] float] deltaT;
+        [group2 [uniform in] float] rule1Distance;
+        [group2 [uniform in] float] rule2Distance;
+        [group2 [uniform in] float] rule3Distance;
+        [group3 [uniform in] float] rule1Scale;
+        [group3 [uniform in] float] rule2Scale;
+        [group3 [uniform in] float] rule3Scale;
 
-        [[buffer loop in] vec3[]] srcParticlePos;
-        [[buffer loop in] vec3[]] srcParticleVel;
-        [[buffer out] vec3[]] dstParticlePos;
-        [[buffer out] vec3[]] dstParticleVel;
+        [group4 [buffer loop in] vec3[]] srcParticlePos;
+        [group4 [buffer loop in] vec3[]] srcParticleVel;
+        [group5 [buffer in out] vec3[]] dstParticlePos;
+        [group5 [buffer in out] vec3[]] dstParticleVel;
 
 
             /* layout(std140, set = 0, binding = 1) buffer SrcParticles {
@@ -104,126 +136,111 @@ async fn execute_gpu() {
                 dstParticleVel[index] = vec3(vVel, 0.0);
             }
         }}
-    };
+    }}
 
-    let mut srcParticlePos: Vec<[f32; 3]> = vec![[0.0, 0.0, 0.0], [0.3, 0.2, 0.0]];
-    let mut srcParticleVel: Vec<[f32; 3]> = vec![[0.01, -0.02, 0.0], [-0.05, -0.03, 0.0]];
-    let deltaT: f32 = 0.04;
-    let rule1Distance: f32 = 0.1;
-    let rule2Distance: f32 = 0.25;
-    let rule3Distance: f32 = 0.25;
-    let rule1Scale: f32 = 0.02;
-    let rule2Scale: f32 = 0.05;
-    let rule3Scale: f32 = 0.005;
+    const S: ComputeShader = eager_compute_shader! {BOIDS!()};
+    eager_binding! {context = BOIDS!()};
 
-    /*     let texture : wgpu::Buffer = create_texture(".."); */
+    let program = compile(&S, &device, context.get_layout(&device)).await;
+
+    let srcParticlePos = BufferData::new(vec![[0.0, 0.0, 0.0], [0.3, 0.2, 0.0]]);
+    let srcParticleVel = BufferData::new(vec![[0.01, -0.02, 0.0], [-0.05, -0.03, 0.0]]);
+    let srcParticle_bg = BindGroup2::new(&device, &srcParticlePos, &srcParticleVel);
+
+    let dstParticlePos = BufferData::new(vec![[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]]);
+    let dstParticleVel = BufferData::new(vec![[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]]);
+    let dstParticle_bg = BindGroup2::new(&device, &dstParticlePos, &dstParticleVel);
+
+    let deltaT = BindGroup1::new(&device, &BufferData::new(0.04));
+
+    let ruleDistance = BindGroup3::new(
+        &device,
+        &BufferData::new(0.1),
+        &BufferData::new(0.25),
+        &BufferData::new(0.25),
+    );
+
+    let ruleScale = BindGroup3::new(
+        &device,
+        &BufferData::new(0.02),
+        &BufferData::new(0.05),
+        &BufferData::new(0.005),
+    );
+
+    let mut loop_count = 0;
     loop {
-        const S: ComputeShader = BOIDS.0;
-        const STARTING_BIND_CONTEXT: [&str; 32] = BOIDS.1;
-
-        let (program, mut bindings, mut out_bindings) = compile(&S).await;
-
-        const BIND_CONTEXT_1: [&str; 32] = update_bind_context(&STARTING_BIND_CONTEXT, "deltaT");
-        bind_float(
-            &program,
-            &mut bindings,
-            &mut out_bindings,
-            &deltaT,
-            "deltaT".to_string(),
-        );
-
-        const BIND_CONTEXT_2: [&str; 32] = update_bind_context(&BIND_CONTEXT_1, "rule1Distance");
-        bind_float(
-            &program,
-            &mut bindings,
-            &mut out_bindings,
-            &rule1Distance,
-            "rule1Distance".to_string(),
-        );
-
-        const BIND_CONTEXT_3: [&str; 32] = update_bind_context(&BIND_CONTEXT_2, "rule2Distance");
-        bind_float(
-            &program,
-            &mut bindings,
-            &mut out_bindings,
-            &rule2Distance,
-            "rule2Distance".to_string(),
-        );
-
-        const BIND_CONTEXT_4: [&str; 32] = update_bind_context(&BIND_CONTEXT_3, "rule3Distance");
-        bind_float(
-            &program,
-            &mut bindings,
-            &mut out_bindings,
-            &rule3Distance,
-            "rule3Distance".to_string(),
-        );
-
-        const BIND_CONTEXT_5: [&str; 32] = update_bind_context(&BIND_CONTEXT_4, "rule1Scale");
-        bind_float(
-            &program,
-            &mut bindings,
-            &mut out_bindings,
-            &rule1Scale,
-            "rule1Scale".to_string(),
-        );
-
-        const BIND_CONTEXT_6: [&str; 32] = update_bind_context(&BIND_CONTEXT_5, "rule2Scale");
-        bind_float(
-            &program,
-            &mut bindings,
-            &mut out_bindings,
-            &rule2Scale,
-            "rule2Scale".to_string(),
-        );
-
-        const BIND_CONTEXT_7: [&str; 32] = update_bind_context(&BIND_CONTEXT_6, "rule3Scale");
-        bind_float(
-            &program,
-            &mut bindings,
-            &mut out_bindings,
-            &rule3Scale,
-            "rule3Scale".to_string(),
-        );
-
-        const BIND_CONTEXT_8: [&str; 32] = update_bind_context(&BIND_CONTEXT_7, "srcParticlePos");
-        bind_vec3(
-            &program,
-            &mut bindings,
-            &mut out_bindings,
-            &srcParticlePos,
-            "srcParticlePos".to_string(),
-        );
-
-        const BIND_CONTEXT_9: [&str; 32] = update_bind_context(&BIND_CONTEXT_8, "srcParticleVel");
-        bind_vec3(
-            &program,
-            &mut bindings,
-            &mut out_bindings,
-            &srcParticleVel,
-            "srcParticleVel".to_string(),
-        );
-
+        let (srcParticle, dstParticle) = if loop_count % 2 == 0 {
+            (&srcParticle_bg, &dstParticle_bg)
+        } else {
+            (&dstParticle_bg, &srcParticle_bg)
+        };
+        let mut encoder =
+            device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
         {
-            ready_to_run(BIND_CONTEXT_9);
-            let result = run(&program, &mut bindings, out_bindings);
-            let dstParticlePos = read_fvec3(&program, &result, "dstParticlePos").await;
-            let dstParticleVel = read_fvec3(&program, &result, "dstParticleVel").await;
-            println!("Current values");
-            println!("{:?}", dstParticlePos);
-            println!("{:?}", dstParticleVel);
-            let mut dstParticlePos1: [f32; 3] = Default::default();
-            let mut dstParticlePos2: [f32; 3] = Default::default();
-            let mut dstParticleVel1: [f32; 3] = Default::default();
-            let mut dstParticleVel2: [f32; 3] = Default::default();
+            let mut cpass =
+                encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: None });
+            cpass.set_pipeline(&program.pipeline);
 
-            dstParticlePos1.copy_from_slice(&dstParticlePos[0..3]);
-            dstParticlePos2.copy_from_slice(&dstParticlePos[3..6]);
-            dstParticleVel1.copy_from_slice(&dstParticleVel[0..3]);
-            dstParticleVel2.copy_from_slice(&dstParticleVel[3..6]);
-            srcParticlePos = vec![dstParticlePos1, dstParticlePos2];
-            srcParticleVel = vec![dstParticleVel1, dstParticleVel2];
+            let context1 = (&context).set_deltaT(&mut cpass, &deltaT);
+
+            let context2 =
+                context1.set_rule1Distance_rule2Distance_rule3Distance(&mut cpass, &ruleDistance);
+
+            let context3 = context2.set_rule1Scale_rule2Scale_rule3Scale(&mut cpass, &ruleScale);
+
+            let context4 = context3.set_srcParticlePos_srcParticleVel(&mut cpass, &srcParticle);
+
+            let context5 = context4.set_dstParticlePos_dstParticleVel(&mut cpass, &dstParticle);
+
+            {
+                let _ = context5.runnable(|| compute_run(cpass, 2));
+            }
         }
+        let dstParticlePos = dstParticle.setup_read_0(
+            &device,
+            &mut encoder,
+            0..std::mem::size_of::<f32>() as u64 * 8,
+        );
+        let dstParticleVel = dstParticle.setup_read_1(
+            &device,
+            &mut encoder,
+            0..std::mem::size_of::<f32>() as u64 * 8,
+        );
+
+        queue.submit(Some(encoder.finish()));
+
+        println!(
+            "{:?}",
+            dstParticlePos
+                .read(&device)
+                .await
+                .unwrap()
+                .chunks_exact(4)
+                .map(|b| f32::from_ne_bytes(b.try_into().unwrap()))
+                .collect::<Vec<f32>>()
+                .as_slice()
+                .chunks_exact(4)
+                .map(|v4| TryInto::<[f32; 4]>::try_into(v4).unwrap())
+                .map(|v4| [v4[0], v4[1], v4[2]])
+                .collect::<Vec<[f32; 3]>>()
+        );
+        println!(
+            "{:?}",
+            dstParticleVel
+                .read(&device)
+                .await
+                .unwrap()
+                .chunks_exact(4)
+                .map(|b| f32::from_ne_bytes(b.try_into().unwrap()))
+                .collect::<Vec<f32>>()
+                .as_slice()
+                .chunks_exact(4)
+                .map(|v4| TryInto::<[f32; 4]>::try_into(v4).unwrap())
+                .map(|v4| [v4[0], v4[1], v4[2]])
+                .collect::<Vec<[f32; 3]>>()
+        );
+
+        loop_count += 1;
     }
 }
 
