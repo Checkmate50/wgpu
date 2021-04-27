@@ -18,7 +18,7 @@ pub use pipeline::wgpu_graphics_header::{
 };
 
 use crate::pipeline::AbstractBind;
-pub use pipeline::bind::{BindGroup1, BindGroup2, Indices, Vertex};
+pub use pipeline::bind::{BindGroup1, BindGroup2, BufferData, Indices, Vertex};
 
 pub use pipeline::helper::{
     generate_identity_matrix, generate_projection_matrix, generate_view_matrix, load_model,
@@ -86,12 +86,14 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 
     let (position_data, _, index_data) = load_model("src/models/teapot.obj");
 
-    let positions = Vertex::new(&device, &position_data);
+    let positions = Vertex::new(&device, &BufferData::new(position_data));
     let indices = Indices::new(&device, &index_data);
 
-    let view_mat = generate_view_matrix();
+    let view_mat = BufferData::new(generate_view_matrix());
 
-    let proj_mat = generate_projection_matrix(size.width as f32 / size.height as f32);
+    let proj_mat = BufferData::new(generate_projection_matrix(
+        size.width as f32 / size.height as f32,
+    ));
 
     let mut model_mat = generate_identity_matrix();
 
@@ -115,7 +117,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                     device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
                 model_mat = rotation_y(model_mat, 0.05);
-                let bind_group_model = BindGroup1::new(&device, &model_mat);
+                let bind_group_model = BindGroup1::new(&device, &BufferData::new(model_mat));
 
                 {
                     let mut rpass = setup_render_pass(

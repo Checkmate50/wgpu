@@ -16,7 +16,9 @@ pub use pipeline::wgpu_graphics_header::{
     GraphicsShader,
 };
 
-pub use pipeline::bind::{BindGroup1, BindGroup2, Indices, SamplerData, TextureData, Vertex};
+pub use pipeline::bind::{
+    BindGroup1, BindGroup2, BufferData, Indices, SamplerData, TextureData, Vertex,
+};
 pub use pipeline::AbstractBind;
 
 pub use pipeline::helper::{
@@ -225,36 +227,39 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 
     let view_proj_mat_init =
         generate_projection_matrix(size.width as f32 / size.height as f32) * generate_view_matrix();
-    let view_proj_mat = rotation(view_proj_mat_init, 0.0, 0.0, 0.0);
-    let world_mat = scale(translate(generate_identity_matrix(), 1.0, 3.0, -1.0), 0.5);
+    let view_proj_mat = BufferData::new(rotation(view_proj_mat_init, 0.0, 0.0, 0.0));
+    let world_mat = BufferData::new(scale(
+        translate(generate_identity_matrix(), 1.0, 3.0, -1.0),
+        0.5,
+    ));
 
     let bind_group_view_world = BindGroup2::new(&device, &view_proj_mat, &world_mat);
 
     let (positions_data, normals_data, index_data) = load_model("src/models/sphere.obj");
 
-    let positions = Vertex::new(&device, &positions_data);
-    let normals = Vertex::new(&device, &normals_data);
+    let positions = Vertex::new(&device, &BufferData::new(positions_data));
+    let normals = Vertex::new(&device, &BufferData::new(normals_data));
     let index = Indices::new(&device, &index_data);
 
     //let (mut positions, mut normals, mut index_data) = load_cube();
-    let color_data = vec![[0.583, 0.771, 0.014, 1.0]];
+    let color_data = BufferData::new(vec![[0.583, 0.771, 0.014, 1.0]]);
     let color = BindGroup1::new(&device, &color_data);
 
     let (plane_positions_data, plane_normals_data, plane_index_data) = load_plane(7);
 
-    let plane_positions = Vertex::new(&device, &plane_positions_data);
-    let plane_normals = Vertex::new(&device, &plane_normals_data);
+    let plane_positions = Vertex::new(&device, &BufferData::new(plane_positions_data));
+    let plane_normals = Vertex::new(&device, &BufferData::new(plane_normals_data));
     let plane_index = Indices::new(&device, &plane_index_data);
 
-    let plane_color_data = vec![[1.0, 1.0, 1.0, 1.0]];
+    let plane_color_data = BufferData::new(vec![[1.0, 1.0, 1.0, 1.0]]);
     let plane_color = BindGroup1::new(&device, &plane_color_data);
 
-    let plane_world_mat = generate_identity_matrix();
+    let plane_world_mat = BufferData::new(generate_identity_matrix());
     let bind_group_plane_world_mat = BindGroup2::new(&device, &view_proj_mat, &plane_world_mat);
 
     let mut light_pos = vec![[20.0, -30.0, 2.0, 1.0]];
     //let mut light_proj_mat = generate_light_projection(light_pos[0], 60.0);
-    let light_color_data = vec![[1.0, 0.5, 0.5, 0.5]];
+    let light_color_data = BufferData::new(vec![[1.0, 0.5, 0.5, 0.5]]);
     let light_color = BindGroup1::new(&device, &light_color_data);
 
     let shadow_sampler = SamplerData::new(wgpu::SamplerDescriptor {
@@ -344,10 +349,11 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                     .output;
                 {
                     light_pos = rotate_vec4(&light_pos, -0.05);
-                    let light_proj_mat = generate_light_projection(light_pos[0], 60.0);
+                    let light_proj_mat =
+                        BufferData::new(generate_light_projection(light_pos[0], 60.0));
 
                     let bind_group_light_proj_pos =
-                        BindGroup2::new(&device, &light_proj_mat, &light_pos);
+                        BindGroup2::new(&device, &light_proj_mat, &BufferData::new(light_pos.clone()));
 
                     //dbg!(&light_pos);
 

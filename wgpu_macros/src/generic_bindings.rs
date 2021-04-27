@@ -882,6 +882,8 @@ impl ParamType {
     }
 }
 
+//todo This should create a new group if there is no group name.
+// Only create a vertex when there is the vertex qualifier
 fn process_params(params: Vec<Parameters>) -> Vec<ParamType> {
     let mut res = Vec::new();
     let mut group_map: HashMap<Ident, ParamType> = HashMap::new();
