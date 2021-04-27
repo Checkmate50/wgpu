@@ -576,42 +576,6 @@ pub fn graphics_run_indices<'a>(
     draw_indexed(&mut rpass, 0..indices.len, 0..num_instances);
     rpass
 }
-/* todo
-pub fn graphics_pipe(
-    program: &GraphicsProgram,
-    rpass: wgpu::RenderPass,
-    bind_group: &mut wgpu::BindGroup,
-    mut in_bindings: GraphicsBindings,
-    mut out_bindings: &mut OutGraphicsBindings,
-    result_vec: Vec<DefaultBinding>,
-) {
-    for i in result_vec {
-        let binding = match in_bindings.bindings.iter().position(|x| x.name == i.name) {
-            Some(x) => &mut in_bindings.bindings[x],
-            None => {
-                let x = out_bindings
-                    .bindings
-                    .iter()
-                    .position(|x| x.name == i.name)
-                    .expect("We couldn't find the binding");
-                &mut out_bindings.bindings[x]
-            }
-        };
-
-        /*          todo Check the types somewhere
-        if !acceptable_types.contains(&binding.gtype) {
-            panic!(
-                "The type of the value you provided is not what was expected, {:?}",
-                &binding.gtype
-            );
-        } */
-
-        binding.data = Some(i.data.unwrap());
-        binding.length = Some(i.length.unwrap());
-    }
-
-    graphics_run(program, rpass, bind_group, &in_bindings, out_bindings);
-} */
 
 pub fn setup_render_pass<'a, 'b>(
     program: &'a GraphicsProgram,

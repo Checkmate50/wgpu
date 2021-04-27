@@ -4,7 +4,6 @@ extern crate pipeline;
 
 #[macro_use]
 extern crate eager;
-use std::rc::Rc;
 
 use winit::{
     event::{Event, WindowEvent},
@@ -108,7 +107,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
             // Everything that can be processed has been so we can now redraw the image on our window
             Event::MainEventsCleared => window.request_redraw(),
             Event::RedrawRequested(_) => {
-                let mut frame = swap_chain
+                let frame = swap_chain
                     .get_current_frame()
                     .expect("Timeout when acquiring next swap chain texture")
                     .output;

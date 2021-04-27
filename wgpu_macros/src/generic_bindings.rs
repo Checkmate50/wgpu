@@ -976,9 +976,7 @@ pub fn sub_module_generic_bindings(input: TokenStream) -> TokenStream {
     // (name, type)
     let input_vec = shader_params.ins;
 
-    let input_names: Vec<Ident> = input_vec.iter().map(|p| p.name.clone()).collect();
     let out_vec = shader_params.outs;
-    let output_names: Vec<Ident> = out_vec.iter().map(|p| p.name.clone()).collect();
 
     let input_params = process_params(input_vec);
 
@@ -1036,19 +1034,9 @@ pub fn sub_module_generic_bindings(input: TokenStream) -> TokenStream {
             }
         }
 
-        impl <'a,  T : pipeline :: RuntimePass<'a>> pipeline::ContextInputs for #context<'a, T, #(#init),*> {
-            fn inputs(&self) -> Vec<String> {
-                vec![#(stringify!(#input_names).to_string()),*]
-            }
-        }
-
         impl <'a,  T : pipeline :: RuntimePass<'a>> #context<'a, T, #(#run),*> {
             fn runnable<P, B>(&self, f: P) -> B where P: FnOnce() -> B{
                 f()
-            }
-            fn can_pipe(&self, b : &dyn pipeline::ContextInputs) {
-                let a = vec![#(stringify!(#output_names).to_string()),*];
-                assert!(b.inputs().iter().all(|item| a.contains(item)));
             }
         }
 
