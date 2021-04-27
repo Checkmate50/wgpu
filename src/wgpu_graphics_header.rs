@@ -487,50 +487,8 @@ pub async fn graphics_compile(
         // Use Triangles
         primitive: args.primitive_state,
 
-        /* wgpu::PrimitiveTopology::TriangleList,
-               color_states: match pipe_type {
-                   PipelineType::Stencil => &[],
-                   PipelineType::ColorWithStencil | PipelineType::Color => &[wgpu::ColorStateDescriptor {
-                       // Specify the size of the color data in the buffer
-                       // Bgra8UnormSrgb is specifically used since it is guaranteed to work on basically all browsers (32bit)
-                       format: wgpu::TextureFormat::Bgra8UnormSrgb,
-                       // Here is where you can do some fancy stuff for transitioning colors/brightness between frames. Replace defaults to taking all of the current frame and none of the next frame.
-                       // This can be changed by specifying the modifier for either of the values from src/dest frames or changing the operation used to combine them(instead of addition maybe Max/Min)
-                       color_blend: wgpu::BlendDescriptor::REPLACE,
-                       alpha_blend: wgpu::BlendDescriptor::REPLACE,
-                       // We can adjust the mask to only include certain colors if we want to
-                       write_mask: wgpu::ColorWrite::ALL,
-                   }],
-               },
-        */
         // We can add an optional stencil descriptor which allows for effects that you would see in Microsoft Powerpoint like fading/swiping to the next slide
         depth_stencil: args.depth_stencil_state,
-
-        /* match pipe_type {
-            // The first two cases are from the shadow example for the shadow pass and forward pass.
-            // The last type is for typical graphics programs with no stencil
-            PipelineType::Stencil => Some(wgpu::DepthStencilState {
-                format: wgpu::TextureFormat::Depth32Float,
-                depth_write_enabled: true,
-                depth_compare: wgpu::CompareFunction::LessEqual,
-                stencil: wgpu::StencilState::default(),
-                bias: wgpu::DepthBiasState {
-                    constant: 2,
-                    slope_scale: 2.0,
-                    clamp: 0.0,
-                },
-                clamp_depth: device.features().contains(wgpu::Features::DEPTH_CLAMPING),
-            }),
-            PipelineType::ColorWithStencil => Some(wgpu::DepthStencilState {
-                format: wgpu::TextureFormat::Depth32Float,
-                depth_write_enabled: true,
-                depth_compare: wgpu::CompareFunction::Less,
-                stencil: wgpu::StencilState::default(),
-                bias: wgpu::DepthBiasState::default(),
-                clamp_depth: false,
-            }),
-            PipelineType::Color => None,
-        }, */
         multisample: args.multisample_state,
     });
 
@@ -576,42 +534,6 @@ pub fn graphics_run_indices<'a>(
     draw_indexed(&mut rpass, 0..indices.len, 0..num_instances);
     rpass
 }
-/* todo
-pub fn graphics_pipe(
-    program: &GraphicsProgram,
-    rpass: wgpu::RenderPass,
-    bind_group: &mut wgpu::BindGroup,
-    mut in_bindings: GraphicsBindings,
-    mut out_bindings: &mut OutGraphicsBindings,
-    result_vec: Vec<DefaultBinding>,
-) {
-    for i in result_vec {
-        let binding = match in_bindings.bindings.iter().position(|x| x.name == i.name) {
-            Some(x) => &mut in_bindings.bindings[x],
-            None => {
-                let x = out_bindings
-                    .bindings
-                    .iter()
-                    .position(|x| x.name == i.name)
-                    .expect("We couldn't find the binding");
-                &mut out_bindings.bindings[x]
-            }
-        };
-
-        /*          todo Check the types somewhere
-        if !acceptable_types.contains(&binding.gtype) {
-            panic!(
-                "The type of the value you provided is not what was expected, {:?}",
-                &binding.gtype
-            );
-        } */
-
-        binding.data = Some(i.data.unwrap());
-        binding.length = Some(i.length.unwrap());
-    }
-
-    graphics_run(program, rpass, bind_group, &in_bindings, out_bindings);
-} */
 
 pub fn setup_render_pass<'a, 'b>(
     program: &'a GraphicsProgram,
@@ -622,65 +544,6 @@ pub fn setup_render_pass<'a, 'b>(
     rpass.set_pipeline(&program.pipeline);
     rpass
 }
-
-/*
-wgpu::RenderPassDescriptor {
-        label: None,
-        color_attachments: &[wgpu::RenderPassColorAttachmentDescriptor {
-            attachment: &frame.view,
-            resolve_target: None,
-            ops: wgpu::Operations {
-                load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-                store: true,
-            },
-        }],
-        depth_stencil_attachment: None,
-    }
-*/
-
-/*
-wgpu::RenderPassDescriptor {
-        label: None,
-        // color_attachments is literally where we draw the colors to
-        color_attachments: &[],
-        depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachmentDescriptor {
-            attachment: &texture,
-            depth_ops: Some(wgpu::Operations {
-                load: wgpu::LoadOp::Clear(1.0),
-                store: true,
-            }),
-            stencil_ops: None,
-        }),
-    }
-*/
-
-/*
-wgpu::RenderPassDescriptor {
-        label: None,
-        // color_attachments is literally where we draw the colors to
-        color_attachments: &[wgpu::RenderPassColorAttachmentDescriptor {
-            attachment: &frame.view,
-            resolve_target: None,
-            ops: wgpu::Operations {
-                load: wgpu::LoadOp::Clear(wgpu::Color {
-                    r: 0.1,
-                    g: 0.2,
-                    b: 0.3,
-                    a: 1.0,
-                }),
-                store: true,
-            },
-        }],
-        depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachmentDescriptor {
-            attachment: &texture,
-            depth_ops: Some(wgpu::Operations {
-                load: wgpu::LoadOp::Clear(1.0),
-                store: true,
-            }),
-            stencil_ops: None,
-        }),
-    }
-*/
 
 #[derive(Debug)]
 pub struct GraphicsShader {

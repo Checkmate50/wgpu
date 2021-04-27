@@ -18,7 +18,7 @@ pub use pipeline::wgpu_graphics_header::{
 };
 
 use crate::pipeline::AbstractBind;
-pub use pipeline::bind::{BindGroup2, Indices, Vertex};
+pub use pipeline::bind::{BindGroup2, BufferData, Indices, Vertex};
 
 pub use pipeline::helper::{generate_projection_matrix, generate_view_matrix, load_cube};
 
@@ -91,7 +91,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 
     let (positions, _, index_data) = load_cube();
 
-    let color_data = vec![
+    let color_data = BufferData::new(vec![
         [0.583, 0.771, 0.014],
         [0.609, 0.115, 0.436],
         [0.327, 0.483, 0.844],
@@ -128,8 +128,8 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         [0.673, 0.211, 0.457],
         [0.820, 0.883, 0.371],
         [0.982, 0.099, 0.879],
-    ];
-    let bad_color_data = vec![
+    ]);
+    let bad_color_data = BufferData::new(vec![
         [0.583, 0.771, 0.0],
         [0.609, 0.115, 0.0],
         [0.327, 0.483, 0.0],
@@ -166,13 +166,13 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         [0.673, 0.211, 0.0],
         [0.820, 0.883, 0.0],
         [0.982, 0.099, 0.0],
-    ];
+    ]);
 
-    let view_mat = generate_view_matrix();
+    let view_mat = BufferData::new(generate_view_matrix());
 
-    let proj_mat = generate_projection_matrix(size.width as f32 / size.height as f32);
+    let proj_mat = BufferData::new(generate_projection_matrix(size.width as f32 / size.height as f32));
 
-    let vertex_position = Vertex::new(&device, &positions);
+    let vertex_position = Vertex::new(&device, &BufferData::new(positions));
     let vertex_color = Vertex::new(&device, &color_data);
     let bad_vertex_color = Vertex::new(&device, &bad_color_data);
     let indices = Indices::new(&device, &index_data);

@@ -17,7 +17,7 @@ pub use pipeline::wgpu_graphics_header::{
 };
 
 use crate::pipeline::AbstractBind;
-pub use pipeline::bind::{BindGroup1, BindGroup2, Indices, Vertex};
+pub use pipeline::bind::{BindGroup1, BindGroup2, BufferData, Indices, Vertex};
 
 pub use pipeline::helper::{
     generate_identity_matrix, generate_projection_matrix, generate_view_matrix, load_model,
@@ -102,17 +102,17 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 
     let mut light_direction = vec![[20.0, 0.0, 0.0]];
 
-    let light_ambient = vec![[0.1, 0.0, 0.0]];
+    let light_ambient = BufferData::new(vec![[0.1, 0.0, 0.0]]);
 
-    let view_mat = generate_view_matrix();
+    let view_mat = BufferData::new(generate_view_matrix());
 
-    let proj_mat = generate_projection_matrix(size.width as f32 / size.height as f32);
+    let proj_mat = BufferData::new(generate_projection_matrix(size.width as f32 / size.height as f32));
 
-    let model_mat_init = generate_identity_matrix();
-    let mut model_mat = scale(model_mat_init, 0.7);
+    let mut model_mat_init = generate_identity_matrix();
+    model_mat_init = scale(model_mat_init, 0.7);
 
-    let vertex_position = Vertex::new(&device, &positions);
-    let vertex_normal = Vertex::new(&device, &normals);
+    let vertex_position = Vertex::new(&device, &BufferData::new(positions));
+    let vertex_normal = Vertex::new(&device, &BufferData::new(normals));
     let indices = Indices::new(&device, &index_data);
     let bind_group_ambient = BindGroup1::new(&device, &light_ambient);
     let bind_group_view_proj = BindGroup2::new(&device, &view_mat, &proj_mat);
@@ -135,10 +135,10 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                     .output;
 
                 light_direction = rotate_vec3(&light_direction, 0.05);
-                let bind_group_light_dir = BindGroup1::new(&device, &light_direction);
+                let bind_group_light_dir = BindGroup1::new(&device, &BufferData::new(light_direction.clone()));
 
-                model_mat = rotation_y(model_mat, 0.05);
-                let bind_group_model = BindGroup1::new(&device, &model_mat);
+                model_mat_init = rotation_y(model_mat_init, 0.05);
+                let bind_group_model = BindGroup1::new(&device, &BufferData::new(model_mat_init));
                 {
                     let mut rpass = setup_render_pass(
                         &program,

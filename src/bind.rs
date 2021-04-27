@@ -13,7 +13,7 @@ use wgpu::util::DeviceExt;
 /// This trait describes the general methods that are needed to convert a rust type into valid data bound on the device.
 pub trait WgpuType {
     /// Sends the data to the device and a handler to that data is returned as `BoundData`.
-    fn bind(&self, device: &wgpu::Device, qual: QUALIFIER) -> BoundData;
+    fn bind(&self, device: &wgpu::Device, qual: Option<QUALIFIER>) -> BoundData;
 
     /// This is the size of the type for the purposes of layout
     /// This is not the size of the underlying data
@@ -36,13 +36,13 @@ impl<const BINDINGTYPE: wgpu::BufferBindingType, T> BufferData<BINDINGTYPE, T> {
 }
 
 impl<const BINDINGTYPE: wgpu::BufferBindingType> WgpuType for BufferData<BINDINGTYPE, f32> {
-    fn bind(&self, device: &wgpu::Device, qual: QUALIFIER) -> BoundData {
+    fn bind(&self, device: &wgpu::Device, qual: Option<QUALIFIER>) -> BoundData {
         BoundData::new_buffer(
             device,
             self.data.as_bytes(),
             1 as u64,
             Self::size_of(),
-            Some(qual),
+            qual,
             Self::create_binding_type(),
         )
     }
@@ -65,13 +65,13 @@ impl<const BINDINGTYPE: wgpu::BufferBindingType> WgpuType for BufferData<BINDING
 }
 
 impl<const BINDINGTYPE: wgpu::BufferBindingType> WgpuType for BufferData<BINDINGTYPE, Vec<u32>> {
-    fn bind(&self, device: &wgpu::Device, qual: QUALIFIER) -> BoundData {
+    fn bind(&self, device: &wgpu::Device, qual: Option<QUALIFIER>) -> BoundData {
         BoundData::new_buffer(
             device,
             self.data.as_slice().as_bytes(),
             self.data.len() as u64,
             Self::size_of(),
-            Some(qual),
+            qual,
             Self::create_binding_type(),
         )
     }
@@ -94,13 +94,13 @@ impl<const BINDINGTYPE: wgpu::BufferBindingType> WgpuType for BufferData<BINDING
 }
 
 impl<const BINDINGTYPE: wgpu::BufferBindingType> WgpuType for BufferData<BINDINGTYPE, Vec<f32>> {
-    fn bind(&self, device: &wgpu::Device, qual: QUALIFIER) -> BoundData {
+    fn bind(&self, device: &wgpu::Device, qual: Option<QUALIFIER>) -> BoundData {
         BoundData::new_buffer(
             device,
             self.data.as_slice().as_bytes(),
             self.data.len() as u64,
             Self::size_of(),
-            Some(qual),
+            qual,
             Self::create_binding_type(),
         )
     }
@@ -125,7 +125,7 @@ impl<const BINDINGTYPE: wgpu::BufferBindingType> WgpuType for BufferData<BINDING
 impl<const BINDINGTYPE: wgpu::BufferBindingType> WgpuType
     for BufferData<BINDINGTYPE, Vec<[f32; 2]>>
 {
-    fn bind(&self, device: &wgpu::Device, qual: QUALIFIER) -> BoundData {
+    fn bind(&self, device: &wgpu::Device, qual: Option<QUALIFIER>) -> BoundData {
         let numbers: Vec<f32> = self
             .data
             .clone()
@@ -138,7 +138,7 @@ impl<const BINDINGTYPE: wgpu::BufferBindingType> WgpuType
             numbers.as_slice().as_bytes(),
             self.data.len() as u64,
             Self::size_of(),
-            Some(qual),
+            qual,
             Self::create_binding_type(),
         )
     }
@@ -163,7 +163,7 @@ impl<const BINDINGTYPE: wgpu::BufferBindingType> WgpuType
 impl<const BINDINGTYPE: wgpu::BufferBindingType> WgpuType
     for BufferData<BINDINGTYPE, Vec<[f32; 3]>>
 {
-    fn bind(&self, device: &wgpu::Device, qual: QUALIFIER) -> BoundData {
+    fn bind(&self, device: &wgpu::Device, qual: Option<QUALIFIER>) -> BoundData {
         let numbers: Vec<f32> = self
             .data
             .clone()
@@ -176,7 +176,7 @@ impl<const BINDINGTYPE: wgpu::BufferBindingType> WgpuType
             numbers.as_slice().as_bytes(),
             self.data.len() as u64,
             Self::size_of(),
-            Some(qual),
+            qual,
             Self::create_binding_type(),
         )
     }
@@ -201,7 +201,7 @@ impl<const BINDINGTYPE: wgpu::BufferBindingType> WgpuType
 impl<const BINDINGTYPE: wgpu::BufferBindingType> WgpuType
     for BufferData<BINDINGTYPE, Vec<[f32; 4]>>
 {
-    fn bind(&self, device: &wgpu::Device, qual: QUALIFIER) -> BoundData {
+    fn bind(&self, device: &wgpu::Device, qual: Option<QUALIFIER>) -> BoundData {
         let numbers: Vec<f32> = self
             .data
             .clone()
@@ -214,7 +214,7 @@ impl<const BINDINGTYPE: wgpu::BufferBindingType> WgpuType
             numbers.as_slice().as_bytes(),
             self.data.len() as u64,
             Self::size_of(),
-            Some(qual),
+            qual,
             Self::create_binding_type(),
         )
     }
@@ -239,14 +239,14 @@ impl<const BINDINGTYPE: wgpu::BufferBindingType> WgpuType
 impl<const BINDINGTYPE: wgpu::BufferBindingType> WgpuType
     for BufferData<BINDINGTYPE, cgmath::Matrix4<f32>>
 {
-    fn bind(&self, device: &wgpu::Device, qual: QUALIFIER) -> BoundData {
+    fn bind(&self, device: &wgpu::Device, qual: Option<QUALIFIER>) -> BoundData {
         let mat_slice: &[f32; 16] = self.data.as_ref();
         BoundData::new_buffer(
             device,
             bytemuck::cast_slice(mat_slice.as_bytes()),
             64,
             Self::size_of(),
-            Some(qual),
+            qual,
             Self::create_binding_type(),
         )
     }
@@ -303,7 +303,7 @@ impl<'a, const COMPARABLE: SamplerComparison, const FILTERABLE: SamplerFiltering
 impl<'a, const COMPARABLE: SamplerComparison, const FILTERABLE: SamplerFiltering> WgpuType
     for SamplerData<'a, COMPARABLE, FILTERABLE>
 {
-    fn bind(&self, device: &wgpu::Device, _: QUALIFIER) -> BoundData {
+    fn bind(&self, device: &wgpu::Device, _: Option<QUALIFIER>) -> BoundData {
         BoundData::Sampler {
             data: device.create_sampler(&self.desc),
             binding_type: Self::create_binding_type(),
@@ -386,7 +386,7 @@ impl<
         const VIEWDIMENSION: wgpu::TextureViewDimension,
     > WgpuType for TextureData<'a, MULTISAMPLE, SAMPLETYPE, VIEWDIMENSION>
 {
-    fn bind(&self, device: &wgpu::Device, _: QUALIFIER) -> BoundData {
+    fn bind(&self, device: &wgpu::Device, _: Option<QUALIFIER>) -> BoundData {
         let texture = match &self.data {
             Some(data) => device.create_texture_with_data(&self.queue, &self.desc, data),
             None => device.create_texture(&self.desc),
@@ -559,7 +559,7 @@ impl<'a, A: WgpuType> Vertex<A> {
     pub fn new(device: &wgpu::Device, data: &A) -> Self {
         Vertex {
             typ: PhantomData,
-            buffer: data.bind(device, QUALIFIER::VERTEX).get_buffer().unwrap().0,
+            buffer: data.bind(device, Some(QUALIFIER::VERTEX)).get_buffer().unwrap().0,
         }
     }
 }
@@ -645,7 +645,7 @@ impl<'a, B: WgpuType> BindGroup1<B> {
     }
 
     pub fn new(device: &wgpu::Device, data0: &B) -> Self {
-        let data = vec![data0.bind(device, B::get_qualifiers().unwrap())];
+        let data = vec![data0.bind(device, B::get_qualifiers())];
 
         let bind_group = create_bind_group(device, &data);
 
@@ -699,8 +699,8 @@ impl<'a, B: WgpuType, C: WgpuType> BindGroup2<B, C> {
 
     pub fn new(device: &wgpu::Device, data0: &B, data1: &C) -> Self {
         let data = vec![
-            data0.bind(device, B::get_qualifiers().unwrap()),
-            data1.bind(device, B::get_qualifiers().unwrap()),
+            data0.bind(device, B::get_qualifiers()),
+            data1.bind(device, B::get_qualifiers()),
         ];
 
         let bind_group = create_bind_group(device, &data);
@@ -773,9 +773,9 @@ impl<'a, B: WgpuType, C: WgpuType, D: WgpuType> BindGroup3<B, C, D> {
     /// Initializes data on the device and returns it as a group
     pub fn new(device: &wgpu::Device, data0: &B, data1: &C, data2: &D) -> Self {
         let data = vec![
-            data0.bind(device, B::get_qualifiers().unwrap()),
-            data1.bind(device, B::get_qualifiers().unwrap()),
-            data2.bind(device, B::get_qualifiers().unwrap()),
+            data0.bind(device, B::get_qualifiers()),
+            data1.bind(device, B::get_qualifiers()),
+            data2.bind(device, B::get_qualifiers()),
         ];
 
         let bind_group = create_bind_group(device, &data);

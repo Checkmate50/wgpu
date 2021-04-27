@@ -7,7 +7,7 @@ use syn::{braced, bracketed, parse_macro_input, Ident, Token};
 use std::collections::HashMap;
 use std::iter;
 
-use rand::Rng;
+use rand::{Rng, SeedableRng, rngs::StdRng};
 
 // For Types like `vec` which can have dimensions `vec2`, `vec3`, and `vec4`
 #[derive(Debug, Clone, Copy)]
@@ -882,6 +882,8 @@ impl ParamType {
     }
 }
 
+//todo This should create a new group if there is no group name.
+// Only create a vertex when there is the vertex qualifier
 fn process_params(params: Vec<Parameters>) -> Vec<ParamType> {
     let mut res = Vec::new();
     let mut group_map: HashMap<Ident, ParamType> = HashMap::new();
@@ -980,7 +982,7 @@ pub fn sub_module_generic_bindings(input: TokenStream) -> TokenStream {
 
     let input_params = process_params(input_vec);
 
-    let mut rng = rand::thread_rng();
+    let mut rng = StdRng::seed_from_u64(0);
 
     let n1: u8 = rng.gen();
     let context = format_ident!("Context{}", n1);
@@ -1023,7 +1025,7 @@ pub fn sub_module_generic_bindings(input: TokenStream) -> TokenStream {
         }
 
         impl <'a,  T : pipeline :: RuntimePass<'a>> #context<'a, T, #(#init),*> {
-            fn new() -> Self {
+            unsafe fn new() -> Self {
                 #context {
                     phantom: std::marker::PhantomData,
                     #(#fields: pipeline::Unbound {},)*
@@ -1050,7 +1052,7 @@ pub fn sub_module_generic_bindings(input: TokenStream) -> TokenStream {
             }
         }
 
-        let #ctxloc = #context::new();
+        let #ctxloc = unsafe { #context::new() };
     });
 
     let bound = bound();

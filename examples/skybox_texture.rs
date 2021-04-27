@@ -17,7 +17,7 @@ pub use pipeline::wgpu_graphics_header::{
 };
 
 use crate::pipeline::AbstractBind;
-pub use pipeline::bind::{BindGroup2, SamplerData, TextureData};
+pub use pipeline::bind::{BindGroup2, BufferData, SamplerData, TextureData};
 
 pub use pipeline::helper::{generate_projection_matrix, generate_view_matrix};
 
@@ -92,9 +92,9 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     let (program, _) =
         compile_valid_graphics_program!(device, context, S_V, S_F, GraphicsCompileArgs::default());
 
-    let proj_mat = generate_projection_matrix(size.width as f32 / size.height as f32);
+    let proj_mat = BufferData::new(generate_projection_matrix(size.width as f32 / size.height as f32));
 
-    let view_mat = generate_view_matrix();
+    let view_mat = BufferData::new(generate_view_matrix());
 
     let bind_group_view_proj = BindGroup2::new(&device, &view_mat, &proj_mat);
 

@@ -20,7 +20,7 @@ pub use pipeline::wgpu_graphics_header::{
 pub use wgpu_macros::generic_bindings;
 
 use crate::pipeline::AbstractBind;
-pub use pipeline::bind::{BindGroup2, Indices, SamplerData, TextureData, Vertex};
+pub use pipeline::bind::{BindGroup2, BufferData, Indices, SamplerData, TextureData, Vertex};
 
 pub use pipeline::helper::{
     create_texels, generate_projection_matrix, generate_view_matrix, load_cube,
@@ -96,7 +96,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     let queue = Rc::new(queue);
 
     let (positions, _, index_data) = load_cube();
-    let texture_coordinates: Vec<[f32; 2]> = vec![
+    let texture_coordinates = BufferData::new(vec![
         [0.0, 0.0],
         [1.0, 0.0],
         [1.0, 1.0],
@@ -121,14 +121,16 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         [1.0, 0.0],
         [1.0, 1.0],
         [0.0, 1.0],
-    ];
+    ]);
 
-    let vertex_position = Vertex::new(&device, &positions);
+    let vertex_position = Vertex::new(&device, &BufferData::new(positions));
     let vertex_tex_coords = Vertex::new(&device, &texture_coordinates);
     let indices = Indices::new(&device, &index_data);
 
-    let view_mat = generate_view_matrix();
-    let proj_mat = generate_projection_matrix(size.width as f32 / size.height as f32);
+    let view_mat = BufferData::new(generate_view_matrix());
+    let proj_mat = BufferData::new(generate_projection_matrix(
+        size.width as f32 / size.height as f32,
+    ));
     let bind_group_view_proj = BindGroup2::new(&device, &view_mat, &proj_mat);
 
     let sampler = SamplerData::new(wgpu::SamplerDescriptor {
