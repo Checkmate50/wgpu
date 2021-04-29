@@ -177,7 +177,7 @@ pub fn sub_module_get_view_func(input: TokenStream) -> TokenStream {
             #i
         }
     }
-    println!("{}", collapsed_expanded);
+    //println!("{}", collapsed_expanded);
 
     // Hand the output tokens back to the compiler
     TokenStream::from(collapsed_expanded)

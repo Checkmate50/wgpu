@@ -1,9 +1,4 @@
 #![recursion_limit = "1024"]
-#[macro_use]
-extern crate pipeline;
-
-#[macro_use]
-extern crate eager;
 
 use winit::{
     event::{Event, WindowEvent},
@@ -15,7 +10,6 @@ pub use pipeline::wgpu_graphics_header::{
     generate_swap_chain, graphics_run, setup_render_pass, GraphicsCompileArgs, GraphicsShader,
 };
 
-use crate::pipeline::AbstractBind;
 use pipeline::bind::{BufferData, Vertex};
 
 use wgpu_macros::graphics_program;
@@ -47,19 +41,30 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         .expect("Failed to create device");
 
     graphics_program!(
-"[[block]]
-struct Stuff {
-  thing: vec3<f32>;
+"struct VertexOutput {
+  [[location(0)]] pos_color: vec3<f32>;
+  [[builtin(position)]] position: vec4<f32>;
+};
+
+[[stage(vertex)]]
+fn vs_main([[location(0)]] position: vec3<f32>) -> VertexOutput {
+    var out: VertexOutput;
+    out.pos_color = position;
+    out.position = vec4<f32>(position, 1.0);
+    return out;
+}
+
+[[block]]
+struct Opts {
+    brightness: f32;
 };
 
 [[group(0), binding(0)]]
-var first: Stuff;
-[[group(1), binding(0)]]
-var second: Stuff;
+var opts: Opts;
 
-[[stage(vertex)]]
-fn vs_main([[builtin(vertex_index)]] vertex_index: u32) -> [[builtin(position)]] vec4<f32> {
-    return vec4<f32>(first.thing + second.thing, 1.0);
+[[stage(fragment)]]
+fn fs_main(in: VertexOutput) -> [[location(0)]] vec4<f32> {
+    return vec4<f32>(in.pos_color * opts.brightness, 1.0);
 }");
 
     let positions = vec![[0.0, 0.7, 0.0], [-0.5, 0.5, 0.0], [0.5, -0.5, 0.0]];
@@ -101,9 +106,9 @@ fn vs_main([[builtin(vertex_index)]] vertex_index: u32) -> [[builtin(position)]]
                         },
                     );
 
-                    let context1 = (&context).set_a_position(&vertex_position);
+                    let context1 = (&context).set_position(&vertex_position);
                     {
-                        let context2 = context1.set_in_brightness(&vertex_brightness);
+                        let context2 = context1.set_opts(&vertex_brightness);
                         {
                             context2.draw(0..3, 0..1);
                         }
