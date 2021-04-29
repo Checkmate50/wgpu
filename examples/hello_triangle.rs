@@ -16,24 +16,9 @@ pub use pipeline::wgpu_graphics_header::{
 };
 
 use crate::pipeline::AbstractBind;
-pub use pipeline::bind::{BufferData, Vertex};
+use pipeline::bind::{BufferData, Vertex};
 
-pub use wgpu_macros::generic_bindings;
-
-my_shader! {vertex = {
-    [[vertex in] vec3] a_position;
-    [[vertex in] float] in_brightness;
-    [[out] vec3] posColor;
-    [[out] float] brightness;
-    [[out] vec4] gl_Position;
-    {{
-        void main() {
-            posColor = a_position;
-            brightness = in_brightness;
-            gl_Position = vec4(a_position, 1.0);
-        }
-    }}
-}}
+use wgpu_macros::graphics_program;
 
 async fn run(event_loop: EventLoop<()>, window: Window) {
     let instance = wgpu::Instance::new(wgpu::BackendBit::PRIMARY);
@@ -61,25 +46,21 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         .await
         .expect("Failed to create device");
 
-    my_shader! {fragment = {
-        [[in] vec3] posColor;
-        [[in] float] brightness;
-        [[out] vec4] color;
-        {{
-            void main() {
-                color = vec4(posColor * brightness, 1.0);
-            }
-        }}
-    }}
+    graphics_program!(
+"[[block]]
+struct Stuff {
+  thing: vec3<f32>;
+};
 
-    const S_V: GraphicsShader = eager_graphics_shader! {vertex!()};
+[[group(0), binding(0)]]
+var first: Stuff;
+[[group(1), binding(0)]]
+var second: Stuff;
 
-    const S_F: GraphicsShader = eager_graphics_shader! {fragment!()};
-
-    eager_binding! {context = vertex!(), fragment!()};
-
-    let (program, _) =
-        compile_valid_graphics_program!(device, context, S_V, S_F, GraphicsCompileArgs::default());
+[[stage(vertex)]]
+fn vs_main([[builtin(vertex_index)]] vertex_index: u32) -> [[builtin(position)]] vec4<f32> {
+    return vec4<f32>(first.thing + second.thing, 1.0);
+}");
 
     let positions = vec![[0.0, 0.7, 0.0], [-0.5, 0.5, 0.0], [0.5, -0.5, 0.0]];
     let brightness = vec![0.5, 0.5, 0.9];
@@ -104,9 +85,8 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                     .output;
 
                 {
-                    let mut rpass = setup_render_pass(
-                        &program,
-                        &mut init_encoder,
+                    let context = program.start_pass(
+                        &init_encoder,
                         wgpu::RenderPassDescriptor {
                             label: None,
                             color_attachments: &[wgpu::RenderPassColorAttachmentDescriptor {
@@ -121,11 +101,11 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                         },
                     );
 
-                    let context1 = (&context).set_a_position(&mut rpass, &vertex_position);
+                    let context1 = (&context).set_a_position(&vertex_position);
                     {
-                        let context2 = context1.set_in_brightness(&mut rpass, &vertex_brightness);
+                        let context2 = context1.set_in_brightness(&vertex_brightness);
                         {
-                            context2.runnable(|| graphics_run(rpass, 3, 1));
+                            context2.draw(0..3, 0..1);
                         }
                     }
                 }

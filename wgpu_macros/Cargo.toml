@@ -15,3 +15,9 @@ quote = "1.0"
 syn = { version = "1.0", features = ["full"] }
 itertools = "0.10"
 rand = "0.8"
+wgpu = "0.7"
+
+[dependencies.naga]
+git = "https://github.com/gfx-rs/naga"
+tag = "gfx-23"
+features = ["wgsl-in"]

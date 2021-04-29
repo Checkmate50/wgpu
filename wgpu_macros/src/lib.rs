@@ -14,3 +14,10 @@ mod generic_bindings;
 pub fn generic_bindings(input: TokenStream) -> TokenStream {
     crate::generic_bindings::sub_module_generic_bindings(input)
 }
+
+mod graphics_program;
+
+#[proc_macro]
+pub fn graphics_program(input: TokenStream) -> TokenStream {
+    crate::graphics_program::sub_module_graphics_program(input)
+}

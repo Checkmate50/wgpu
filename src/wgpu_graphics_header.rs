@@ -429,14 +429,14 @@ pub async fn graphics_compile(
 
     let x = stringify_shader(vertex, &program_bindings1, &out_program_bindings1);
 
-    println!("{}", x);
+    //println!("{}", x);
 
     // Our compiled vertex shader
     let vs_module = compile_shader(x, ShaderType::Vertex, &device);
 
     let y = stringify_shader(fragment, &program_bindings2, &out_program_bindings2);
 
-    println!("{}", y);
+    //println!("{}", y);
 
     // Our compiled fragment shader
     let fs_module = compile_shader(y, ShaderType::Fragment, &device);

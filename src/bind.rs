@@ -688,7 +688,7 @@ impl<'a, B: WgpuType, C: WgpuType> BindGroup2<B, C> {
             },
         ];
 
-        debug!(bind_entry_vec);
+        //debug!(bind_entry_vec);
 
         device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             // The layout of for each binding specify a number to connect with the bind_group, a visibility to specify for which stage it's for and a type
