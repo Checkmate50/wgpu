@@ -120,9 +120,9 @@ impl Parse for GLSLType {
             ("vec4", 1) => Ok(GLSLType::ArrayVec(GLSLDimension::Four)),
             ("sampler", 0) => Ok(GLSLType::Sampler),
             ("samplerShadow", 0) => Ok(GLSLType::SamplerShadow),
-            ("texture2D", 0) => Ok(GLSLType::TextureCube),
-            ("texture2DArray", 0) => Ok(GLSLType::Texture2D),
-            ("textureCube", 0) => Ok(GLSLType::Texture2DArray),
+            ("texture2D", 0) => Ok(GLSLType::Texture2D),
+            ("texture2DArray", 0) => Ok(GLSLType::Texture2DArray),
+            ("textureCube", 0) => Ok(GLSLType::TextureCube),
             (x, _) => {
                 panic!("We currently do not support {}", x)
             }
