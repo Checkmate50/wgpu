@@ -174,8 +174,8 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                             let context6 = (&context5)
                                                 .set_u_model(&mut rpass, &bind_group_model);
                                             {
-                                                let _ = context6.runnable(|| {
-                                                    graphics_run_indices(rpass, &indices, 1)
+                                                context6.runnable(|| {
+                                                    graphics_run_indices(&mut rpass, &indices, 1)
                                                 });
                                             }
                                         }

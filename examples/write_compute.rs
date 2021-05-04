@@ -100,7 +100,7 @@ async fn execute_gpu() {
             cpass.set_pipeline(&program.pipeline);
             let context1 = context.set_indices(&mut cpass, &bg_i);
             {
-                let _ = context1.runnable(|| compute_run(cpass, 4));
+                context1.runnable(|| compute_run(&mut cpass, 4));
             }
         }
 

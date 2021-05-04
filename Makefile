@@ -70,7 +70,7 @@ cube3:
 .PHONY: cube4
 cube4:
 	cargo +nightly run --example multicube
-	#cargo +nightly run --example cube_shadow --release
+	#cargo +nightly run --example multicube --release
 
 .PHONY: flat_color
 flat_color:

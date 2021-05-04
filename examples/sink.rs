@@ -17,7 +17,7 @@ pub use pipeline::wgpu_graphics_header::{
     GraphicsShader,
 };
 
-pub use pipeline::bind::{BindGroup1, BindGroup2, Indices, SamplerData, TextureData, Vertex};
+pub use pipeline::bind::{BindGroup1, BindGroup2, Indices, SamplerData, TextureData, Vertex, BufferData};
 pub use pipeline::AbstractBind;
 
 pub use pipeline::helper::{
@@ -143,18 +143,18 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     );
 
     let (positions_data, normals_data, indices_data) = load_model("src/models/teapot.obj");
-    let positions = Vertex::new(&device, &positions_data);
-    let normals = Vertex::new(&device, &normals_data);
+    let positions = Vertex::new(&device, &BufferData::new(positions_data));
+    let normals = Vertex::new(&device, &BufferData::new(normals_data));
     let indices = Indices::new(&device, &indices_data);
 
     let (positions2_data, normals2_data, indices2_data) = load_model("src/models/caiman.obj");
-    let positions2 = Vertex::new(&device, &positions2_data);
-    let normals2 = Vertex::new(&device, &normals_data);
+    let positions2 = Vertex::new(&device, &BufferData::new(positions2_data));
+    let normals2 = Vertex::new(&device, &BufferData::new(normals2_data));
     let indices2 = Indices::new(&device, &indices2_data);
 
     let (positions_cube_data, normals_cube_data, index_cube_data) = load_cube();
-    let positions_cube = Vertex::new(&device, &positions_cube_data);
-    let normals_cube = Vertex::new(&device, &normals_cube_data);
+    let positions_cube = Vertex::new(&device, &BufferData::new(positions_cube_data));
+    //let normals_cube = Vertex::new(&device, &BufferData::new(normals_cube_data));
     let index_cube = Indices::new(&device, &index_cube_data);
 
     let texture_coordinates_cube: Vec<[f32; 2]> = vec![
@@ -183,30 +183,30 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         [1.0, 1.0],
         [0.0, 1.0],
     ];
-    let texture_coords = Vertex::new(&device, &texture_coordinates_cube);
+    let texture_coords = Vertex::new(&device, &BufferData::new(texture_coordinates_cube));
 
     let mut light_direction = vec![[20.0, 0.0, 0.0]];
 
     let light_ambient_data = vec![[0.1, 0.0, 0.0]];
-    let light_ambient = BindGroup1::new(&device, &light_ambient_data);
+    let light_ambient = BindGroup1::new(&device, &BufferData::new(light_ambient_data));
 
     let view_mat = generate_view_matrix();
 
     let proj_mat = generate_projection_matrix(size.width as f32 / size.height as f32);
 
-    let bg_view_proj = BindGroup2::new(&device, &view_mat, &proj_mat);
+    let bg_view_proj = BindGroup2::new(&device, &BufferData::new(view_mat), &BufferData::new(proj_mat));
 
     let mut model_mat_data = generate_identity_matrix();
 
     let model_mat2_data = rotation_x(translate(model_mat_data, 0.5, -3.0, 2.0), 2.0);
-    let model_mat2 = BindGroup1::new(&device, &model_mat2_data);
+    let model_mat2 = BindGroup1::new(&device, &BufferData::new(model_mat2_data));
 
     let model_mat3_data = translate(model_mat_data, 0.5, 0.0, -0.5);
-    let model_mat3 = BindGroup1::new(&device, &model_mat3_data);
+    //let model_mat3 = BindGroup1::new(&device, &BufferData::new(model_mat3_data));
 
     // rust is going the reverse of the order we want for matrix multiplication
     let trans_mat_data = model_mat3_data * proj_mat * view_mat;
-    let trans_mat = BindGroup1::new(&device, &trans_mat_data);
+    let trans_mat = BindGroup1::new(&device, &BufferData::new(trans_mat_data));
 
     let sampler = SamplerData::new(wgpu::SamplerDescriptor {
         address_mode_u: wgpu::AddressMode::ClampToEdge,
@@ -260,10 +260,10 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                     .output;
 
                 model_mat_data = rotation_y(model_mat_data, 0.05);
-                let model_mat = BindGroup1::new(&device, &model_mat_data);
+                let model_mat = BindGroup1::new(&device, &BufferData::new(model_mat_data));
 
                 light_direction = rotate_vec3(&light_direction, 0.05);
-                let light_dir = BindGroup1::new(&device, &light_direction);
+                let light_dir = BindGroup1::new(&device, &BufferData::new(light_direction.clone()));
 
                 {
                     let mut rpass = setup_render_pass(
@@ -297,8 +297,8 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                             let context6 =
                                                 context5.set_a_position(&mut rpass, &positions);
                                             {
-                                                rpass = context6.runnable(|| {
-                                                    graphics_run_indices(rpass, &indices, 1)
+                                                context6.runnable(|| {
+                                                    graphics_run_indices(&mut rpass, &indices, 1)
                                                 });
                                             }
                                         }
@@ -313,8 +313,8 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                             let context6 =
                                                 context5.set_a_position(&mut rpass, &positions2);
                                             {
-                                                rpass = context6.runnable(|| {
-                                                    graphics_run_indices(rpass, &indices2, 1)
+                                                context6.runnable(|| {
+                                                    graphics_run_indices(&mut rpass, &indices2, 1)
                                                 });
                                             }
                                         }
@@ -354,8 +354,8 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                     context4_cube.set_t_Color_s_Color(&mut rpass, &bind_group_t_s);
 
                                 {
-                                    let _ = context5_cube
-                                        .runnable(|| graphics_run_indices(rpass, &index_cube, 1));
+                                    context5_cube
+                                        .runnable(|| graphics_run_indices(&mut rpass, &index_cube, 1));
                                 }
                             }
                         }

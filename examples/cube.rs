@@ -187,7 +187,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                 context2.set_u_view_u_proj(&mut rpass, &bind_group_view_proj);
                             {
                                 let _ =
-                                    context3.runnable(|| graphics_run_indices(rpass, &indices, 1));
+                                    context3.runnable(|| graphics_run_indices(&mut rpass, &indices, 1));
                             }
                         }
                     }

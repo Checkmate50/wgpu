@@ -119,33 +119,37 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                 let bind_group_model = BindGroup1::new(&device, &BufferData::new(model_mat));
 
                 {
-                    let mut rpass = setup_render_pass(
-                        &program,
-                        &mut init_encoder,
-                        wgpu::RenderPassDescriptor {
-                            label: None,
-                            color_attachments: &[wgpu::RenderPassColorAttachmentDescriptor {
-                                attachment: &frame.view,
-                                resolve_target: None,
-                                ops: wgpu::Operations {
-                                    load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-                                    store: true,
-                                },
-                            }],
-                            depth_stencil_attachment: None,
-                        },
-                    );
-                    let context1 = (&context).set_a_position(&mut rpass, &positions);
-
                     {
-                        let context2 =
-                            (&context1).set_u_view_u_proj(&mut rpass, &bind_group_view_proj);
+                        let mut rpass = setup_render_pass(
+                            &program,
+                            &mut init_encoder,
+                            wgpu::RenderPassDescriptor {
+                                label: None,
+                                color_attachments: &[wgpu::RenderPassColorAttachmentDescriptor {
+                                    attachment: &frame.view,
+                                    resolve_target: None,
+                                    ops: wgpu::Operations {
+                                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                                        store: true,
+                                    },
+                                }],
+                                depth_stencil_attachment: None,
+                            },
+                        );
+
+                        let context1 = (&context).set_a_position(&mut rpass, &positions);
 
                         {
-                            let context3 = (&context2).set_u_model(&mut rpass, &bind_group_model);
+                            let context2 =
+                                (&context1).set_u_view_u_proj(&mut rpass, &bind_group_view_proj);
+
                             {
-                                let _ =
-                                    context3.runnable(|| graphics_run_indices(rpass, &indices, 1));
+                                let context3 =
+                                    (&context2).set_u_model(&mut rpass, &bind_group_model);
+                                {
+                                    context3
+                                        .runnable(|| graphics_run_indices(&mut rpass, &indices, 1));
+                                }
                             }
                         }
                     }

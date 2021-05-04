@@ -125,7 +125,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                     {
                         let context2 = context1.set_in_brightness(&mut rpass, &vertex_brightness);
                         {
-                            context2.runnable(|| graphics_run(rpass, 3, 1));
+                            context2.runnable(|| graphics_run(&mut rpass, 3, 1));
                         }
                     }
                 }
