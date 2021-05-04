@@ -364,12 +364,11 @@ impl Default for GraphicsCompileArgs {
         GraphicsCompileArgs {
             color_target_state: Some(wgpu::ColorTargetState {
                 format: wgpu::TextureFormat::Bgra8UnormSrgb,
-                alpha_blend: wgpu::BlendState::default(),
-                color_blend: wgpu::BlendState::default(),
+                blend: None,
                 write_mask: wgpu::ColorWrite::default(),
             }),
             primitive_state: wgpu::PrimitiveState {
-                cull_mode: wgpu::CullMode::Back,
+                cull_mode: Some(wgpu::Face::Back),
                 ..Default::default()
             },
             depth_stencil_state: None,
@@ -399,11 +398,11 @@ pub async fn graphics_compile(
                 // TODO WOW I had an error because I hardcoded the format's below. That should not be a thing
                 shader_location: i.binding_number,
                 format: if i.gtype == GLSLTYPE::Vec3 {
-                    wgpu::VertexFormat::Float3
+                    wgpu::VertexFormat::Float32x3
                 } else if i.gtype == GLSLTYPE::Vec2 {
-                    wgpu::VertexFormat::Float2
+                    wgpu::VertexFormat::Float32x2
                 } else {
-                    wgpu::VertexFormat::Float
+                    wgpu::VertexFormat::Float32
                 },
             };
         }
@@ -732,7 +731,7 @@ pub fn compile_buffer() -> [wgpu::VertexAttribute; 32] {
         .map(|_| wgpu::VertexAttribute {
             offset: 0,
             shader_location: 0,
-            format: wgpu::VertexFormat::Float,
+            format: wgpu::VertexFormat::Float32,
         })
         .collect();
     let y: Box<[wgpu::VertexAttribute; 32]> = x.try_into().unwrap();
