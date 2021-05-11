@@ -2,6 +2,7 @@ use obj::{load_obj, Obj};
 use std::fs::File;
 use std::io::BufReader;
 
+/// This function takes in a file_name, accesses the file to load in the object and returns the data in the format (Positions, Normals, Indices)
 pub fn load_model(file_name: &str) -> (Vec<[f32; 3]>, Vec<[f32; 3]>, Vec<u16>) {
     let input = BufReader::new(
         File::open(file_name)
@@ -17,6 +18,7 @@ pub fn load_model(file_name: &str) -> (Vec<[f32; 3]>, Vec<[f32; 3]>, Vec<u16>) {
     (positions, normals, indices)
 }
 
+/// Returns the (Positions, Normals, Indices) of a basic cube
 pub fn load_cube() -> (Vec<[f32; 3]>, Vec<[f32; 3]>, Vec<u16>) {
     let positions = vec![
         [-1.0, -1.0, 1.0],
@@ -88,6 +90,7 @@ pub fn load_cube() -> (Vec<[f32; 3]>, Vec<[f32; 3]>, Vec<u16>) {
     (positions, normals, index_data)
 }
 
+/// Returns the (Positions, Normals, Indices) of a basic plane
 pub fn load_plane(size: i8) -> (Vec<[f32; 3]>, Vec<[f32; 3]>, Vec<u16>) {
     let positions = vec![
         [size as f32, -size as f32, 0.0],
@@ -95,12 +98,6 @@ pub fn load_plane(size: i8) -> (Vec<[f32; 3]>, Vec<[f32; 3]>, Vec<u16>) {
         [-size as f32, -size as f32, 0.0],
         [-size as f32, size as f32, 0.0],
     ];
-    /* let positions = vec![
-        [-size as f32, -size as f32, 0.0],
-        [size as f32, -size as f32, 0.0],
-        [size as f32, size as f32, 0.0],
-        [-size as f32, size as f32, 0.0],
-    ]; */
 
     let normals = vec![
         [0.0, 0.0, 1.0],
@@ -110,7 +107,6 @@ pub fn load_plane(size: i8) -> (Vec<[f32; 3]>, Vec<[f32; 3]>, Vec<u16>) {
     ];
 
     let index_data: Vec<u16> = vec![0, 1, 2, 2, 3, 1];
-    /* let index_data: Vec<u16> = vec![0, 1, 2, 3]; */
     (positions, normals, index_data)
 }
 
@@ -125,6 +121,7 @@ macro_rules! mx_correction {
         )
     };
 }
+
 
 pub fn generate_light_projection(pos: [f32; 4], fov: f32) -> cgmath::Matrix4<f32> {
     use cgmath::{Deg, EuclideanSpace, Matrix4, PerspectiveFov, Point3, Vector3};
@@ -143,6 +140,7 @@ pub fn generate_light_projection(pos: [f32; 4], fov: f32) -> cgmath::Matrix4<f32
     mx_view_proj
 }
 
+/// Provides the standard view matrix used in Wgpu-rs examples
 pub fn generate_view_matrix() -> cgmath::Matrix4<f32> {
     let mx_view = cgmath::Matrix4::look_at_rh(
         // From this spot
@@ -151,19 +149,16 @@ pub fn generate_view_matrix() -> cgmath::Matrix4<f32> {
         cgmath::Point3::new(0f32, 0.0, 0.0),
         cgmath::Vector3::unit_z(),
     );
-    /* let mx_view = cgmath::Matrix4::look_at(
-        cgmath::Point3::new(3.0f32, -10.0, 6.0),
-        cgmath::Point3::new(0f32, 0.0, 0.0),
-        cgmath::Vector3::unit_z(),
-    ); */
     mx_view
 }
 
+/// Provides the standard projection matrix used in Wgpu-rs examples
 pub fn generate_projection_matrix(aspect_ratio: f32) -> cgmath::Matrix4<f32> {
     let mx_projection = cgmath::perspective(cgmath::Deg(45f32), aspect_ratio, 1.0, 100.0);
     mx_correction!() * mx_projection
 }
 
+/// Provides the standard identity matrix
 pub fn generate_identity_matrix() -> cgmath::Matrix4<f32> {
     use cgmath::SquareMatrix;
     cgmath::Matrix4::identity()
@@ -218,6 +213,7 @@ pub fn rotate_vec4(start: &[[f32; 4]], delta_y: f32) -> Vec<[f32; 4]> {
     vec![[temp_vec3.x, temp_vec3.y, temp_vec3.z, temp_vec3.w]]
 }
 
+/// For some examples, a list of example texels are needed to create a texture on the standard cube. 
 pub fn create_texels(size: usize) -> Vec<u8> {
     use std::iter;
 

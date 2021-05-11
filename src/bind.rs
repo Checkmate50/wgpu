@@ -13,10 +13,12 @@ use wgpu::util::DeviceExt;
 /// This trait describes the general methods that are needed to convert a rust type into valid data bound on the device.
 pub trait WgpuType {
     /// Sends the data to the device and a handler to that data is returned as `BoundData`.
+    #[doc(hidden)]
     fn bind(&self, device: &wgpu::Device, qual: Option<QUALIFIER>) -> BoundData;
 
     /// This is the size of the type for the purposes of layout
     /// This is not the size of the underlying data
+    #[doc(hidden)]
     fn size_of() -> usize;
 
     /// This is used to convert the compile time type into a valid layout on the device without knowing what the value of the data will be.
@@ -25,6 +27,8 @@ pub trait WgpuType {
     /// Sometimes the usage of the underlying data is described by how it is bound. For example, a Vertex will always have `wgpu::BufferUsage::VERTEX`. However, for other buffers the value depends on it's compile time type. For example, whether we are creating a uniform or storage buffer. In this second case, I've added this convenience function to get the appropriate qualifiers from the type.
     fn get_qualifiers() -> Option<QUALIFIER>;
 }
+
+/// This struct is used to hold traditional array like data such as single values, vectors, and matricies. It is parameterized on a `BINDINGTYPE` which specifies whether the end buffer is suppose to be a uniform or storage buffer.
 pub struct BufferData<const BINDINGTYPE: wgpu::BufferBindingType, T> {
     data: T,
 }
@@ -270,18 +274,21 @@ impl<const BINDINGTYPE: wgpu::BufferBindingType> WgpuType
     }
 }
 
+/// Used to specify https://wgpu.rs/doc/wgpu_types/enum.BindingType.html#variant.Sampler.field.comparison
 #[derive(PartialEq, Eq)]
 pub enum SamplerComparison {
     True,
     False,
 }
 
+/// Used to specify https://wgpu.rs/doc/wgpu_types/enum.BindingType.html#variant.Sampler.field.filtering
 #[derive(PartialEq, Eq)]
 pub enum SamplerFiltering {
     True,
     False,
 }
 
+/// This struct is used to create samplers for a pipeline. It is parameterized on two enums which specify whether the sampler created should be a comparison sampler and whether it should be a filtering sampler.
 pub struct SamplerData<'a, const COMPARABLE: SamplerComparison, const FILTERABLE: SamplerFiltering>
 {
     desc: wgpu::SamplerDescriptor<'a>,
@@ -325,12 +332,16 @@ impl<'a, const COMPARABLE: SamplerComparison, const FILTERABLE: SamplerFiltering
     }
 }
 
+/// Used to specify https://docs.rs/wgpu/0.8.1/wgpu/enum.BindingType.html#variant.Texture.field.multisampled
 #[derive(PartialEq, Eq)]
 pub enum TextureMultisampled {
     True,
     False,
 }
 
+/// This struct is
+/// For `SAMPLETYPE` https://docs.rs/wgpu/0.8.1/wgpu/enum.BindingType.html#variant.Texture.field.sample_type
+/// For `VIEWDIMENSION` https://docs.rs/wgpu/0.8.1/wgpu/enum.BindingType.html#variant.Texture.field.view_dimension
 pub struct TextureData<
     'a,
     const MULTISAMPLE: TextureMultisampled,
@@ -415,6 +426,8 @@ impl<
     }
 }
 
+#[doc(hidden)]
+/// The result of binding WGPUType data to the gpu. These are basically all handlers to GPU data of different types.
 pub enum BoundData {
     Buffer {
         data: Rc<wgpu::Buffer>,
@@ -495,6 +508,7 @@ impl BoundData {
     }
 }
 
+//todo get rid of this when there is a new way to stringify shaders
 #[derive(Debug, Clone)]
 pub struct TextureBinding {
     pub binding_number: u32,
@@ -505,6 +519,7 @@ pub struct TextureBinding {
     pub qual: Vec<QUALIFIER>,
 }
 
+//todo get rid of this when there is a new way to stringify shaders
 #[derive(Debug, Clone)]
 pub struct SamplerBinding {
     pub binding_number: u32,
@@ -515,6 +530,7 @@ pub struct SamplerBinding {
     pub qual: Vec<QUALIFIER>,
 }
 
+//todo get rid of this when there is a new way to stringify shaders
 #[derive(Debug, Clone)]
 pub struct DefaultBinding {
     pub binding_number: u32,
@@ -526,13 +542,14 @@ pub struct DefaultBinding {
     pub qual: Vec<QUALIFIER>,
 }
 
+/// A buffer of indices that can be used to run a pipeline by indexing into the vertex buffer(s) instead of iterating over them
 pub struct Indices {
     pub buffer: Rc<wgpu::Buffer>,
     pub len: u32,
 }
 
 impl Indices {
-    pub fn new(device: &wgpu::Device, data: &Vec<u16>) -> Self {
+    fn new(device: &wgpu::Device, data: &Vec<u16>) -> Self {
         Indices {
             buffer: Rc::new(
                 device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -546,13 +563,14 @@ impl Indices {
     }
 }
 
+/// A Vertex Buffer containing data of type WgpuType
 pub struct Vertex<A: WgpuType + ?Sized> {
     typ: PhantomData<A>,
     buffer: Rc<wgpu::Buffer>,
 }
 
 impl<'a, A: WgpuType> Vertex<A> {
-    pub fn get_buffer(&'a self) -> &'a wgpu::Buffer {
+    fn get_buffer(&'a self) -> &'a wgpu::Buffer {
         &self.buffer
     }
 
