@@ -3,11 +3,11 @@ use proc_macro2::Ident;
 use syn::{parse_macro_input, LitStr};
 use quote::{quote, format_ident};
 
-use naga::{valid::{ValidationFlags, Validator}, front::wgsl, GlobalVariable, Module, ShaderStage, Binding};
+use naga::{valid::{ValidationFlags, Validator}, front::wgsl, GlobalVariable, Module, ShaderStage, Binding, Handle, Type, TypeInner};
 
 #[derive(Debug, Clone)]
 enum Input {
-    Argument { binding: u32, name: String },
+    Argument { binding: u32, name: String, ty: Handle<Type> },
     Uniform { binding: u32, name: String },
 }
 
@@ -28,24 +28,34 @@ impl Input {
 fn make_inputs(module: &Module) -> Vec<Option<Input>> {
     let vert_inputs = module.entry_points.iter()
         .find(|x| x.stage == ShaderStage::Vertex).unwrap().function.arguments.iter()
-        .filter_map(|arg| Some(arg.binding.as_ref()
-                    .map(|binding| {
-                        match binding {
-                            Binding::Location { location, .. } => Some(Input::Argument { binding: *location, name: arg.name.clone().unwrap() }),
-                            Binding::BuiltIn(..) => None,
-                        }
+        .filter_map(|arg|
+            Some(arg.binding.as_ref().map(|binding| {
+                match binding {
+                    Binding::Location { location, .. } => {
+                        Some(Input::Argument {
+                            binding: *location,
+                            name: arg.name.clone().unwrap(),
+                            ty: arg.ty,
+                        })
+                    },
+                    Binding::BuiltIn(..) => None,
+                }
         }).flatten()));
     let vars = module.global_variables.iter().map(|v| v.1.clone()).collect::<Vec<GlobalVariable>>();
-    let mut grouped_vars = vec![Vec::new(); 1 + (&vars).last().unwrap().binding.as_ref().unwrap().group as usize];
-    for var in vars {
-        let binding = var.binding.as_ref().unwrap().group;
-        let input = Input::Uniform { binding, name: var.name.unwrap() };
-        grouped_vars[binding as usize].push(input);
-    }
-    let uniforms = grouped_vars.into_iter().map(|x| x.into_iter().reduce(|a, b| {
-        Input::Uniform { binding: a.binding(), name: format!("{}_{}", a.name(), b.name()) }
-    }));
-    uniforms.chain(vert_inputs).collect::<Vec<Option<Input>>>()
+    let uniforms = if let Some(last) = vars.last() {
+        let mut grouped_vars = vec![Vec::new(); 1 + last.binding.as_ref().unwrap().group as usize];
+        for var in vars {
+            let binding = var.binding.as_ref().unwrap().group;
+            let input = Input::Uniform { binding, name: var.name.unwrap() };
+            grouped_vars[binding as usize].push(input);
+        }
+        Some(grouped_vars.into_iter().map(|x| x.into_iter().reduce(|a, b| {
+            Input::Uniform { binding: a.binding(), name: format!("{}_{}", a.name(), b.name()) }
+        })))
+    } else {
+        None
+    };
+    vert_inputs.chain(uniforms.into_iter().flatten()).collect::<Vec<Option<Input>>>()
 }
 
 pub fn sub_module_graphics_program(input: TokenStream) -> TokenStream {
@@ -60,7 +70,7 @@ pub fn sub_module_graphics_program(input: TokenStream) -> TokenStream {
 
     let final_context_name = format_ident!("Context{}", "1".repeat((&inputs).len()));
     let initial_context_name = format_ident!("Context{}", "0".repeat((&inputs).len()));
-    let impls = make_context(inputs);
+    let impls = make_context(&shader_module, inputs);
 
     let pipeline = make_pipeline(&shader_str, shader_module);
 
@@ -96,13 +106,13 @@ pub fn sub_module_graphics_program(input: TokenStream) -> TokenStream {
             }
         }
 
-        let program = GraphicsProgram { pipeline, rpass: None };
+        let mut program = GraphicsProgram { pipeline, rpass: None };
     };
 
     TokenStream::from(contexts)
 }
 
-fn make_context(inputs: Vec<Option<Input>>) -> proc_macro2::TokenStream {
+fn make_context(module: &Module, inputs: Vec<Option<Input>>) -> proc_macro2::TokenStream {
     let mut impls = quote!();
     let mut contexts = quote!();
 
@@ -111,19 +121,31 @@ fn make_context(inputs: Vec<Option<Input>>) -> proc_macro2::TokenStream {
             let mut new_vars = inputs.clone();
             new_vars[i] = None;
             let new_name = context_name_from_vars(&new_vars);
-            let lower_context = make_context(new_vars);
+            let lower_context = make_context(module, new_vars);
             contexts = quote! {
                 #contexts
                 #lower_context
             };
             match input {
-                Input::Argument { binding, name } => {
+                Input::Argument { binding, name, ty } => {
                     let setter_name = format_ident!("set_{}", name);
+                    let ty = match &module.types[*ty].inner {
+                        TypeInner::Vector { size, kind, .. } => {
+                            let size = naga_size_to_num(size);
+                            let ty = naga_kind_to_type(kind);
+                            quote!(Vec<[#ty; #size]>)
+                        }
+                        TypeInner::Scalar { kind, .. } => {
+                            let ty = naga_kind_to_type(kind);
+                            quote!(Vec<#ty>)
+                        }
+                        e => panic!("bad entrypoint input: {:?}", e),
+                    };
                     impls = quote! {
                         #impls
 
-                        fn #setter_name(&'a mut self, bind_group: &'a wgpu::BindGroup) -> #new_name {
-                            self.rpass.set_bind_group(#binding, bind_group, &[]);
+                        fn #setter_name(&'a mut self, buffer_slice: &'a pipeline::bind::Vertex<BufferData<{wgpu::BufferBindingType::Uniform}, #ty>>) -> #new_name {
+                            self.rpass.set_vertex_buffer(#binding, buffer_slice.get_buffer().slice(..));
                             #new_name { rpass: self.rpass }
                         }
                     }
@@ -133,8 +155,9 @@ fn make_context(inputs: Vec<Option<Input>>) -> proc_macro2::TokenStream {
                     impls = quote! {
                         #impls
 
-                        fn #setter_name(&'a mut self, buffer_slice: wgpu::BufferSlice<'a>) -> #new_name {
-                            self.rpass.set_vertex_buffer(#binding, buffer_slice);
+                        // TODO: types
+                        fn #setter_name(&'a mut self, bind_group: &'a pipeline::bind::BindGroup1<BufferData<{wgpu::BufferBindingType::Uniform}, Vec<f32>>>) -> #new_name {
+                            self.rpass.set_bind_group(#binding, bind_group.get_bind_group(), &[]);
                             #new_name { rpass: self.rpass }
                         }
                     }
@@ -217,4 +240,34 @@ fn make_pipeline(shader_str: &str, shader_module: Module) -> proc_macro2::TokenS
     };
 
     result
+}
+
+fn naga_size_to_num(size: &naga::VectorSize) -> usize {
+    match size {
+        naga::VectorSize::Bi => 2,
+        naga::VectorSize::Tri => 3,
+        naga::VectorSize::Quad => 4,
+    }
+}
+
+fn naga_kind_to_type(kind: &naga::ScalarKind) -> syn::Type {
+    let ident = match kind {
+        naga::ScalarKind::Sint => format_ident!("i32"),
+        naga::ScalarKind::Uint => format_ident!("u32"),
+        naga::ScalarKind::Float => format_ident!("f32"),
+        naga::ScalarKind::Bool => format_ident!("bool"),
+    };
+    let mut ty = syn::punctuated::Punctuated::new();
+    ty.push(syn::PathSegment {
+        ident,
+        arguments: syn::PathArguments::None,
+    });
+
+    syn::Type::Path(syn::TypePath {
+        qself: None,
+        path: syn::Path {
+            leading_colon: None,
+            segments: ty,
+        },
+    })
 }

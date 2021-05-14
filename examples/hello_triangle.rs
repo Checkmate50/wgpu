@@ -42,29 +42,26 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 
     graphics_program!(
 "struct VertexOutput {
-  [[location(0)]] pos_color: vec3<f32>;
   [[builtin(position)]] position: vec4<f32>;
+  [[location(0)]] color: vec3<f32>;
+  [[location(1)]] brightness: f32;
 };
 
 [[stage(vertex)]]
-fn vs_main([[location(0)]] position: vec3<f32>) -> VertexOutput {
+fn vs_main(
+    [[location(0)]] position: vec3<f32>,
+    [[location(1)]] brightness: f32
+) -> VertexOutput {
     var out: VertexOutput;
-    out.pos_color = position;
+    out.color = position;
+    out.brightness = brightness;
     out.position = vec4<f32>(position, 1.0);
     return out;
 }
 
-[[block]]
-struct Opts {
-    brightness: f32;
-};
-
-[[group(0), binding(0)]]
-var opts: Opts;
-
 [[stage(fragment)]]
 fn fs_main(in: VertexOutput) -> [[location(0)]] vec4<f32> {
-    return vec4<f32>(in.pos_color * opts.brightness, 1.0);
+    return vec4<f32>(in.color * in.brightness, 1.0);
 }");
 
     let positions = vec![[0.0, 0.7, 0.0], [-0.5, 0.5, 0.0], [0.5, -0.5, 0.0]];
@@ -108,7 +105,7 @@ fn fs_main(in: VertexOutput) -> [[location(0)]] vec4<f32> {
 
                     let context1 = (&context).set_position(&vertex_position);
                     {
-                        let context2 = context1.set_opts(&vertex_brightness);
+                        let context2 = context1.set_brightness(&vertex_brightness);
                         {
                             context2.draw(0..3, 0..1);
                         }

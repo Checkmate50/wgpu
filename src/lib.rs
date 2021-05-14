@@ -1,5 +1,5 @@
 #![crate_type = "lib"]
-#![feature(const_fn, const_panic)]
+#![feature(const_panic)]
 #![feature(const_generics)]
 
 use wgpu::BufferSlice;
