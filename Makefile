@@ -80,14 +80,17 @@ flat_color:
 sink:
 	cargo +nightly run --example sink
 
+build:
+	cargo +nightly build
+
 release:
-	cargo build --release
+	cargo +nightly build --release
 
 test:
-	cargo test
+	cargo +nightly test
 
 clean:
-	cargo clean
+	cargo +nightly clean
 
 check:
 	cargo +nightly clippy
