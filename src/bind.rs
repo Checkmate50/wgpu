@@ -570,7 +570,7 @@ pub struct Vertex<A: WgpuType + ?Sized> {
 }
 
 impl<'a, A: WgpuType> Vertex<A> {
-    fn get_buffer(&'a self) -> &'a wgpu::Buffer {
+    pub fn get_buffer(&'a self) -> &'a wgpu::Buffer {
         &self.buffer
     }
 
