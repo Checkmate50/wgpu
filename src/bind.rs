@@ -549,7 +549,7 @@ pub struct Indices {
 }
 
 impl Indices {
-    fn new(device: &wgpu::Device, data: &Vec<u16>) -> Self {
+    pub fn new(device: &wgpu::Device, data: &Vec<u16>) -> Self {
         Indices {
             buffer: Rc::new(
                 device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
