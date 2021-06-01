@@ -1,14 +1,25 @@
 use proc_macro::TokenStream;
 use proc_macro2::Ident;
+use quote::{format_ident, quote};
 use syn::{parse_macro_input, LitStr};
-use quote::{quote, format_ident};
 
-use naga::{valid::{ValidationFlags, Validator}, front::wgsl, GlobalVariable, Module, ShaderStage, Binding, Handle, Type, TypeInner};
+use naga::{
+    front::wgsl,
+    valid::{ValidationFlags, Validator},
+    Binding, GlobalVariable, Handle, Module, ShaderStage, Type, TypeInner,
+};
 
 #[derive(Debug, Clone)]
 enum Input {
-    Argument { binding: u32, name: String, ty: Handle<Type> },
-    Uniform { binding: u32, name: String },
+    Argument {
+        binding: u32,
+        name: String,
+        ty: Handle<Type>,
+    },
+    Uniform {
+        binding: u32,
+        name: String,
+    },
 }
 
 impl Input {
@@ -26,36 +37,56 @@ impl Input {
 }
 
 fn make_inputs(module: &Module) -> Vec<Option<Input>> {
-    let vert_inputs = module.entry_points.iter()
-        .find(|x| x.stage == ShaderStage::Vertex).unwrap().function.arguments.iter()
-        .filter_map(|arg|
-            Some(arg.binding.as_ref().map(|binding| {
-                match binding {
-                    Binding::Location { location, .. } => {
-                        Some(Input::Argument {
+    let vert_inputs = module
+        .entry_points
+        .iter()
+        .find(|x| x.stage == ShaderStage::Vertex)
+        .unwrap()
+        .function
+        .arguments
+        .iter()
+        .filter_map(|arg| {
+            Some(
+                arg.binding
+                    .as_ref()
+                    .map(|binding| match binding {
+                        Binding::Location { location, .. } => Some(Input::Argument {
                             binding: *location,
                             name: arg.name.clone().unwrap(),
                             ty: arg.ty,
-                        })
-                    },
-                    Binding::BuiltIn(..) => None,
-                }
-        }).flatten()));
-    let vars = module.global_variables.iter().map(|v| v.1.clone()).collect::<Vec<GlobalVariable>>();
+                        }),
+                        Binding::BuiltIn(..) => None,
+                    })
+                    .flatten(),
+            )
+        });
+    let vars = module
+        .global_variables
+        .iter()
+        .map(|v| v.1.clone())
+        .collect::<Vec<GlobalVariable>>();
     let uniforms = if let Some(last) = vars.last() {
         let mut grouped_vars = vec![Vec::new(); 1 + last.binding.as_ref().unwrap().group as usize];
         for var in vars {
             let binding = var.binding.as_ref().unwrap().group;
-            let input = Input::Uniform { binding, name: var.name.unwrap() };
+            let input = Input::Uniform {
+                binding,
+                name: var.name.unwrap(),
+            };
             grouped_vars[binding as usize].push(input);
         }
-        Some(grouped_vars.into_iter().map(|x| x.into_iter().reduce(|a, b| {
-            Input::Uniform { binding: a.binding(), name: format!("{}_{}", a.name(), b.name()) }
-        })))
+        Some(grouped_vars.into_iter().map(|x| {
+            x.into_iter().reduce(|a, b| Input::Uniform {
+                binding: a.binding(),
+                name: format!("{}_{}", a.name(), b.name()),
+            })
+        }))
     } else {
         None
     };
-    vert_inputs.chain(uniforms.into_iter().flatten()).collect::<Vec<Option<Input>>>()
+    vert_inputs
+        .chain(uniforms.into_iter().flatten())
+        .collect::<Vec<Option<Input>>>()
 }
 
 pub fn sub_module_graphics_program(input: TokenStream) -> TokenStream {
@@ -64,7 +95,9 @@ pub fn sub_module_graphics_program(input: TokenStream) -> TokenStream {
     // TODO: make these errors better
     // this is the entirety of shader parsing and validation
     let shader_module = wgsl::parse_str(&shader_str).expect("Failed to parse shader");
-    Validator::new(ValidationFlags::all()).validate(&shader_module).expect("Invalid shader");
+    Validator::new(ValidationFlags::all())
+        .validate(&shader_module)
+        .expect("Invalid shader");
 
     let inputs = make_inputs(&shader_module);
 
@@ -149,7 +182,7 @@ fn make_context(module: &Module, inputs: Vec<Option<Input>>) -> proc_macro2::Tok
                             #new_name { rpass: self.rpass }
                         }
                     }
-                },
+                }
                 Input::Uniform { binding, name } => {
                     let setter_name = format_ident!("set_{}", name);
                     impls = quote! {
@@ -168,7 +201,7 @@ fn make_context(module: &Module, inputs: Vec<Option<Input>>) -> proc_macro2::Tok
 
     if !impls.is_empty() {
         let context_name = context_name_from_vars(&inputs);
-        let struct_name = quote!{
+        let struct_name = quote! {
             struct #context_name<'a> {
                 rpass: &'a mut wgpu::RenderPass<'a>,
             }
@@ -191,17 +224,29 @@ fn make_context(module: &Module, inputs: Vec<Option<Input>>) -> proc_macro2::Tok
 }
 
 fn context_name_from_vars(vars: &Vec<Option<Input>>) -> Ident {
-    let nums = vars.iter().map(|x| match x {
-        Some(_) => '0',
-        None => '1',
-    }).collect::<String>();
+    let nums = vars
+        .iter()
+        .map(|x| match x {
+            Some(_) => '0',
+            None => '1',
+        })
+        .collect::<String>();
 
     format_ident!("Context{}", nums)
 }
 
 fn make_pipeline(shader_str: &str, shader_module: Module) -> proc_macro2::TokenStream {
-    let vert_entry_point = shader_module.entry_points.iter().find(|x| x.stage == ShaderStage::Vertex).map(|x| x.name.clone()).unwrap();
-    let frag_entry_point = shader_module.entry_points.into_iter().find(|x| x.stage == ShaderStage::Fragment).map(|x| x.name);
+    let vert_entry_point = shader_module
+        .entry_points
+        .iter()
+        .find(|x| x.stage == ShaderStage::Vertex)
+        .map(|x| x.name.clone())
+        .unwrap();
+    let frag_entry_point = shader_module
+        .entry_points
+        .into_iter()
+        .find(|x| x.stage == ShaderStage::Fragment)
+        .map(|x| x.name);
     let frag_module = if let Some(entry_point) = frag_entry_point {
         quote! {
             let fragment = Some(wgpu::FragmentState {
