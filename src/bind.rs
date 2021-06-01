@@ -1,7 +1,7 @@
 pub use crate::read::MyBufferView;
-pub use crate::write::MyBufferViewMut;
 use crate::shared::{GLSLTYPE, QUALIFIER};
 pub use crate::write;
+pub use crate::write::MyBufferViewMut;
 use std::marker::PhantomData;
 use wgpu_macros::create_get_view_func;
 use zerocopy::AsBytes as _;
@@ -168,7 +168,11 @@ impl<const BINDINGTYPE: wgpu::BufferBindingType> WgpuType
             .data
             .clone()
             .into_iter()
-            .map(|x| {let mut y = x.to_vec(); y.push(0.0); y}) // We need to extend Vec3 -> Vec4 for alignment
+            .map(|x| {
+                let mut y = x.to_vec();
+                y.push(0.0);
+                y
+            }) // We need to extend Vec3 -> Vec4 for alignment
             .flatten()
             .collect();
         BoundData::new_buffer(
@@ -556,10 +560,18 @@ impl<'a, A: WgpuType> Vertex<A> {
         &self.buffer
     }
 
+    pub fn get_size(&self) -> usize {
+        A::size_of()
+    }
+
     pub fn new(device: &wgpu::Device, data: &A) -> Self {
         Vertex {
             typ: PhantomData,
-            buffer: data.bind(device, Some(QUALIFIER::VERTEX)).get_buffer().unwrap().0,
+            buffer: data
+                .bind(device, Some(QUALIFIER::VERTEX))
+                .get_buffer()
+                .unwrap()
+                .0,
         }
     }
 }
@@ -880,7 +892,6 @@ where
         )
     }
 }
-
 
 impl<'a, const BINDINGTYPE: wgpu::BufferBindingType, T, R> BindGroup2<R, BufferData<BINDINGTYPE, T>>
 where

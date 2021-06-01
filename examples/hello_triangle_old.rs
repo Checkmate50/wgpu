@@ -12,13 +12,28 @@ use winit::{
 };
 
 pub use pipeline::wgpu_graphics_header::{
-    generate_swap_chain, graphics_run, setup_render_pass, GraphicsCompileArgs,
+    generate_swap_chain, graphics_run, setup_render_pass, GraphicsCompileArgs, GraphicsShader,
 };
 
 use crate::pipeline::AbstractBind;
 pub use pipeline::bind::{BufferData, Vertex};
 
 pub use wgpu_macros::generic_bindings;
+
+my_shader! {vertex = {
+    [[vertex in] vec3] a_position;
+    [[vertex in] float] in_brightness;
+    [[out] vec3] posColor;
+    [[out] float] brightness;
+    [[out] vec4] gl_Position;
+    {{
+        void main() {
+            posColor = a_position;
+            brightness = in_brightness;
+            gl_Position = vec4(a_position, 1.0);
+        }
+    }}
+}}
 
 async fn run(event_loop: EventLoop<()>, window: Window) {
     let instance = wgpu::Instance::new(wgpu::BackendBit::PRIMARY);
@@ -46,24 +61,25 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         .await
         .expect("Failed to create device");
 
-    my_shader! {pipeline = {
-        [[stage(vertex)]]
-        fn vs_main([[builtin(vertex_index)]] in_vertex_index: u32) -> [[builtin(position)]] vec4<f32> {
-            let x = f32(i32(in_vertex_index) - 1);
-            let y = f32(i32(in_vertex_index & 1u) * 2 - 1);
-            return vec4<f32>(x, y, 0.0, 1.0);
-        }
-
-        [[stage(fragment)]]
-        fn fs_main() -> [[location(0)]] vec4<f32> {
-            return vec4<f32>(1.0, 0.0, 0.0, 1.0);
-        }
+    my_shader! {fragment = {
+        [[in] vec3] posColor;
+        [[in] float] brightness;
+        [[out] vec4] color;
+        {{
+            void main() {
+                color = vec4(posColor * brightness, 1.0);
+            }
+        }}
     }}
 
-    eager_binding! {context = pipeline!()};
+    const S_V: GraphicsShader = eager_graphics_shader! {vertex!()};
+
+    const S_F: GraphicsShader = eager_graphics_shader! {fragment!()};
+
+    eager_binding! {context = vertex!(), fragment!()};
 
     let (program, _) =
-        compile_valid_graphics_program!(device, context, GraphicsCompileArgs::default());
+        compile_valid_graphics_program!(device, context, S_V, S_F, GraphicsCompileArgs::default());
 
     let positions = vec![[0.0, 0.7, 0.0], [-0.5, 0.5, 0.0], [0.5, -0.5, 0.0]];
     let brightness = vec![0.5, 0.5, 0.9];
@@ -105,13 +121,13 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                         },
                     );
 
-/*                     let context1 = (&context).set_a_position(&mut rpass, &vertex_position);
+                    let context1 = (&context).set_a_position(&mut rpass, &vertex_position);
                     {
-                        let context2 = context1.set_in_brightness(&mut rpass, &vertex_brightness); */
+                        let context2 = context1.set_in_brightness(&mut rpass, &vertex_brightness);
                         {
-                            context.runnable(|| graphics_run(&mut rpass, 3, 1));
+                            context2.runnable(|| graphics_run(&mut rpass, 3, 1));
                         }
-                    //}
+                    }
                 }
                 queue.submit(Some(init_encoder.finish()));
             }

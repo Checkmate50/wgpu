@@ -1,101 +1,12 @@
-use glsl_to_spirv::ShaderType;
+use wgpu::ShaderModule;
 
-use std::collections::HashMap;
 use std::convert::TryInto;
-use std::rc::Rc;
 
-use crate::shared::{
-    check_gl_builtin_type, compile_shader, has_out_qual, is_gl_builtin, process_body,
-    string_compare, GLSLTYPE, PARAMETER, QUALIFIER,
-};
 
-use crate::bind::{DefaultBinding, Indices, SamplerBinding, TextureBinding};
+use crate::bind::{Indices};
 
 pub struct GraphicsProgram {
     pub pipeline: wgpu::RenderPipeline,
-}
-
-#[derive(Debug, Clone)]
-pub struct GraphicsBindings {
-    pub bindings: Vec<DefaultBinding>,
-    pub indices: Option<Rc<wgpu::Buffer>>,
-    pub index_len: Option<u32>,
-    pub textures: Vec<TextureBinding>,
-    pub samplers: Vec<SamplerBinding>,
-}
-
-#[derive(Debug, Clone)]
-pub struct OutGraphicsBindings {
-    pub bindings: Vec<DefaultBinding>,
-}
-
-fn stringify_shader(
-    s: &GraphicsShader,
-    b: &GraphicsBindings,
-    b_out: &OutGraphicsBindings,
-) -> String {
-    let mut buffer = Vec::new();
-    for i in &b.bindings[..] {
-        if i.qual.contains(&QUALIFIER::UNIFORM) {
-            buffer.push(format!(
-                "layout(set = {}, binding = {}) uniform UNIFORM{}{} {{\n\t {} {};\n}};\n",
-                i.group_number, i.binding_number, i.group_number, i.binding_number, i.gtype, i.name
-            ));
-        } else if !is_gl_builtin(&i.name) {
-            buffer.push(format!(
-                "layout(location={}) {} {} {};\n",
-                i.binding_number,
-                if i.qual.contains(&QUALIFIER::IN) && i.qual.contains(&QUALIFIER::OUT) {
-                    "inout"
-                } else if i.qual.contains(&QUALIFIER::IN) {
-                    "in"
-                } else if i.qual.contains(&QUALIFIER::OUT) {
-                    "out"
-                } else {
-                    panic!("You are trying to do something with something that isn't an in or out")
-                },
-                i.gtype,
-                i.name
-            ));
-        }
-    }
-    for i in &b.textures[..] {
-        buffer.push(format!(
-            "layout(set = {}, binding = {}) uniform {} {};\n",
-            i.group_number, i.binding_number, i.gtype, i.name
-        ));
-    }
-    for i in &b.samplers[..] {
-        buffer.push(format!(
-            "layout(set = {}, binding = {}) uniform {} {};\n",
-            i.group_number, i.binding_number, i.gtype, i.name
-        ));
-    }
-    for i in &b_out.bindings[..] {
-        if i.name != "gl_Position" && !i.qual.contains(&QUALIFIER::UNIFORM) {
-            buffer.push(format!(
-                "layout(location={}) {} {} {};\n",
-                i.binding_number,
-                if i.qual.contains(&QUALIFIER::IN) && i.qual.contains(&QUALIFIER::OUT) {
-                    "inout"
-                } else if i.qual.contains(&QUALIFIER::IN) {
-                    "in"
-                } else if i.qual.contains(&QUALIFIER::OUT) {
-                    "out"
-                } else {
-                    panic!("You are trying to do something with something that isn't an in or out")
-                },
-                i.gtype,
-                i.name
-            ));
-        }
-    }
-    format!(
-        //todo figure out how to use a non-1 local size
-        "\n#version 450\n{}\n\n{}",
-        buffer.join(""),
-        process_body(s.body)
-    )
 }
 
 pub fn generate_swap_chain(
@@ -114,242 +25,6 @@ pub fn generate_swap_chain(
         present_mode: wgpu::PresentMode::Mailbox,
     };
     device.create_swap_chain(&surface, &sc_desc)
-}
-
-//todo clean this up, or better yet, can this move to proc_macro?
-fn create_bindings(
-    vertex: &GraphicsShader,
-    fragment: &GraphicsShader,
-) -> (
-    GraphicsBindings,
-    OutGraphicsBindings,
-    GraphicsBindings,
-    OutGraphicsBindings,
-) {
-    let mut vertex_binding_struct = Vec::new();
-    let mut vertex_out_binding_struct = Vec::new();
-    let mut fragment_binding_struct = Vec::new();
-    let mut fragment_out_binding_struct = Vec::new();
-    let mut vertex_stage_binding_number = 0;
-    let mut vertex_binding_number = 0;
-    let mut vertex_to_fragment_binding_number = 0;
-    let mut vertex_to_fragment_map = HashMap::new();
-    let mut uniform_map = HashMap::new();
-    let mut uniform_binding_number_map = HashMap::new();
-    let mut uniform_binding_number_fragment_map = HashMap::new();
-    let mut fragment_out_binding_number = 0;
-    let mut group_map: HashMap<&str, u32> = HashMap::new();
-    let mut group_set_number = 0;
-    for i in &vertex.params[..] {
-        if !check_gl_builtin_type(i.name, &i.gtype) {
-            // Bindings that are kept between runs
-            if i.qual.contains(&QUALIFIER::VERTEX) {
-                vertex_binding_struct.push(DefaultBinding {
-                    binding_number: vertex_binding_number,
-                    group_number: 0,
-                    name: i.name.to_string(),
-                    data: None,
-                    length: None,
-                    gtype: i.gtype.clone(),
-                    qual: i.qual.to_vec(),
-                });
-                vertex_binding_number += 1;
-            // Bindings that are invalidated after a run
-            } else if i.qual.contains(&QUALIFIER::UNIFORM) {
-                let group_number = match group_map.get(i.group.unwrap()) {
-                    Some(i) => *i,
-                    None => {
-                        let x = group_set_number;
-                        group_map.insert(i.group.unwrap(), x);
-                        group_set_number += 1;
-                        x
-                    }
-                };
-                let uniform_binding_number =
-                    uniform_binding_number_map.entry(group_number).or_insert(0);
-                vertex_binding_struct.push(DefaultBinding {
-                    binding_number: *uniform_binding_number,
-                    group_number,
-                    name: i.name.to_string(),
-                    data: None,
-                    length: None,
-                    gtype: i.gtype.clone(),
-                    qual: i.qual.to_vec(),
-                });
-                uniform_map.insert(i.group.unwrap(), *uniform_binding_number);
-                *uniform_binding_number += 1;
-            } else if i.qual.contains(&QUALIFIER::IN) && !i.qual.contains(&QUALIFIER::OUT) {
-                vertex_binding_struct.push(DefaultBinding {
-                    binding_number: vertex_stage_binding_number,
-                    group_number: 0,
-                    name: i.name.to_string(),
-                    data: None,
-                    length: None,
-                    gtype: i.gtype.clone(),
-                    qual: i.qual.to_vec(),
-                });
-                vertex_stage_binding_number += 1;
-            // Bindings that are invalidated after a run
-            } else if !i.qual.contains(&QUALIFIER::IN) && i.qual.contains(&QUALIFIER::OUT) {
-                vertex_out_binding_struct.push(DefaultBinding {
-                    binding_number: vertex_to_fragment_binding_number,
-                    group_number: 0,
-                    name: i.name.to_string(),
-                    data: None,
-                    length: None,
-                    gtype: i.gtype.clone(),
-                    qual: i.qual.to_vec(),
-                });
-                vertex_to_fragment_map.insert(i.name, vertex_to_fragment_binding_number);
-                vertex_to_fragment_binding_number += 1;
-            } else {
-                dbg!(&i);
-                panic!("TODO We currently don't support both in and out qualifiers for vertex/fragment shaders")
-            }
-        }
-    }
-
-    let mut textures_struct = Vec::new();
-    let mut samplers_struct = Vec::new();
-
-    for i in &fragment.params[..] {
-        //todo the binding_number's below are probably wrong
-        if !check_gl_builtin_type(i.name, &i.gtype) {
-            // Bindings that are kept between runs
-            if i.qual.contains(&QUALIFIER::UNIFORM) {
-                if i.gtype == GLSLTYPE::Sampler || i.gtype == GLSLTYPE::SamplerShadow {
-                    let group_number = match group_map.get(i.group.unwrap()) {
-                        Some(i) => *i,
-                        None => {
-                            let x = group_set_number;
-                            group_map.insert(i.group.unwrap(), x);
-                            group_set_number += 1;
-                            x
-                        }
-                    };
-                    let binding_number = uniform_binding_number_fragment_map
-                        .entry(group_number)
-                        .or_insert(0);
-                    samplers_struct.push(SamplerBinding {
-                        binding_number: *binding_number,
-                        group_number,
-                        name: i.name.to_string(),
-                        data: None,
-                        gtype: i.gtype.clone(),
-                        qual: i.qual.to_vec(),
-                    });
-                    *binding_number += 1;
-                } else if i.gtype == GLSLTYPE::Texture2D
-                    || i.gtype == GLSLTYPE::Texture2DArray
-                    || i.gtype == GLSLTYPE::TextureCube
-                {
-                    let group_number = match group_map.get(i.group.unwrap()) {
-                        Some(i) => *i,
-                        None => {
-                            let x = group_set_number;
-                            group_map.insert(i.group.unwrap(), x);
-                            group_set_number += 1;
-                            x
-                        }
-                    };
-                    let binding_number = uniform_binding_number_fragment_map
-                        .entry(group_number)
-                        .or_insert(0);
-                    textures_struct.push(TextureBinding {
-                        binding_number: *binding_number,
-                        group_number,
-                        name: i.name.to_string(),
-                        data: None,
-                        gtype: i.gtype.clone(),
-                        qual: i.qual.to_vec(),
-                    });
-                    *binding_number += 1;
-                } else {
-                    let group_number = match group_map.get(i.group.unwrap()) {
-                        Some(i) => *i,
-                        None => {
-                            let x = group_set_number;
-                            group_map.insert(i.group.unwrap(), x);
-                            group_set_number += 1;
-                            x
-                        }
-                    };
-                    let binding_number = uniform_binding_number_fragment_map
-                        .entry(group_number)
-                        .or_insert(0);
-                    /* let num = if uniform_map.get(i.name).is_some() {
-                        *uniform_map.get(i.name).unwrap()
-                    } else {
-                        uniform_map
-                        0
-                        /* let x = uniform_binding_number;
-                        uniform_map.insert(i.name, x);
-                        uniform_binding_number += 1;
-                        x */
-                    }; */
-                    fragment_binding_struct.push(DefaultBinding {
-                        binding_number: *binding_number,
-                        group_number,
-                        name: i.name.to_string(),
-                        data: None,
-                        length: None,
-                        gtype: i.gtype.clone(),
-                        qual: i.qual.to_vec(),
-                    });
-                    *binding_number += 1;
-                }
-            } else if i.qual.contains(&QUALIFIER::IN) && !i.qual.contains(&QUALIFIER::OUT) {
-                fragment_binding_struct.push(DefaultBinding {
-                    binding_number: *vertex_to_fragment_map
-                        .get(i.name)
-                        .unwrap_or_else(|| panic!("{} has not been bound", i.name)),
-                    group_number: 0,
-                    name: i.name.to_string(),
-                    data: None,
-                    length: None,
-                    gtype: i.gtype.clone(),
-                    qual: i.qual.to_vec(),
-                });
-            // Bindings that are invalidated after a run
-            } else if !i.qual.contains(&QUALIFIER::IN) && i.qual.contains(&QUALIFIER::OUT) {
-                fragment_out_binding_struct.push(DefaultBinding {
-                    binding_number: fragment_out_binding_number,
-                    group_number: 0,
-                    name: i.name.to_string(),
-                    data: None,
-                    length: None,
-                    gtype: i.gtype.clone(),
-                    qual: i.qual.to_vec(),
-                });
-                fragment_out_binding_number += 1;
-            } else {
-                //panic!("TODO We currently don't support both in and out qualifiers for vertex/fragment shaders")
-            }
-        }
-    }
-
-    (
-        GraphicsBindings {
-            bindings: vertex_binding_struct,
-            indices: None,
-            index_len: None,
-            textures: Vec::new(),
-            samplers: Vec::new(),
-        },
-        OutGraphicsBindings {
-            bindings: vertex_out_binding_struct,
-        },
-        GraphicsBindings {
-            bindings: fragment_binding_struct,
-            indices: None,
-            index_len: None,
-            textures: textures_struct,
-            samplers: samplers_struct,
-        },
-        OutGraphicsBindings {
-            bindings: fragment_out_binding_struct,
-        },
-    )
 }
 
 pub struct GraphicsCompileArgs {
@@ -382,64 +57,39 @@ pub async fn graphics_compile(
     vec_buffer: &mut [wgpu::VertexAttribute; 32],
     device: &wgpu::Device,
     bind_group_layout: Vec<wgpu::BindGroupLayout>,
-    vertex: &GraphicsShader,
-    fragment: &GraphicsShader,
+    vertex_sizes: Vec<usize>,
+    module: &ShaderModule,
     args: GraphicsCompileArgs,
 ) -> GraphicsProgram {
-    // the adapter is the handler to the physical graphics unit
+    for (idx, _)  in vertex_sizes.iter().enumerate() {
+        vec_buffer[idx] = wgpu::VertexAttribute {
+            offset: 0,
+            // This is our connection to shader.vert
+            // TODO WOW I had an error because I hardcoded the format's below. That should not be a thing
+            shader_location: idx as u32,
+            format: wgpu::VertexFormat::Float3
 
-    let (program_bindings1, out_program_bindings1, program_bindings2, out_program_bindings2) =
-        create_bindings(&vertex, &fragment);
-
-    for i in &program_bindings1.bindings[..] {
-        if i.qual.contains(&QUALIFIER::VERTEX) {
-            vec_buffer[i.binding_number as usize] = wgpu::VertexAttribute {
-                offset: 0,
-                // This is our connection to shader.vert
-                // TODO WOW I had an error because I hardcoded the format's below. That should not be a thing
-                shader_location: i.binding_number,
-                format: if i.gtype == GLSLTYPE::Vec3 {
-                    wgpu::VertexFormat::Float3
-                } else if i.gtype == GLSLTYPE::Vec2 {
-                    wgpu::VertexFormat::Float2
-                } else {
-                    wgpu::VertexFormat::Float
-                },
-            };
-        }
+            /* todo if i.gtype == GLSLTYPE::Vec3 {
+                wgpu::VertexFormat::Float3
+            } else if i.gtype == GLSLTYPE::Vec2 {
+                wgpu::VertexFormat::Float2
+            } else {
+                wgpu::VertexFormat::Float
+            } */,
+        };
     }
 
     let mut vertex_binding_desc = Vec::new();
 
-    for i in &program_bindings1.bindings[..] {
-        if !i.qual.contains(&QUALIFIER::UNIFORM) && !i.qual.contains(&QUALIFIER::BUFFER) {
-            vertex_binding_desc.push(wgpu::VertexBufferLayout {
-                array_stride: (i.gtype.size_of()) as wgpu::BufferAddress,
-                step_mode: if i.qual.contains(&QUALIFIER::VERTEX) {
-                    wgpu::InputStepMode::Vertex
-                } else {
-                    wgpu::InputStepMode::Instance
-                },
-                // If you have a struct that specifies your vertex, this is a 1 to 1 mapping of that struct
-                attributes: &vec_buffer
-                    [((i.binding_number) as usize)..((i.binding_number + 1) as usize)],
-            });
-        }
+    for (idx, i) in vertex_sizes.iter().enumerate() {
+        vertex_binding_desc.push(wgpu::VertexBufferLayout {
+            array_stride: *i as wgpu::BufferAddress,
+            step_mode: wgpu::InputStepMode::Vertex,
+            // If you have a struct that specifies your vertex, this is a 1 to 1 mapping of that struct
+            attributes: &vec_buffer
+                [idx..idx+1],
+        });
     }
-
-    let x = stringify_shader(vertex, &program_bindings1, &out_program_bindings1);
-
-    //println!("{}", x);
-
-    // Our compiled vertex shader
-    let vs_module = compile_shader(x, ShaderType::Vertex, &device);
-
-    let y = stringify_shader(fragment, &program_bindings2, &out_program_bindings2);
-
-    //println!("{}", y);
-
-    // Our compiled fragment shader
-    let fs_module = compile_shader(y, ShaderType::Fragment, &device);
 
     let bind_group_layout_ref: Vec<&wgpu::BindGroupLayout> =
         bind_group_layout.iter().map(|a| a).collect();
@@ -472,14 +122,14 @@ pub async fn graphics_compile(
         // fragment => 2
         // rasterization => 3
         vertex: wgpu::VertexState {
-            module: &vs_module,
+            module: &module,
             // The name of the method in shader.vert to use
             entry_point: "main",
             buffers: &vertex_binding_desc[..],
         },
         // Notice how the fragment and rasterization parts are optional
         fragment: Some(wgpu::FragmentState {
-            module: &fs_module,
+            module: &module,
             // The name of the method in shader.frag to use
             entry_point: "main",
             targets: &color_target_state,
@@ -646,62 +296,18 @@ wgpu::RenderPassDescriptor {
     }
 */
 
-#[derive(Debug)]
-pub struct GraphicsShader {
-    pub params: &'static [PARAMETER],
-    pub body: &'static str,
-}
-
-pub const fn valid_vertex_shader(vert: &GraphicsShader) {
-    let mut acc = 0;
-    while acc < vert.params.len() {
-        if string_compare(vert.params[acc].name, "gl_Position")
-            && has_out_qual(vert.params[acc].qual)
-        {
-            if let GLSLTYPE::Vec4 = vert.params[acc].gtype {
-                return;
-            }
-        }
-        acc += 1;
-    }
-    panic!("This is not a valid vertex shader! Remember you need 'gl_Position' as an out of a vertex shader")
-}
-
-pub const fn valid_fragment_shader(frag: &GraphicsShader) {
-    let mut acc = 0;
-    while acc < frag.params.len() {
-        if string_compare(frag.params[acc].name, "color") && has_out_qual(frag.params[acc].qual) {
-            if let GLSLTYPE::Vec4 = frag.params[acc].gtype {
-                return;
-            }
-        }
-        acc += 1;
-    }
-    panic!("This is not a valid fragment shader! Remember you need 'color' as an out of a fragment shader")
-}
-
-#[macro_export]
-macro_rules! graphics_shader {
-    ($($body:tt)*) => {{
-        const S : (&[pipeline::shared::PARAMETER], &'static str) = shader!($($body)*);
-        (pipeline::wgpu_graphics_header::GraphicsShader{params:S.0, body:S.1})
-    }};
-}
-
 #[macro_export]
 macro_rules! compile_valid_graphics_program {
-    ($device:tt, $context:tt, $vertex:tt, $fragment:tt, $args:expr) => {{
+    ($device:tt, $context:tt, $args:expr) => {{
         let mut compile_buffer: [wgpu::VertexAttribute; 32] =
             pipeline::wgpu_graphics_header::compile_buffer();
 
-        const _: () = pipeline::wgpu_graphics_header::valid_vertex_shader(&$vertex);
-        const _: () = pipeline::wgpu_graphics_header::valid_fragment_shader(&$fragment);
         let x = pipeline::wgpu_graphics_header::graphics_compile(
             &mut compile_buffer,
             &$device,
-            $context.get_layout(&$device),
-            &$vertex,
-            &$fragment,
+            $context.get_bindgroup_layout(&$device),
+            $context.get_vertex_sizes(),
+            &$context.get_module(&$device),
             $args,
         )
         .await;

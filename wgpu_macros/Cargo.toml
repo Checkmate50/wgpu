@@ -13,7 +13,13 @@ proc-macro = true
 proc-macro2 = "1.0"
 quote = "1.0"
 syn = { version = "1.0", features = ["full"] }
-naga = { version = "0.4.0", features = ["wgsl-in"] }
 itertools = "0.10"
 rand = "0.8"
 wgpu = "0.7"
+zerocopy = "0.5"
+
+
+[dependencies.naga]
+version = "0.4.0"
+path = "naga"
+features = ["wgsl-in", "spv-out"]

@@ -1,134 +1,13 @@
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
 use syn::parse::{Parse, ParseStream, Result};
-use syn::punctuated::Punctuated;
-use syn::{braced, bracketed, parse_macro_input, Ident, Token};
+use syn::{parse_macro_input, Ident, Token};
 
 use std::collections::HashMap;
 use std::iter;
+use zerocopy::AsBytes as _;
 
 use rand::Rng;
-
-// For Types like `vec` which can have dimensions `vec2`, `vec3`, and `vec4`
-#[derive(Debug, Clone, Copy)]
-enum GLSLDimension {
-    Two,
-    Three,
-    Four,
-}
-
-impl From<&GLSLDimension> for &str {
-    fn from(dim: &GLSLDimension) -> Self {
-        match dim {
-            GLSLDimension::Two => "2",
-            GLSLDimension::Three => "3",
-            GLSLDimension::Four => "4",
-        }
-    }
-}
-
-// All possible GLSL types that are supported or that I should support
-#[derive(Debug, Clone)]
-enum GLSLType {
-    // Non-vector types
-    Bool,
-    Int,
-    Uint,
-    Float,
-    Double,
-    // Vector-2 types
-    BVec(GLSLDimension),
-    IVec(GLSLDimension),
-    UVec(GLSLDimension),
-    Vec(GLSLDimension),
-    DVec(GLSLDimension),
-    // Matrix types
-    Mat(GLSLDimension, GLSLDimension),
-    DMat(GLSLDimension, GLSLDimension),
-    // todo I think I need to describe arrays somehow?
-    ArrayBool,
-    ArrayInt,
-    ArrayUint,
-    ArrayFloat,
-    ArrayDouble,
-    ArrayVec(GLSLDimension),
-    // Sampler types todo add more https://www.khronos.org/opengl/wiki/Sampler_(GLSL)
-    Sampler,
-    // Shadow Sampler types todo add more https://www.khronos.org/opengl/wiki/Sampler_(GLSL)
-    SamplerShadow,
-    // Texture types  todo figure out all of the types that should be allowed here
-    TextureCube,
-    Texture2D,
-    Texture2DArray,
-}
-
-impl GLSLType {
-    // For vertex parameters, you bind an array of values but the pipeline give the vertex/fragment shader one value at a time so even if the parameter is of type `float`, you need to bind `float[]`
-    fn arrayify(&self) -> Self {
-        match self {
-            GLSLType::Bool => GLSLType::ArrayBool,
-            GLSLType::Int => GLSLType::ArrayInt,
-            GLSLType::Uint => GLSLType::ArrayUint,
-            GLSLType::Float => GLSLType::ArrayFloat,
-            GLSLType::Double => GLSLType::ArrayDouble,
-            GLSLType::BVec(_) => {todo!()}
-            GLSLType::IVec(_) => {todo!()}
-            GLSLType::UVec(_) => {todo!()}
-            GLSLType::Vec(dim) => {GLSLType::ArrayVec(*dim)}
-            GLSLType::DVec(_) => {todo!()}
-            GLSLType::Mat(_, _) => {todo!()}
-            GLSLType::DMat(_, _) => {todo!()}
-            GLSLType::ArrayBool => {todo!()}
-            GLSLType::ArrayInt => {todo!()}
-            GLSLType::ArrayUint => {todo!()}
-            GLSLType::ArrayFloat => {todo!()}
-            GLSLType::ArrayDouble => {todo!()}
-            GLSLType::ArrayVec(_) => {todo!()}
-            GLSLType::Sampler => {todo!()}
-            GLSLType::SamplerShadow => {todo!()}
-            GLSLType::TextureCube => {todo!()}
-            GLSLType::Texture2D => {todo!()}
-            GLSLType::Texture2DArray => {todo!()}
-        }
-    }
-}
-
-impl Parse for GLSLType {
-    fn parse(input: ParseStream) -> Result<Self> {
-        let glsl_type = input.parse::<Ident>()?;
-        let mut arr_num = 0;
-        while !input.is_empty() {
-            let _x;
-            bracketed!(_x in input);
-            arr_num += 1;
-        }
-        match (glsl_type.to_string().as_ref(), arr_num) {
-            ("bool", 0) => Ok(GLSLType::Bool),
-            ("int", 0) => Ok(GLSLType::Int),
-            ("uint", 0) => Ok(GLSLType::Uint),
-            ("float", 0) => Ok(GLSLType::Float),
-            ("double", 0) => Ok(GLSLType::Double),
-            ("vec2", 0) => Ok(GLSLType::Vec(GLSLDimension::Two)),
-            ("vec3", 0) => Ok(GLSLType::Vec(GLSLDimension::Three)),
-            ("vec4", 0) => Ok(GLSLType::Vec(GLSLDimension::Four)),
-            ("mat4", 0) => Ok(GLSLType::Mat(GLSLDimension::Four, GLSLDimension::Four)),
-            ("int", 1) => Ok(GLSLType::ArrayInt),
-            ("uint", 1) => Ok(GLSLType::ArrayUint),
-            ("float", 1) => Ok(GLSLType::ArrayFloat),
-            ("vec2", 1) => Ok(GLSLType::ArrayVec(GLSLDimension::Two)),
-            ("vec3", 1) => Ok(GLSLType::ArrayVec(GLSLDimension::Three)),
-            ("vec4", 1) => Ok(GLSLType::ArrayVec(GLSLDimension::Four)),
-            ("sampler", 0) => Ok(GLSLType::Sampler),
-            ("samplerShadow", 0) => Ok(GLSLType::SamplerShadow),
-            ("texture2D", 0) => Ok(GLSLType::TextureCube),
-            ("texture2DArray", 0) => Ok(GLSLType::Texture2D),
-            ("textureCube", 0) => Ok(GLSLType::Texture2DArray),
-            (x, _) => {
-                panic!("We currently do not support {}", x)
-            }
-        }
-    }
-}
 
 // This is a parameter which is often written like :
 // `[group1 [buffer loop in out] uint[]] indices`
@@ -138,10 +17,11 @@ impl Parse for GLSLType {
 // where `indices` is the name of the parameter
 #[derive(Debug, Clone)]
 struct Parameters {
-    group: Option<Ident>,
-    quals: Vec<Ident>, //todo Add Qualifiers parsing instead of ident
-    glsl_type: GLSLType,
-    name: Ident,
+    location: u32,
+    group: Option<u32>,
+    quals: Vec<syn::Ident>, //todo Add Qualifiers parsing instead of ident
+    glsl_type: naga::Type,
+    name: syn::Ident,
 }
 
 impl PartialEq for Parameters {
@@ -151,151 +31,95 @@ impl PartialEq for Parameters {
 }
 impl Eq for Parameters {}
 
-impl Parse for Parameters {
-    fn parse(input: ParseStream) -> Result<Self> {
-        let qual_and_type;
-        bracketed!(qual_and_type in input);
-        let group = if qual_and_type.peek(Ident) {
-            Some(qual_and_type.parse::<Ident>()?)
-        } else {
-            None
-        };
-
-        let qual_lst;
-        bracketed!(qual_lst in qual_and_type);
-        let mut quals = Vec::new();
-        while !qual_lst.is_empty() {
-            // loop and in tokens are not Ident's so they need to be handled differently
-            if qual_lst.peek(Token!(loop)) {
-                qual_lst.parse::<Token!(loop)>()?;
-                quals.push(format_ident!("loop"));
-            } else if qual_lst.peek(Token!(in)) {
-                qual_lst.parse::<Token!(in)>()?;
-                quals.push(format_ident!("in"));
-            } else {
-                quals.push(qual_lst.parse::<Ident>()?);
-            }
-        }
-
-        let mut glsl_type = qual_and_type.parse::<GLSLType>()?;
-
-        // Then the input into the parameter is from an array and we need to promote it to an array
-        if quals.contains(&format_ident!("vertex")) {
-            glsl_type = glsl_type.arrayify();
-        }
-
-        let name = input.parse::<Ident>()?;
-        Ok(Parameters {
-            group,
-            glsl_type,
-            quals: quals.into_iter().collect(),
-            name,
-        })
-    }
-}
-
-// Contains the parameters of a single glsl shader
-// todo Later this should also contain the body of the shader
-struct Shader {
-    params: Vec<Parameters>, //body: String,
-}
-
-fn is_gl_builtin(p: &str) -> bool {
-    let builtin = vec![
-        "gl_VertexID",
-        "gl_InstanceID",
-        "gl_FragCoord",
-        "gl_FrontFacing",
-        "gl_PointCoord",
-        "gl_SampleID",
-        "gl_SamplePosition",
-        "gl_NumWorkGroups",
-        "gl_WorkGroupID",
-        "gl_LocalInvocationID",
-        "gl_GlobalInvocationID",
-        "gl_LocalInvocationIndex",
-    ];
-    builtin.contains(&p)
-}
-
-impl Parse for Shader {
-    fn parse(input: ParseStream) -> Result<Self> {
-        let mut params = Vec::new();
-        while !input.peek(syn::token::Brace) {
-            let p = input.parse::<Parameters>()?;
-            if !is_gl_builtin(&p.name.to_string()) {
-                params.push(p);
-            }
-
-            input.parse::<Token![;]>()?;
-        }
-
-        // The body/code of the shader
-        let x;
-        let y;
-        braced!(x in input);
-        braced!(y in x);
-        if !y.is_empty() {
-            y.step(|cursor| {
-                (*cursor).token_stream();
-                Ok(((), syn::buffer::Cursor::empty()))
-            })?;
-            //parse_any(&y)?;
-        }
-        Ok(Shader {
-            params: params.into_iter().collect(),
-        })
-    }
-}
-
 // Contains the parameters of one or more shaders which make up a pipeline context
 // Will be created for the user at `context`
 struct Context {
     context: Ident,
-    ins: Vec<Parameters>,
-    outs: Vec<Parameters>,
+    params: Vec<Parameters>,
+    module: naga::Module,
+    info: naga::valid::ModuleInfo,
 }
 
 impl Parse for Context {
     fn parse(input: ParseStream) -> Result<Self> {
         let context = input.parse::<Ident>()?;
         input.parse::<Token![=]>()?;
-        let shaders = Punctuated::<Shader, Token![,]>::parse_separated_nonempty(input)?;
 
-        let mut ins = Vec::new();
-        let mut outs = Vec::new();
+        let module = naga::front::wgsl::parse_str(&input.to_string()).unwrap();
 
-        shaders.into_iter().for_each(|s| {
-            s.params.into_iter().for_each(|p| {
-                if p.quals.contains(&format_ident!("in")) {
-                    if !outs.contains(&p) && !ins.contains(&p) {
-                        ins.push(p);
+        // We converted the rest of the parse into a stream so just chew up the rest
+        while !input.is_empty() {input.step(|cursor| {
+            let rest = *cursor;
+            while let Some((_, next)) = rest.token_tree() {
+                return Ok(((), next));
+            }
+            unreachable!()
+        })?;}
+
+        let info = naga::valid::Validator::new(
+            naga::valid::ValidationFlags::all(),
+            naga::valid::Capabilities::all(),
+        )
+        .validate(&module)
+        .unwrap();
+
+        let mut params: Vec<Parameters> = Vec::new();
+
+        module.entry_points.iter().for_each(|f| {
+            println!("{:?}", f.name);
+            f.function.arguments.iter().for_each(|arg| {
+                match (arg.name.as_ref(), arg.ty, arg.binding.as_ref()) {
+                    //https://docs.rs/naga/0.4.2/naga/enum.BuiltIn.html Most builtin's are just provided by the runtime. Some of these like position or baseVertex are probably something I should look at todo
+                    (Some(name), ty, Some(naga::Binding::BuiltIn(_))) => {
+                        println!("Builtin {} {:?}", name, module.types.try_get(ty))
                     }
-                } else if p.quals.contains(&format_ident!("out")) {
-                    if ins.contains(&(p)) {
-                        ins.remove(ins.iter().position(|x| *x == p).unwrap());
-                    } else {
-                        outs.push(p);
+                    (Some(name), ty, Some(naga::Binding::Location { location, .. })) => {
+                        println!("Location {} {:?}", name, module.types.try_get(ty));
+                        params.push(Parameters {
+                            location: *location,
+                            group: None,
+                            quals: vec![],
+                            glsl_type: module.types.try_get(ty).unwrap().clone(),
+                            name: quote::format_ident!("{}", name),
+                        })
+                    }
+                    //todo I'm not sure when this case fires and would like to know
+                    (None, _, _) => {
+                        println!("idk why there is no name")
+                    }
+                    //todo I wondered when None would get triggered. For example, if a fragment shader takes in a struct, that counts as a None Binding.
+                    (_, _, None) => {
+                        println!("hi")
                     }
                 }
             })
         });
-
-        Ok(Context {
-            context,
-            ins: ins.into_iter().collect(),
-            outs: outs.into_iter().collect(),
-        })
+        // todo should this also use StorageClass::Storage??
+        module
+            .global_variables
+            .iter()
+            .filter(|var| var.1.class == naga::StorageClass::Uniform)
+            .for_each(|var| {
+                println!(
+                    "{} {:?} {:?}",
+                    var.1.name.as_ref().unwrap(),
+                    module.types.try_get(var.1.ty),
+                    var.1.binding.as_ref().unwrap(),
+                );
+            });
+        Ok(Context { context, params, module, info })
     }
 }
 
 fn create_mat_type(
     data_type: &mut syn::punctuated::Punctuated<syn::PathSegment, syn::token::Colon2>,
+    dim: &naga::VectorSize,
+    width: &u8,
     // maybe other args with other mat types
 ) {
     let mut inner_type = syn::punctuated::Punctuated::new();
     inner_type.push(syn::PathSegment {
-        ident: format_ident!("f32"),
+        ident: format_ident!("f{}", width),
         arguments: syn::PathArguments::None,
     });
     let mut mat_type = syn::punctuated::Punctuated::new();
@@ -312,7 +136,7 @@ fn create_mat_type(
         arguments: syn::PathArguments::None,
     });
     data_type.push(syn::PathSegment {
-        ident: format_ident!("Matrix4"),
+        ident: format_ident!("Matrix{}", format!("{:?}", dim)),
         arguments: syn::PathArguments::AngleBracketed(syn::AngleBracketedGenericArguments {
             args: mat_type,
             colon2_token: None,
@@ -364,7 +188,7 @@ fn create_vec_type(
 fn create_vec_array_type(
     data_type: &mut syn::punctuated::Punctuated<syn::PathSegment, syn::token::Colon2>,
     vec_type: syn::Ident,
-    n: &GLSLDimension,
+    n: &naga::VectorSize,
 ) {
     let mut array_type = syn::punctuated::Punctuated::new();
     array_type.push(syn::PathSegment {
@@ -385,7 +209,10 @@ fn create_vec_array_type(
             semi_token: Token!(;)(proc_macro2::Span::call_site()),
             len: syn::Expr::Lit(syn::ExprLit {
                 attrs: Vec::new(),
-                lit: syn::Lit::Int(syn::LitInt::new(n.into(), proc_macro2::Span::call_site())),
+                lit: syn::Lit::Int(syn::LitInt::new(
+                    &format!("{:?}", n), // Change Dimension to string form via debug
+                    proc_macro2::Span::call_site(),
+                )),
             }),
         },
     )));
@@ -484,7 +311,7 @@ fn create_buffer_type(
 
 fn create_sampler_type(
     data_type: &mut syn::punctuated::Punctuated<syn::PathSegment, syn::token::Colon2>,
-    qualifiers: &Vec<Ident>,
+    comparison: &bool,
 ) {
     data_type.push(syn::PathSegment {
         ident: format_ident!("pipeline"),
@@ -509,7 +336,7 @@ fn create_sampler_type(
         arguments: syn::PathArguments::None,
     });
     comparable_path.push(syn::PathSegment {
-        ident: if qualifiers.contains(&format_ident!("compare")) {
+        ident: if *comparison {
             format_ident!("True")
         } else {
             format_ident!("False")
@@ -531,7 +358,7 @@ fn create_sampler_type(
     });
     //todo push True if filterable
     filterable_path.push(syn::PathSegment {
-        ident: if qualifiers.contains(&format_ident!("filter")) {
+        ident: if false {
             format_ident!("True")
         } else {
             format_ident!("False")
@@ -573,8 +400,9 @@ fn create_sampler_type(
 
 fn create_texture_type(
     data_type: &mut syn::punctuated::Punctuated<syn::PathSegment, syn::token::Colon2>,
-    view_dimension: syn::Ident,
-    qualifiers: &Vec<Ident>,
+    dim: &naga::ImageDimension,
+    arrayed: &bool,
+    class: &naga::ImageClass,
 ) {
     let mut multi_sample_path = syn::punctuated::Punctuated::new();
     multi_sample_path.push(syn::PathSegment {
@@ -589,9 +417,13 @@ fn create_texture_type(
         ident: format_ident!("TextureMultisampled"),
         arguments: syn::PathArguments::None,
     });
-    //todo push True if multisample
+    //todo not sure what kind is here for in Multisampled
     multi_sample_path.push(syn::PathSegment {
-        ident: if qualifiers.contains(&format_ident!("MultiSample")) {
+        ident: if let naga::ImageClass::Sampled {
+            multi: true,
+            kind: _,
+        } = class
+        {
             format_ident!("True")
         } else {
             format_ident!("False")
@@ -608,9 +440,25 @@ fn create_texture_type(
         ident: format_ident!("TextureViewDimension"),
         arguments: syn::PathArguments::None,
     });
-    //todo push different dimension
     view_dimension_path.push(syn::PathSegment {
-        ident: view_dimension,
+        ident: match dim {
+            naga::ImageDimension::D1 => format_ident!("D1"),
+            naga::ImageDimension::D2 => {
+                if *arrayed {
+                    format_ident!("D2Array")
+                } else {
+                    format_ident!("D2")
+                }
+            }
+            naga::ImageDimension::D3 => format_ident!("D3"),
+            naga::ImageDimension::Cube => {
+                if *arrayed {
+                    format_ident!("CubeArray")
+                } else {
+                    format_ident!("Cube")
+                }
+            }
+        },
         arguments: syn::PathArguments::None,
     });
 
@@ -623,26 +471,52 @@ fn create_texture_type(
         ident: format_ident!("TextureSampleType"),
         arguments: syn::PathArguments::None,
     });
-    //todo push different type when needed
-    sample_type_path.push(syn::PathSegment {
-        ident: format_ident!("Float"),
-        arguments: syn::PathArguments::None,
-    });
 
     let mut sample_type_field = syn::punctuated::Punctuated::new();
-    sample_type_field.push(syn::FieldValue {
-        attrs: Vec::new(),
-        member: syn::Member::Named(format_ident!("filterable")),
-        colon_token: Some(Token!(:)(proc_macro2::Span::call_site())),
-        expr: syn::Expr::Lit(syn::ExprLit {
-            attrs: Vec::new(),
-            lit: syn::Lit::Bool(syn::LitBool {
-                value: false,
-                span: proc_macro2::Span::call_site(),
-            }),
-        }),
-    });
 
+    if let naga::ImageClass::Sampled { kind, multi: _ } = class {
+        match kind {
+            naga::ScalarKind::Sint => {
+                sample_type_path.push(syn::PathSegment {
+                    ident: format_ident!("Sint"),
+                    arguments: syn::PathArguments::None,
+                });
+            }
+            naga::ScalarKind::Uint => {
+                sample_type_path.push(syn::PathSegment {
+                    ident: format_ident!("Uint"),
+                    arguments: syn::PathArguments::None,
+                });
+            }
+            naga::ScalarKind::Bool => {
+                unimplemented!() // Yeah, there is no corresponding thing for bool so idk
+            }
+            naga::ScalarKind::Float => {
+                sample_type_path.push(syn::PathSegment {
+                    ident: format_ident!("Float"),
+                    arguments: syn::PathArguments::None,
+                });
+
+                sample_type_field.push(syn::FieldValue {
+                    attrs: Vec::new(),
+                    member: syn::Member::Named(format_ident!("filterable")),
+                    colon_token: Some(Token!(:)(proc_macro2::Span::call_site())),
+                    expr: syn::Expr::Lit(syn::ExprLit {
+                        attrs: Vec::new(),
+                        lit: syn::Lit::Bool(syn::LitBool {
+                            value: false,
+                            span: proc_macro2::Span::call_site(),
+                        }),
+                    }),
+                });
+            }
+        }
+    } else if let naga::ImageClass::Depth = class {
+        sample_type_path.push(syn::PathSegment {
+            ident: format_ident!("Depth"),
+            arguments: syn::PathArguments::None,
+        });
+    }
     let mut generic_args = syn::punctuated::Punctuated::new();
     generic_args.push(syn::GenericArgument::Const(syn::Expr::Path(
         syn::ExprPath {
@@ -697,84 +571,90 @@ fn create_texture_type(
     });
 }
 
-fn create_base_type(ty: &GLSLType, qualifiers: &Vec<Ident>) -> syn::GenericArgument {
+fn letterize(kind: &naga::ScalarKind) -> &str {
+    match kind {
+        naga::ScalarKind::Float => "f",
+        naga::ScalarKind::Uint => "u",
+        naga::ScalarKind::Sint => "i",
+        naga::ScalarKind::Bool => {
+            unimplemented!()
+        }
+    }
+}
+
+fn create_base_type(ty: &naga::Type, qualifiers: &Vec<Ident>) -> syn::GenericArgument {
     let mut data_type = syn::punctuated::Punctuated::new();
     match ty {
-        GLSLType::Float => {
+        // For now, I am going to assume 32 bit width
+        naga::Type {
+            name: _,
+            inner: naga::TypeInner::Scalar { kind, width },
+        } => {
             //Vec<f32>
             let mut generic_type = syn::punctuated::Punctuated::new();
-            create_type(&mut generic_type, format_ident!("f32"));
+            create_type(
+                &mut generic_type,
+                format_ident!("{}{}", letterize(kind), width),
+            );
             create_buffer_type(
                 &mut data_type,
                 generic_type,
                 qualifiers.contains(&format_ident!("buffer")),
             );
         }
-        GLSLType::Vec(dim) | GLSLType::ArrayVec(dim) => {
+        naga::Type {
+            name: _,
+            inner: naga::TypeInner::Vector { size, kind, width },
+        } => {
             //Vec<[f32; dim]>
             let mut generic_type = syn::punctuated::Punctuated::new();
-            create_vec_array_type(&mut generic_type, format_ident!("f32"), dim);
+            create_vec_array_type(
+                &mut generic_type,
+                format_ident!("{}{}", letterize(kind), width),
+                size,
+            );
             create_buffer_type(
                 &mut data_type,
                 generic_type,
                 qualifiers.contains(&format_ident!("buffer")),
             );
         }
-        GLSLType::Mat(GLSLDimension::Four, GLSLDimension::Four) => {
+        naga::Type {
+            name: _,
+            inner:
+                naga::TypeInner::Matrix {
+                    columns,
+                    rows,
+                    width,
+                },
+        } if columns == rows => {
             //cgmath::Matrix4<f32>
             let mut generic_type = syn::punctuated::Punctuated::new();
-            create_mat_type(&mut generic_type);
+            create_mat_type(&mut generic_type, columns, width);
             create_buffer_type(
                 &mut data_type,
                 generic_type,
                 qualifiers.contains(&format_ident!("buffer")),
             );
         }
-        GLSLType::Int => {
-            //Vec<i32>
-            let mut generic_type = syn::punctuated::Punctuated::new();
-            create_vec_type(&mut generic_type, format_ident!("i32"));
-            create_buffer_type(
-                &mut data_type,
-                generic_type,
-                qualifiers.contains(&format_ident!("buffer")),
-            );
+        naga::Type {
+            name: _,
+            inner: naga::TypeInner::Sampler { comparison },
+        } => {
+            println!("I am printing the name fo the Sampler to see if it sheds any light");
+            create_sampler_type(&mut data_type, comparison);
         }
-        GLSLType::Uint | GLSLType::ArrayUint => {
-            //todo what is the difference between this data type and ArratUint
-            // Vec<u32>
-            let mut generic_type = syn::punctuated::Punctuated::new();
-            create_vec_type(&mut generic_type, format_ident!("u32"));
-            create_buffer_type(
-                &mut data_type,
-                generic_type,
-                qualifiers.contains(&format_ident!("buffer")),
-            );
-        }
-        GLSLType::ArrayFloat => {
-            let mut generic_type = syn::punctuated::Punctuated::new();
-            create_vec_type(&mut generic_type, format_ident!("f32"));
-            create_buffer_type(
-                &mut data_type,
-                generic_type,
-                qualifiers.contains(&format_ident!("buffer")),
-            );
-        }
-        GLSLType::Sampler => {
-            create_sampler_type(&mut data_type, qualifiers);
-        }
-        //todo see what setting need to be different for this
-        GLSLType::SamplerShadow => {
-            create_sampler_type(&mut data_type, qualifiers);
-        }
-        GLSLType::Texture2D => {
-            create_texture_type(&mut data_type, format_ident!("D2"), qualifiers);
-        }
-        GLSLType::Texture2DArray => {
-            create_texture_type(&mut data_type, format_ident!("D2Array"), qualifiers);
-        }
-        GLSLType::TextureCube => {
-            create_texture_type(&mut data_type, format_ident!("Cube"), qualifiers);
+
+        naga::Type {
+            name: _,
+            inner:
+                naga::TypeInner::Image {
+                    dim,
+                    arrayed,
+                    class,
+                },
+        } => {
+            create_texture_type(&mut data_type, dim, arrayed, class);
         }
         _ => panic!("Unsupported type: {:?}", ty),
     }
@@ -788,7 +668,7 @@ fn create_base_type(ty: &GLSLType, qualifiers: &Vec<Ident>) -> syn::GenericArgum
     }))
 }
 
-fn create_vertex(ty: &GLSLType, quals: &Vec<Ident>) -> syn::Type {
+fn create_vertex(ty: &naga::Type, quals: &Vec<Ident>) -> syn::Type {
     let mut bind_ty = syn::punctuated::Punctuated::new();
     bind_ty.push(create_base_type(ty, quals));
 
@@ -820,7 +700,7 @@ fn create_vertex(ty: &GLSLType, quals: &Vec<Ident>) -> syn::Type {
     })
 }
 
-fn create_bindgroup(ty: Vec<(&GLSLType, &Vec<Ident>)>) -> syn::Type {
+fn create_bindgroup(ty: Vec<(&naga::Type, &Vec<Ident>)>) -> syn::Type {
     let mut bind_ty = syn::punctuated::Punctuated::new();
     ty.iter()
         .for_each(|(t, q)| bind_ty.push(create_base_type(t, q)));
@@ -886,22 +766,20 @@ impl ParamType {
 // Only create a vertex when there is the vertex qualifier
 fn process_params(params: Vec<Parameters>) -> Vec<ParamType> {
     let mut res = Vec::new();
-    let mut group_map: HashMap<Ident, ParamType> = HashMap::new();
+    let mut group_map: HashMap<u32, ParamType> = HashMap::new();
     let mut num_vertex = 0;
-    let mut num_groups = 0;
     params.into_iter().for_each(|p| match p.group.clone() {
         Some(g) if group_map.contains_key(&g) => {
             group_map.get_mut(&g).unwrap().get_params_mut().push(p)
         }
-        Some(g) => {
+        Some(num) => {
             group_map.insert(
-                g,
+                num,
                 ParamType::Group {
-                    num: num_groups,
+                    num,
                     param: vec![p],
                 },
             );
-            num_groups += 1
         }
         None => {
             res.push(ParamType::Vertex {
@@ -971,14 +849,17 @@ fn unbound() -> syn::Type {
 // Implementation 3
 pub fn sub_module_generic_bindings(input: TokenStream) -> TokenStream {
     // Parse the input tokens into a syntax tree
+
+    //println!("{}", input.to_string());
+
     let shader_params = parse_macro_input!(input as Context);
+    let spirv = naga::back::spv::write_vec(&shader_params.module, &shader_params.info, &naga::back::spv::Options::default()).unwrap();
+    let spirv_bytes = spirv.as_bytes();
 
     // (name, type)
-    let input_vec = shader_params.ins;
+    let param_vec = shader_params.params;
 
-    let out_vec = shader_params.outs;
-
-    let input_params = process_params(input_vec);
+    let params = process_params(param_vec);
 
     let mut rng = rand::thread_rng();
 
@@ -987,34 +868,41 @@ pub fn sub_module_generic_bindings(input: TokenStream) -> TokenStream {
 
     let mut all_expanded = Vec::new();
 
-    let variables: Vec<syn::Type> = (1..input_params.len() + 1)
+    let variables: Vec<syn::Type> = (1..params.len() + 1)
         .into_iter()
         .map(|x| make_trait(format!("T{}", x)))
         .collect();
-    let fields: Vec<Ident> = (1..input_params.len() + 1)
+    let fields: Vec<Ident> = (1..params.len() + 1)
         .into_iter()
         .map(|x| format_ident!("field{}", x))
         .collect();
-    let init: Vec<syn::Type> = iter::repeat(unbound()).take(input_params.len()).collect();
-    let run: Vec<syn::Type> = iter::repeat(bound()).take(input_params.len()).collect();
+    let init: Vec<syn::Type> = iter::repeat(unbound()).take(params.len()).collect();
+    let run: Vec<syn::Type> = iter::repeat(bound()).take(params.len()).collect();
     let ctxloc = shader_params.context;
 
     // For setting up pipeline
-    let mut bind_group_types: Vec<(u32, syn::Type)> = input_params
+    let mut bind_group_types: Vec<(u32, syn::Type)> = Vec::new();
+    let mut vertex_types: Vec<(u32, syn::Type)> = Vec::new();
+
+    params
         .clone()
         .into_iter()
-        .filter_map(|a| match a {
-            ParamType::Vertex { .. } => None,
-            ParamType::Group { num, param } => Some((
+        .for_each(|a| match a {
+            ParamType::Vertex { num, param } => vertex_types.push((num, create_vertex(&param.glsl_type, &param.quals))),
+            ParamType::Group { num, param } => bind_group_types.push((
                 num,
                 create_bindgroup(param.iter().map(|p| (&p.glsl_type, &p.quals)).collect()),
             )),
-        })
-        .collect();
+        });
+
     bind_group_types.sort_by(|(a, _), (b, _)| a.cmp(b));
+    vertex_types.sort_by(|(a, _), (b, _)| a.cmp(b));
 
     let sorted_bind_group_types: Vec<syn::Type> =
         bind_group_types.into_iter().map(|(_, x)| x).collect();
+
+    let sorted_vertex_types: Vec<syn::Type> =
+        vertex_types.into_iter().map(|(_, x)| x).collect();
 
     all_expanded.push(quote! {
         struct #context<'a,  T : pipeline :: RuntimePass<'a>, #(#variables: pipeline::AbstractBind),*> {
@@ -1029,8 +917,18 @@ pub fn sub_module_generic_bindings(input: TokenStream) -> TokenStream {
                     #(#fields: pipeline::Unbound {},)*
                 }
             }
-            fn get_layout(&self, device : &wgpu::Device) -> Vec<wgpu::BindGroupLayout> {
+            fn get_bindgroup_layout(&self, device : &wgpu::Device) -> Vec<wgpu::BindGroupLayout> {
                 vec![#(#sorted_bind_group_types::get_layout(device),)*]
+            }
+            fn get_vertex_sizes(&self) -> Vec<usize> {
+                vec![#(#sorted_vertex_types::get_size(),)*]
+            }
+            fn get_module(&self, device: &wgpu::Device) -> wgpu::ShaderModule {
+                device.create_shader_module(&wgpu::ShaderModuleDescriptor {
+                    label: None,
+                    source: wgpu::util::make_spirv(&[#(#spirv_bytes),*]),
+                    flags: wgpu::ShaderFlags::VALIDATION,
+                })
             }
         }
 
@@ -1057,11 +955,11 @@ pub fn sub_module_generic_bindings(input: TokenStream) -> TokenStream {
             )),
         })
     })
-    .take(input_params.len())
+    .take(params.len())
     .collect();
 
-    for i in 0..input_params.len() {
-        let current_thing = input_params[i].clone();
+    for i in 0..params.len() {
+        let current_thing = params[i].clone();
         let trait_name = format_ident!("BindField{}{}", i + 1, n1);
 
         let bind_name = format_ident!(
@@ -1092,46 +990,8 @@ pub fn sub_module_generic_bindings(input: TokenStream) -> TokenStream {
         impl_params.insert(i, unbound.clone());
 
         // A copy of the input vec with the current param being bound removed so that the names match up with trait_params.
-        let mut bind_names = input_params.clone();
+        let mut bind_names = params.clone();
         bind_names.remove(i);
-
-        // For the first, restricted implementation
-        // Only have T_? for parameters that are not required to be unbound
-        let restricted_abstract: Vec<syn::Type> = trait_params
-            .clone()
-            .into_iter()
-            .enumerate()
-            .filter(|&(x, _)| {
-                !bind_names[x]
-                    .get_params()
-                    .iter()
-                    .any(|p| out_vec.contains(p))
-            })
-            .map(|(_, e)| e)
-            .collect();
-
-        // Make sure the above are unbound
-        let restricted_trait: Vec<syn::Type> = trait_params
-            .clone()
-            .into_iter()
-            .enumerate()
-            .map(|(x, e)| {
-                if bind_names[x]
-                    .get_params()
-                    .iter()
-                    .any(|p| out_vec.contains(p))
-                {
-                    unbound.clone()
-                } else {
-                    e
-                }
-            })
-            .collect();
-
-        let mut restricted_impl = restricted_trait.clone();
-        restricted_impl.insert(i, unbound.clone());
-        let mut restricted_type = restricted_trait.clone();
-        restricted_type.insert(i, bound.clone());
 
         match current_thing {
             ParamType::Vertex{..} => all_expanded.push(quote! {
@@ -1139,15 +999,6 @@ pub fn sub_module_generic_bindings(input: TokenStream) -> TokenStream {
                     fn #bind_name(self, rpass: &mut T, data : &'a #data_type) -> #context<'a, T, #(#type_params),*>;
                 }
 
-                impl<'a,  T : pipeline :: RuntimePass<'a>, #(#restricted_abstract: pipeline::AbstractBind,)* > #trait_name<'a, T, #(#restricted_trait,)*> for &#context<'a, T, #(#restricted_impl),*> {
-                    fn #bind_name(self, rpass: &mut T, data : &'a #data_type) -> #context<'a, T, #(#restricted_type),*>{
-                        rpass.set_vertex_buffer(#index as u32, data.get_buffer().slice(..));
-                        #context {
-                            phantom: std::marker::PhantomData,
-                            #(#fields : #type_params::new()),*
-                        }
-                    }
-                }
                 impl<'a,  T : pipeline :: RuntimePass<'a>, #(#trait_params: pipeline::AbstractBind,)* > #trait_name<'a, T, #(#trait_params,)*> for #context<'a, T, #(#impl_params),*> {
                     fn #bind_name(self, rpass: &mut T, data : &'a #data_type) -> #context<'a, T, #(#type_params),*>{
                         rpass.set_vertex_buffer(#index as u32, data.get_buffer().slice(..));
@@ -1163,15 +1014,6 @@ pub fn sub_module_generic_bindings(input: TokenStream) -> TokenStream {
                 fn #bind_name(self, rpass: &mut T, data : &'a #data_type) -> #context<'a, T, #(#type_params),*>;
             }
 
-            impl<'a,  T : pipeline :: RuntimePass<'a>, #(#restricted_abstract: pipeline::AbstractBind,)* > #trait_name<'a, T, #(#restricted_trait,)*> for &#context<'a, T, #(#restricted_impl),*> {
-                fn #bind_name(self, rpass: &mut T, data : &'a #data_type) -> #context<'a, T, #(#restricted_type),*>{
-                    rpass.set_bind_group(#index as u32, data.get_bind_group(), &[]);
-                    #context {
-                        phantom: std::marker::PhantomData,
-                        #(#fields : #type_params::new()),*
-                    }
-                }
-            }
             impl<'a,  T : pipeline :: RuntimePass<'a>, #(#trait_params: pipeline::AbstractBind,)* > #trait_name<'a, T, #(#trait_params,)*> for #context<'a, T, #(#impl_params),*> {
                 fn #bind_name(self, rpass: &mut T, data : &'a #data_type) -> #context<'a, T, #(#type_params),*>{
                     rpass.set_bind_group(#index as u32, data.get_bind_group(), &[]);
