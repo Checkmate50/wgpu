@@ -70,7 +70,7 @@ cube3:
 .PHONY: cube4
 cube4:
 	cargo +nightly run --example multicube
-	#cargo +nightly run --example cube_shadow --release
+	#cargo +nightly run --example multicube --release
 
 .PHONY: flat_color
 flat_color:
@@ -80,14 +80,17 @@ flat_color:
 sink:
 	cargo +nightly run --example sink
 
+build:
+	cargo +nightly build
+
 release:
-	cargo build --release
+	cargo +nightly build --release
 
 test:
-	cargo test
+	cargo +nightly test
 
 clean:
-	cargo clean
+	cargo +nightly clean
 
 check:
 	cargo +nightly clippy

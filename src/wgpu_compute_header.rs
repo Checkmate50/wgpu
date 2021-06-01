@@ -164,11 +164,8 @@ pub async fn compile(
     ComputeProgram { pipeline }
 }
 
-pub fn compute_run(mut rpass: wgpu::ComputePass, length: u32) -> wgpu::ComputePass {
-    {
-        compute(&mut rpass, length);
-    }
-    rpass
+pub fn compute_run(rpass: &mut wgpu::ComputePass, length: u32) {
+    compute(rpass, length);
 }
 
 pub fn compute(cpass: &mut wgpu::ComputePass, length: u32) {

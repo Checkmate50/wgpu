@@ -88,13 +88,13 @@ async fn execute_gpu() {
             {
                 let context2 = (&context1).set_indices2(&mut cpass, &indices_1);
 
-                cpass = context2.runnable(|| compute_run(cpass, 4));
+                context2.runnable(|| compute_run(&mut cpass, 4));
             }
             {
                 let context3 =
                     context1.set_indices2(&mut cpass, &indices_2);
                 {
-                    let _ = context3.runnable(|| compute_run(cpass, 4));
+                    context3.runnable(|| compute_run(&mut cpass, 4));
                 }
             }
         }

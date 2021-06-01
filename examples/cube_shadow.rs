@@ -396,8 +396,8 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                     &bind_group_plane_world_mat,
                                 );
                                 {
-                                    rpass_stencil = bake_context_plane.runnable(|| {
-                                        graphics_run_indices(rpass_stencil, &plane_index, 1)
+                                    bake_context_plane.runnable(|| {
+                                        graphics_run_indices(&mut rpass_stencil, &plane_index, 1)
                                     });
                                 }
                             }
@@ -413,8 +413,8 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                 );
 
                                 {
-                                    let _ = bake_context_sphere.runnable(|| {
-                                        graphics_run_indices(rpass_stencil, &index, 1)
+                                    bake_context_sphere.runnable(|| {
+                                        graphics_run_indices(&mut rpass_stencil, &index, 1)
                                     });
                                 }
                             }
@@ -487,9 +487,9 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                                         );
 
                                                     {
-                                                        rpass = context9.runnable(|| {
+                                                        context9.runnable(|| {
                                                             graphics_run_indices(
-                                                                rpass,
+                                                                &mut rpass,
                                                                 &plane_index,
                                                                 1,
                                                             )
@@ -516,8 +516,8 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                                         );
 
                                                     {
-                                                        let _ = context9.runnable(|| {
-                                                            graphics_run_indices(rpass, &index, 1)
+                                                        context9.runnable(|| {
+                                                            graphics_run_indices(&mut rpass, &index, 1)
                                                         });
                                                     }
                                                 }

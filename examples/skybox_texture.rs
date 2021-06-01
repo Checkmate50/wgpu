@@ -92,7 +92,9 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     let (program, _) =
         compile_valid_graphics_program!(device, context, S_V, S_F, GraphicsCompileArgs::default());
 
-    let proj_mat = BufferData::new(generate_projection_matrix(size.width as f32 / size.height as f32));
+    let proj_mat = BufferData::new(generate_projection_matrix(
+        size.width as f32 / size.height as f32,
+    ));
 
     let view_mat = BufferData::new(generate_view_matrix());
 
@@ -209,30 +211,31 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                     .output;
                 let mut init_encoder =
                     device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-
-                let mut rpass = setup_render_pass(
-                    &program,
-                    &mut init_encoder,
-                    wgpu::RenderPassDescriptor {
-                        label: None,
-                        color_attachments: &[wgpu::RenderPassColorAttachmentDescriptor {
-                            attachment: &frame.view,
-                            resolve_target: None,
-                            ops: wgpu::Operations {
-                                load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-                                store: true,
-                            },
-                        }],
-                        depth_stencil_attachment: None,
-                    },
-                );
-
-                let context1 =
-                    (&context).set_t_Cubemap_s_Cubemap(&mut rpass, &bind_group_t_s_cubemap);
                 {
-                    let context2 = (&context1).set_view_proj(&mut rpass, &bind_group_view_proj);
+                    let mut rpass = setup_render_pass(
+                        &program,
+                        &mut init_encoder,
+                        wgpu::RenderPassDescriptor {
+                            label: None,
+                            color_attachments: &[wgpu::RenderPassColorAttachmentDescriptor {
+                                attachment: &frame.view,
+                                resolve_target: None,
+                                ops: wgpu::Operations {
+                                    load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                                    store: true,
+                                },
+                            }],
+                            depth_stencil_attachment: None,
+                        },
+                    );
+
+                    let context1 =
+                        (&context).set_t_Cubemap_s_Cubemap(&mut rpass, &bind_group_t_s_cubemap);
                     {
-                        let _ = context2.runnable(|| graphics_run(rpass, 3, 1));
+                        let context2 = (&context1).set_view_proj(&mut rpass, &bind_group_view_proj);
+                        {
+                            context2.runnable(|| graphics_run(&mut rpass, 3, 1));
+                        }
                     }
                 }
                 queue.submit(Some(init_encoder.finish()));

@@ -102,7 +102,7 @@ async fn execute_gpu() {
                 {
                     let context2 = context1.set_add_two_in(&mut cpass, &empty1);
                     {
-                        cpass = context2.runnable(|| compute_run(cpass, 4));
+                        context2.runnable(|| compute_run(&mut cpass, 4));
                     }
                 }
             }
@@ -114,7 +114,7 @@ async fn execute_gpu() {
                     let next_context2 = next_context1.set_add_two_result(&mut cpass, &empty2);
 
                     {
-                        let _ = next_context2.runnable(|| compute_run(cpass, 4));
+                        next_context2.runnable(|| compute_run(&mut cpass, 4));
                     }
                 }
             }

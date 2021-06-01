@@ -225,7 +225,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                     // Without scoping for each context, that uses the previous context, I've inserted a call here to change the vertexColor. This should only be visible in the bad_context, as that is where it is bound, but the effect is shown when you try to run context3. Remember, at no point in the chain of context's to create context3 did we bind this bad_vertex_color and we still see the effect.
                     let bad_context = context1.set_vertexColor(&mut rpass, &bad_vertex_color);
 
-                    let _ = context3.runnable(|| graphics_run_indices(rpass, &indices, 1));
+                    let _ = context3.runnable(|| graphics_run_indices(&mut rpass, &indices, 1));
                 }
                 queue.submit(Some(init_encoder.finish()));
             }

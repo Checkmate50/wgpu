@@ -17,8 +17,8 @@ pub use pipeline::wgpu_graphics_header::{
     GraphicsShader,
 };
 
-use crate::pipeline::AbstractBind;
-pub use pipeline::bind::{BindGroup1, Indices, SamplerData, TextureData, Vertex};
+pub use pipeline::bind::{BindGroup1, Indices, BufferData, SamplerData, TextureData, Vertex};
+pub use pipeline::AbstractBind;
 
 pub use pipeline::helper::{
     generate_identity_matrix, generate_projection_matrix, generate_view_matrix, load_cube,
@@ -95,7 +95,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 
     let (positions, _, index_data) = load_cube();
 
-    let color_data = vec![
+    let color_data = BufferData::new(vec![
         [0.583, 0.771, 0.014],
         [0.609, 0.115, 0.436],
         [0.327, 0.483, 0.844],
@@ -132,15 +132,16 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         [0.673, 0.211, 0.457],
         [0.820, 0.883, 0.371],
         [0.982, 0.099, 0.879],
-    ];
-    let view_mat = generate_view_matrix();
+    ]);
+    let view_mat = BufferData::new(generate_view_matrix());
 
-    let proj_mat = generate_projection_matrix(size.width as f32 / size.height as f32);
+    let proj_mat = BufferData::new(generate_projection_matrix(size.width as f32 / size.height as f32));
 
-    let model_mat = generate_identity_matrix();
-    let model_mat2 = translate(model_mat, 2.0, 0.0, 0.0);
+    let imat = generate_identity_matrix();
+    let model_mat = BufferData::new(imat); 
+    let model_mat2 = BufferData::new(translate(imat, 2.0, 0.0, 0.0));
 
-    let vertex_position = Vertex::new(&device, &positions);
+    let vertex_position = Vertex::new(&device, &BufferData::new(positions));
     let vertex_color = Vertex::new(&device, &color_data);
     let indices = Indices::new(&device, &index_data);
 
@@ -198,14 +199,14 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                     let context5 =
                                         (&context4).set_u_model(&mut rpass, &bind_model_mat);
                                     {
-                                        rpass = context5
-                                            .runnable(|| graphics_run_indices(rpass, &indices, 1));
+                                        let _ = context5
+                                            .runnable(|| graphics_run_indices(&mut rpass, &indices, 1));
                                     }
                                     let context5_1 =
                                         (&context4).set_u_model(&mut rpass, &bind_model_mat2);
                                     {
                                         let _ = context5_1
-                                            .runnable(|| graphics_run_indices(rpass, &indices, 1));
+                                            .runnable(|| graphics_run_indices(&mut rpass, &indices, 1));
                                     }
                                 }
                             }

@@ -217,7 +217,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 
                                 {
                                     let _ = context4
-                                        .runnable(|| graphics_run_indices(rpass, &indices, 1));
+                                        .runnable(|| graphics_run_indices(&mut rpass, &indices, 1));
                                 }
                             }
                         }

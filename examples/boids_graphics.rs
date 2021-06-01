@@ -1,6 +1,11 @@
 #![feature(async_closure)]
+#![recursion_limit = "1024"]
 #[macro_use]
 extern crate pipeline;
+
+#[macro_use]
+extern crate eager;
+use std::rc::Rc;
 
 use winit::{
     event::{Event, WindowEvent},
@@ -23,12 +28,14 @@ pub use pipeline::wgpu_compute_header::{
     compile, read_fvec3, run, ComputeBindings, ComputeProgram, ComputeShader, OutComputeBindings,
 };
 pub use pipeline::wgpu_graphics_header::{
-    compile_buffer, default_bind_group, graphics_compile, graphics_pipe, graphics_run,
-    setup_render_pass, valid_fragment_shader, valid_vertex_shader, GraphicsBindings,
-    GraphicsProgram, GraphicsShader, OutGraphicsBindings,
+    generate_swap_chain, graphics_run_indices, setup_render_pass, GraphicsCompileArgs,
+    GraphicsShader,
 };
 
-pub use static_assertions::const_assert;
+pub use wgpu_macros::generic_bindings;
+
+use crate::pipeline::AbstractBind;
+pub use pipeline::bind::{BindGroup2, BufferData, Indices, SamplerData, TextureData, Vertex};
 
 fn execute_gpu(event_loop: EventLoop<()>, window: Window) {
     let size = window.inner_size();

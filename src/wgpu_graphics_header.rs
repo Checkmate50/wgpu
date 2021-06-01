@@ -205,26 +205,18 @@ fn draw_indexed(
     rpass.draw_indexed(indexes, 0, instances);
 }
 
-pub fn graphics_run(
-    mut rpass: wgpu::RenderPass,
-    num_verts: u32,
-    num_instances: u32,
-) -> wgpu::RenderPass {
-    {
-        draw(&mut rpass, 0..num_verts, 0..num_instances);
-    }
-    rpass
+pub fn graphics_run(rpass: &mut wgpu::RenderPass, num_verts: u32, num_instances: u32) {
+    draw(rpass, 0..num_verts, 0..num_instances);
 }
 
 pub fn graphics_run_indices<'a>(
-    mut rpass: wgpu::RenderPass<'a>,
+    rpass: &mut wgpu::RenderPass<'a>,
     indices: &'a Indices,
     num_instances: u32,
-) -> wgpu::RenderPass<'a> {
+) {
     rpass.set_index_buffer(indices.buffer.slice(..), wgpu::IndexFormat::Uint16);
 
-    draw_indexed(&mut rpass, 0..indices.len, 0..num_instances);
-    rpass
+    draw_indexed(rpass, 0..indices.len, 0..num_instances);
 }
 
 pub fn setup_render_pass<'a, 'b>(

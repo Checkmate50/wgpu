@@ -193,7 +193,7 @@ async fn execute_gpu() {
             let context5 = context4.set_dstParticlePos_dstParticleVel(&mut cpass, &dstParticle);
 
             {
-                let _ = context5.runnable(|| compute_run(cpass, 2));
+                context5.runnable(|| compute_run(&mut cpass, 2));
             }
         }
         let dstParticlePos = dstParticle.setup_read_0(
