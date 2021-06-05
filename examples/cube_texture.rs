@@ -14,7 +14,6 @@ use winit::{
 
 pub use pipeline::wgpu_graphics_header::{
     generate_swap_chain, graphics_run_indices, setup_render_pass, GraphicsCompileArgs,
-    GraphicsShader,
 };
 
 pub use wgpu_macros::generic_bindings;
@@ -54,44 +53,90 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         .await
         .expect("Failed to create device");
 
-    my_shader! {vertex = {
-        [[vertex in] vec3] a_Pos;
-        [[vertex in] vec2] a_TexCoord;
-        [group1 [uniform in] mat4] u_view;
-        [group1 [uniform in] mat4] u_proj;
 
-        [[out] vec2] v_TexCoord;
-        [[out] vec4] gl_Position;
-        {{
-            void main() {
-                v_TexCoord = a_TexCoord;
-                gl_Position = u_proj * u_view * vec4(a_Pos, 1.0);
-            }
-        }}
+    my_shader!{pipeline = {
+        struct VertexOutput {
+            [[location(0)]] tex_coord: vec2<f32>;
+            [[builtin(position)]] position: vec4<f32>;
+        };
+
+        [[block]]
+        struct Locals {
+            transform: mat4x4<f32>;
+        };
+        [[group(0), binding(0)]]
+        var r_locals: Locals;
+
+        [[stage(vertex)]]
+        fn vs_main(
+            [[location(0)]] position: vec4<f32>,
+            [[location(1)]] tex_coord: vec2<f32>,
+        ) -> VertexOutput {
+            var out: VertexOutput;
+            out.tex_coord = tex_coord;
+            out.position = r_locals.transform * position;
+            return out;
+        }
+
+        [[group(0), binding(1)]]
+        var r_color: texture_2d<u32>;
+
+        [[stage(fragment)]]
+        fn fs_main(in: VertexOutput) -> [[location(0)]] vec4<f32> {
+            let tex = textureLoad(r_color, vec2<i32>(in.tex_coord * 256.0), 0);
+            let v = f32(tex.x) / 255.0;
+            return vec4<f32>(1.0 - (v * 5.0), 1.0 - (v * 15.0), 1.0 - (v * 50.0), 1.0);
+        }
+
+        [[stage(fragment)]]
+        fn fs_wire() -> [[location(0)]] vec4<f32> {
+            return vec4<f32>(0.0, 0.5, 0.0, 0.5);
+        }
     }}
 
-    my_shader! {fragment = {
-        [[in] vec2] v_TexCoord;
-        [[out] vec4] color;
-        [group2 [uniform in] texture2D] t_Color;
-        [group2 [uniform in] sampler] s_Color;
-        {{
-            void main() {
-                vec4 tex = texture(sampler2D(t_Color, s_Color), v_TexCoord);
-                float mag = length(v_TexCoord-vec2(0.5));
-                color = mix(tex, vec4(0.0), mag*mag);
-            }
-        }}
-    }}
 
-    const S_V: GraphicsShader = eager_graphics_shader! {vertex!()};
+    wgpu_macros::generic_bindings! {context =
+struct VertexOutput {
+    [[location(0)]] tex_coord: vec2<f32>;
+    [[builtin(position)]] position: vec4<f32>;
+};
 
-    const S_F: GraphicsShader = eager_graphics_shader! {fragment!()};
+[[block]]
+struct Locals {
+    transform: mat4x4<f32>;
+};
+[[group(0), binding(0)]]
+var r_locals: Locals;
 
-    eager_binding! {context = vertex!(), fragment!()};
+[[stage(vertex)]]
+fn vs_main(
+    [[location(0)]] position: vec4<f32>,
+    [[location(1)]] tex_coord: vec2<f32>,
+) -> VertexOutput {
+    var out: VertexOutput;
+    out.tex_coord = tex_coord;
+    out.position = r_locals.transform * position;
+    return out;
+}
+
+[[group(0), binding(1)]]
+var r_color: texture_2d<u32>;
+
+[[stage(fragment)]]
+fn fs_main(in: VertexOutput) -> [[location(0)]] vec4<f32> {
+    let tex = textureLoad(r_color, vec2<i32>(in.tex_coord * 256.0), 0);
+    let v = f32(tex.x) / 255.0;
+    return vec4<f32>(1.0 - (v * 5.0), 1.0 - (v * 15.0), 1.0 - (v * 50.0), 1.0);
+}
+
+[[stage(fragment)]]
+fn fs_wire() -> [[location(0)]] vec4<f32> {
+    return vec4<f32>(0.0, 0.5, 0.0, 0.5);
+}
+    };
 
     let (program, _) =
-        compile_valid_graphics_program!(device, context, S_V, S_F, GraphicsCompileArgs::default());
+        compile_valid_graphics_program!(device, context, GraphicsCompileArgs::default());
 
     let queue = Rc::new(queue);
 
@@ -128,6 +173,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     let indices = Indices::new(&device, &index_data);
 
     let view_mat = BufferData::new(generate_view_matrix());
+
     let proj_mat = BufferData::new(generate_projection_matrix(
         size.width as f32 / size.height as f32,
     ));

@@ -2,7 +2,6 @@ use wgpu::ShaderModule;
 
 use std::convert::TryInto;
 
-
 use crate::bind::{Indices};
 
 pub struct GraphicsProgram {
@@ -58,24 +57,24 @@ pub async fn graphics_compile(
     device: &wgpu::Device,
     bind_group_layout: Vec<wgpu::BindGroupLayout>,
     vertex_sizes: Vec<usize>,
+    entry_points: Vec<String>,
     module: &ShaderModule,
     args: GraphicsCompileArgs,
 ) -> GraphicsProgram {
-    for (idx, _)  in vertex_sizes.iter().enumerate() {
+    for (idx, size)  in vertex_sizes.iter().enumerate() {
         vec_buffer[idx] = wgpu::VertexAttribute {
             offset: 0,
             // This is our connection to shader.vert
             // TODO WOW I had an error because I hardcoded the format's below. That should not be a thing
             shader_location: idx as u32,
-            format: wgpu::VertexFormat::Float3
+            format: match size { // todo an adhock way to get the right format
+                4 => wgpu::VertexFormat::Float,
+                8 => wgpu::VertexFormat::Float2,
+                12 => wgpu::VertexFormat::Float3,
+                16 => wgpu::VertexFormat::Float4,
+                _ => panic!("unsupported size for VertexFormat in graphics_compile")
 
-            /* todo if i.gtype == GLSLTYPE::Vec3 {
-                wgpu::VertexFormat::Float3
-            } else if i.gtype == GLSLTYPE::Vec2 {
-                wgpu::VertexFormat::Float2
-            } else {
-                wgpu::VertexFormat::Float
-            } */,
+            }
         };
     }
 
@@ -86,10 +85,11 @@ pub async fn graphics_compile(
             array_stride: *i as wgpu::BufferAddress,
             step_mode: wgpu::InputStepMode::Vertex,
             // If you have a struct that specifies your vertex, this is a 1 to 1 mapping of that struct
-            attributes: &vec_buffer
-                [idx..idx+1],
+            attributes: &vec_buffer[idx..idx+1],
         });
     }
+
+    debug!(vertex_binding_desc);
 
     let bind_group_layout_ref: Vec<&wgpu::BindGroupLayout> =
         bind_group_layout.iter().map(|a| a).collect();
@@ -101,9 +101,6 @@ pub async fn graphics_compile(
         bind_group_layouts: &bind_group_layout_ref,
         push_constant_ranges: &[],
     });
-
-    //debug!(pipeline_layout);
-    debug!(vertex_binding_desc);
 
     let mut color_target_state = Vec::new();
 
@@ -124,14 +121,14 @@ pub async fn graphics_compile(
         vertex: wgpu::VertexState {
             module: &module,
             // The name of the method in shader.vert to use
-            entry_point: "main",
+            entry_point: &entry_points[0],
             buffers: &vertex_binding_desc[..],
         },
         // Notice how the fragment and rasterization parts are optional
         fragment: Some(wgpu::FragmentState {
             module: &module,
             // The name of the method in shader.frag to use
-            entry_point: "main",
+            entry_point: &entry_points[1],
             targets: &color_target_state,
         }),
         // Use Triangles
@@ -189,24 +186,8 @@ pub async fn graphics_compile(
     }
 }
 
-fn draw(
-    rpass: &mut wgpu::RenderPass,
-    vertices: core::ops::Range<u32>,
-    instances: core::ops::Range<u32>,
-) {
-    rpass.draw(vertices, instances);
-}
-
-fn draw_indexed(
-    rpass: &mut wgpu::RenderPass,
-    indexes: core::ops::Range<u32>,
-    instances: core::ops::Range<u32>,
-) {
-    rpass.draw_indexed(indexes, 0, instances);
-}
-
 pub fn graphics_run(rpass: &mut wgpu::RenderPass, num_verts: u32, num_instances: u32) {
-    draw(rpass, 0..num_verts, 0..num_instances);
+    rpass.draw(0..num_verts, 0..num_instances);
 }
 
 pub fn graphics_run_indices<'a>(
@@ -216,7 +197,7 @@ pub fn graphics_run_indices<'a>(
 ) {
     rpass.set_index_buffer(indices.buffer.slice(..), wgpu::IndexFormat::Uint16);
 
-    draw_indexed(rpass, 0..indices.len, 0..num_instances);
+    rpass.draw_indexed(0..indices.len, 0, 0..num_instances);
 }
 
 pub fn setup_render_pass<'a, 'b>(
@@ -299,6 +280,7 @@ macro_rules! compile_valid_graphics_program {
             &$device,
             $context.get_bindgroup_layout(&$device),
             $context.get_vertex_sizes(),
+            $context.get_entry_points(),
             &$context.get_module(&$device),
             $args,
         )

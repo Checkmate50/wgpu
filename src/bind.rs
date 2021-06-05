@@ -578,7 +578,7 @@ impl<'a, A: WgpuType> Vertex<A> {
         &self.buffer
     }
 
-    pub fn get_size(&self) -> usize {
+    pub fn size_of() -> usize {
         A::size_of()
     }
 

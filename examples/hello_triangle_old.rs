@@ -74,7 +74,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 
     const S_V: GraphicsShader = eager_graphics_shader! {vertex!()};
 
-    const S_F: GraphicsShader = eager_graphics_shader! {fragment!()};
+    const S_F: GrasphicShader = eager_graphics_shader! {fragment!()};
 
     eager_binding! {context = vertex!(), fragment!()};
 
