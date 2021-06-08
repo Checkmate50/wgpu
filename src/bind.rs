@@ -2,6 +2,7 @@ pub use crate::read::MyBufferView;
 use crate::shared::{GLSLTYPE, QUALIFIER};
 pub use crate::write;
 pub use crate::write::MyBufferViewMut;
+pub use crate::align::Alignment;
 use std::marker::PhantomData;
 use wgpu_macros::create_get_view_func;
 use zerocopy::AsBytes as _;
@@ -43,7 +44,7 @@ impl<const BINDINGTYPE: wgpu::BufferBindingType> WgpuType for BufferData<BINDING
     fn bind(&self, device: &wgpu::Device, qual: Option<QUALIFIER>) -> BoundData {
         BoundData::new_buffer(
             device,
-            self.data.as_bytes(),
+            self.data.align_bytes(),
             1 as u64,
             Self::size_of(),
             qual,
@@ -51,7 +52,7 @@ impl<const BINDINGTYPE: wgpu::BufferBindingType> WgpuType for BufferData<BINDING
         )
     }
     fn size_of() -> usize {
-        std::mem::size_of::<f32>()
+        <f32>::alignment_size()
     }
     fn create_binding_type() -> wgpu::BindingType {
         wgpu::BindingType::Buffer {
@@ -248,10 +249,10 @@ impl<const BINDINGTYPE: wgpu::BufferBindingType> WgpuType
     for BufferData<BINDINGTYPE, cgmath::Matrix4<f32>>
 {
     fn bind(&self, device: &wgpu::Device, qual: Option<QUALIFIER>) -> BoundData {
-        let mat_slice: &[f32; 16] = self.data.as_ref();
+
         BoundData::new_buffer(
             device,
-            bytemuck::cast_slice(mat_slice.as_bytes()),
+            self.data.align_bytes(),
             64,
             Self::size_of(),
             qual,
@@ -260,7 +261,7 @@ impl<const BINDINGTYPE: wgpu::BufferBindingType> WgpuType
     }
 
     fn size_of() -> usize {
-        64
+        <cgmath::Matrix4<f32>>::alignment_size()
     }
 
     fn create_binding_type() -> wgpu::BindingType {

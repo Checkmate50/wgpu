@@ -75,7 +75,12 @@ impl Parse for Context {
                         println!("Builtin {} {:?}", name, module.types.try_get(ty))
                     }
                     (Some(name), ty, Some(naga::Binding::Location { location, .. })) => {
-                        println!("Location {} {:?} {:?}", name, location, module.types.try_get(ty));
+                        println!(
+                            "Location {} {:?} {:?}",
+                            name,
+                            location,
+                            module.types.try_get(ty)
+                        );
                         params.push(Parameters {
                             location: *location,
                             group: None,
@@ -106,12 +111,12 @@ impl Parse for Context {
                     module.types.try_get(var.1.ty),
                     var.1.binding.as_ref().unwrap(),
                 );
-                 params.push(Parameters {
-                            location: var.1.binding.as_ref().unwrap().binding,
-                            group: Some(var.1.binding.as_ref().unwrap().group),
-                            glsl_type: module.types.try_get(var.1.ty).unwrap().clone(),
-                            name: quote::format_ident!("{}", var.1.name.as_ref().unwrap()),
-                        })
+                params.push(Parameters {
+                    location: var.1.binding.as_ref().unwrap().binding,
+                    group: Some(var.1.binding.as_ref().unwrap().group),
+                    glsl_type: module.types.try_get(var.1.ty).unwrap().clone(),
+                    name: quote::format_ident!("{}", var.1.name.as_ref().unwrap()),
+                })
             });
         Ok(Context {
             context,
@@ -344,7 +349,6 @@ fn create_sampler_type(
         ident: format_ident!("bind"),
         arguments: syn::PathArguments::None,
     });
-
     let mut comparable_path = syn::punctuated::Punctuated::new();
     comparable_path.push(syn::PathSegment {
         ident: format_ident!("pipeline"),
@@ -605,8 +609,10 @@ fn letterize(kind: &naga::ScalarKind) -> &str {
     }
 }
 
-fn create_base_type(ty: &naga::Type) -> syn::GenericArgument {
-    let mut data_type = syn::punctuated::Punctuated::new();
+// Like Vec<[f32;4]>
+fn create_new_base_type(
+    ty: &naga::Type,
+) -> syn::punctuated::Punctuated<syn::PathSegment, syn::token::Colon2> {
     match ty {
         // For now, I am going to assume 32 bit width
         naga::Type {
@@ -620,11 +626,7 @@ fn create_base_type(ty: &naga::Type) -> syn::GenericArgument {
                 &mut generic_type,
                 format_ident!("{}{}", letterize(kind), byteify(width)),
             );
-            create_buffer_type(
-                &mut data_type,
-                generic_type,
-                false, // todo Whether this is a "buffer"
-            );
+            generic_type
         }
         naga::Type {
             name: _,
@@ -637,11 +639,7 @@ fn create_base_type(ty: &naga::Type) -> syn::GenericArgument {
                 format_ident!("{}{}", letterize(kind), byteify(width)),
                 size,
             );
-            create_buffer_type(
-                &mut data_type,
-                generic_type,
-                false, // todo Whether this is a "buffer"
-            );
+            generic_type
         }
         naga::Type {
             name: _,
@@ -655,20 +653,95 @@ fn create_base_type(ty: &naga::Type) -> syn::GenericArgument {
             //cgmath::Matrix4<f32>
             let mut generic_type = syn::punctuated::Punctuated::new();
             create_mat_type(&mut generic_type, columns, width);
-            create_buffer_type(
-                &mut data_type,
-                generic_type,
-                false, // todo Whether this is a "buffer"
-            );
+            generic_type
+        }
+        naga::Type {
+            name: Some(name), // the name of the struct
+            inner:
+                naga::TypeInner::Struct {
+                    top_level: true,
+                    members: _,
+                    span: _,
+                },
+        } => {
+            //Struct<const BINDINGTYPE: wgpu::BufferBindingType>
+            let mut buffer_binding_type_path = syn::punctuated::Punctuated::new();
+            buffer_binding_type_path.push(syn::PathSegment {
+                ident: format_ident!("wgpu"),
+                arguments: syn::PathArguments::None,
+            });
+            buffer_binding_type_path.push(syn::PathSegment {
+                ident: format_ident!("BufferBindingType"),
+                arguments: syn::PathArguments::None,
+            });
+            if false {
+                // todo should be is_buffer
+                buffer_binding_type_path.push(syn::PathSegment {
+                    ident: format_ident!("Storage"),
+                    arguments: syn::PathArguments::None,
+                });
+            } else {
+                buffer_binding_type_path.push(syn::PathSegment {
+                    ident: format_ident!("Uniform"),
+                    arguments: syn::PathArguments::None,
+                });
+            }
+            let mut generic_type = syn::punctuated::Punctuated::new();
+            generic_type.push(syn::GenericArgument::Const(syn::Expr::Struct(
+                syn::ExprStruct {
+                    attrs: Vec::new(),
+                    path: syn::Path {
+                        leading_colon: None,
+                        segments: buffer_binding_type_path,
+                    },
+                    brace_token: syn::token::Brace(proc_macro2::Span::call_site()),
+                    fields: syn::punctuated::Punctuated::new(),
+                    dot2_token: None,
+                    rest: None,
+                },
+            )));
+
+            let mut struct_type = syn::punctuated::Punctuated::new();
+            struct_type.push(syn::PathSegment {
+                ident: format_ident!("{}", name),
+                arguments: syn::PathArguments::AngleBracketed(
+                    syn::AngleBracketedGenericArguments {
+                        args: generic_type,
+                        colon2_token: None,
+                        lt_token: Token!(<)(proc_macro2::Span::call_site()),
+                        gt_token: Token!(>)(proc_macro2::Span::call_site()),
+                    },
+                ),
+            });
+            struct_type
+        }
+        _ => panic!("Unsupported new base type {:?}", ty),
+    }
+}
+
+// Like BufferData<Vec<[f32;4]>>
+fn create_type_with_wrapper(ty: &naga::Type) -> syn::GenericArgument {
+    let mut data_type = syn::punctuated::Punctuated::new();
+    match ty {
+        naga::Type {
+            name: _,
+            inner:
+                naga::TypeInner::Scalar { .. }
+                | naga::TypeInner::Vector { .. }
+                | naga::TypeInner::Matrix { .. },
+        } => {
+            create_buffer_type(&mut data_type, create_new_base_type(ty), true);
+        }
+        naga::Type {
+            name: _,
+            inner: naga::TypeInner::Struct { .. },
+        } => {
+            data_type = create_new_base_type(ty);
         }
         naga::Type {
             name: _,
             inner: naga::TypeInner::Sampler { comparison },
-        } => {
-            println!("I am printing the name fo the Sampler to see if it sheds any light");
-            create_sampler_type(&mut data_type, comparison);
-        }
-
+        } => create_sampler_type(&mut data_type, comparison),
         naga::Type {
             name: _,
             inner:
@@ -680,20 +753,19 @@ fn create_base_type(ty: &naga::Type) -> syn::GenericArgument {
         } => {
             create_texture_type(&mut data_type, dim, arrayed, class);
         }
-        // todo working on this
         naga::Type {
-            name:_, // the name of the struct
-            inner: naga::TypeInner::Struct {
-                top_level: true,
-                members,
-                span,
-            }
+            name: _,
+            inner: naga::TypeInner::Pointer { .. } | naga::TypeInner::ValuePointer { .. },
         } => {
-
+            panic!("Pointers are unsupported types")
         }
-        _ => panic!("Unsupported type: {:?}", ty),
+        naga::Type {
+            name: _,
+            inner: naga::TypeInner::Array { .. },
+        } => {
+            panic!("I am unsure if arrays should be supported")
+        }
     }
-
     syn::GenericArgument::Type(syn::Type::Path(syn::TypePath {
         qself: None,
         path: syn::Path {
@@ -705,7 +777,7 @@ fn create_base_type(ty: &naga::Type) -> syn::GenericArgument {
 
 fn create_vertex(ty: &naga::Type) -> syn::Type {
     let mut bind_ty = syn::punctuated::Punctuated::new();
-    bind_ty.push(create_base_type(ty));
+    bind_ty.push(create_type_with_wrapper(ty));
 
     let mut vertex_ty = syn::punctuated::Punctuated::new();
     vertex_ty.push(syn::PathSegment {
@@ -737,7 +809,8 @@ fn create_vertex(ty: &naga::Type) -> syn::Type {
 
 fn create_bindgroup(ty: Vec<&naga::Type>) -> syn::Type {
     let mut bind_ty = syn::punctuated::Punctuated::new();
-    ty.iter().for_each(|t| bind_ty.push(create_base_type(t)));
+    ty.iter()
+        .for_each(|t| bind_ty.push(create_type_with_wrapper(t)));
 
     let mut vertex_ty = syn::punctuated::Punctuated::new();
     vertex_ty.push(syn::PathSegment {
@@ -883,9 +956,6 @@ fn unbound() -> syn::Type {
 // Implementation 3
 pub fn sub_module_generic_bindings(input: TokenStream) -> TokenStream {
     // Parse the input tokens into a syntax tree
-
-    //println!("{}", input.to_string());
-
     let shader_params = parse_macro_input!(input as Context);
     let spirv = naga::back::spv::write_vec(
         &shader_params.module,
@@ -896,7 +966,7 @@ pub fn sub_module_generic_bindings(input: TokenStream) -> TokenStream {
     let spirv_bytes = spirv.as_bytes();
 
     // (name, type)
-    let param_vec = shader_params.params;
+    let param_vec = shader_params.params.clone();
 
     let params = process_params(param_vec);
 
@@ -907,6 +977,39 @@ pub fn sub_module_generic_bindings(input: TokenStream) -> TokenStream {
 
     let mut all_expanded = Vec::new();
 
+    // Setting up struct
+    //let struct_set = std::collections::HashSet::new();
+    params.clone().into_iter().for_each(|p| {
+        p.get_params().into_iter().for_each(|x| {
+            if let naga::Type {
+                name: Some(name),
+                inner:
+                    naga::TypeInner::Struct {
+                        top_level: true,
+                        span: _,
+                        mut members,
+                    },
+            } = x.glsl_type
+            {
+                members.sort_by(|a, b| a.offset.cmp(&b.offset));
+                let (mut field_name, mut field_type) = (Vec::new(), Vec::new());
+                members.iter().for_each(|m| {
+                    field_name.push(format_ident!("{}", m.name.as_ref().unwrap()));
+                    field_type.push(create_new_base_type(
+                        shader_params.module.types.try_get(m.ty).unwrap(),
+                    ))
+                });
+                let struct_name = format_ident!("{}", name);
+                all_expanded.push(quote! {
+                    struct #struct_name<const BINDINGTYPE: wgpu::BufferBindingType> {
+                        #(#field_name: #field_type,)*
+                    }
+                });
+            }
+        })
+    });
+
+    // Setting up context
     let variables: Vec<syn::Type> = (1..params.len() + 1)
         .into_iter()
         .map(|x| make_trait(format!("T{}", x)))
@@ -1100,7 +1203,7 @@ pub fn sub_module_generic_bindings(input: TokenStream) -> TokenStream {
         }
     }
 
-    //println!("{}", collapsed_expanded);
+    println!("{}", collapsed_expanded);
 
     // Hand the output tokens back to the compiler
     TokenStream::from(collapsed_expanded)

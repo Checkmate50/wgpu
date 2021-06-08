@@ -1,4 +1,5 @@
 #![recursion_limit = "1024"]
+#![feature(const_generics)]
 #[macro_use]
 extern crate pipeline;
 
@@ -19,7 +20,9 @@ pub use pipeline::wgpu_graphics_header::{
 pub use wgpu_macros::generic_bindings;
 
 use crate::pipeline::AbstractBind;
-pub use pipeline::bind::{BindGroup2, BufferData, Indices, SamplerData, TextureData, Vertex};
+pub use pipeline::bind::{
+    BindGroup1, BindGroup2, BufferData, Indices, SamplerData, TextureData, Vertex,
+};
 
 pub use pipeline::helper::{
     create_texels, generate_projection_matrix, generate_view_matrix, load_cube,
@@ -53,8 +56,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         .await
         .expect("Failed to create device");
 
-
-    my_shader!{pipeline = {
+    my_shader! {pipeline = {
         struct VertexOutput {
             [[location(0)]] tex_coord: vec2<f32>;
             [[builtin(position)]] position: vec4<f32>;
@@ -94,46 +96,86 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         }
     }}
 
-
     wgpu_macros::generic_bindings! {context =
-struct VertexOutput {
-    [[location(0)]] tex_coord: vec2<f32>;
-    [[builtin(position)]] position: vec4<f32>;
-};
-
-[[block]]
-struct Locals {
-    transform: mat4x4<f32>;
-};
-[[group(0), binding(0)]]
-var r_locals: Locals;
-
-[[stage(vertex)]]
-fn vs_main(
-    [[location(0)]] position: vec4<f32>,
-    [[location(1)]] tex_coord: vec2<f32>,
-) -> VertexOutput {
-    var out: VertexOutput;
-    out.tex_coord = tex_coord;
-    out.position = r_locals.transform * position;
-    return out;
-}
-
-[[group(0), binding(1)]]
-var r_color: texture_2d<u32>;
-
-[[stage(fragment)]]
-fn fs_main(in: VertexOutput) -> [[location(0)]] vec4<f32> {
-    let tex = textureLoad(r_color, vec2<i32>(in.tex_coord * 256.0), 0);
-    let v = f32(tex.x) / 255.0;
-    return vec4<f32>(1.0 - (v * 5.0), 1.0 - (v * 15.0), 1.0 - (v * 50.0), 1.0);
-}
-
-[[stage(fragment)]]
-fn fs_wire() -> [[location(0)]] vec4<f32> {
-    return vec4<f32>(0.0, 0.5, 0.0, 0.5);
-}
+    struct VertexOutput {
+        [[location(0)]] tex_coord: vec2<f32>;
+        [[builtin(position)]] position: vec4<f32>;
     };
+
+    [[block]]
+    struct Locals {
+        transform: mat4x4<f32>;
+    };
+    [[group(0), binding(0)]]
+    var r_locals: Locals;
+
+    [[stage(vertex)]]
+    fn vs_main(
+        [[location(0)]] position: vec4<f32>,
+        [[location(1)]] tex_coord: vec2<f32>,
+    ) -> VertexOutput {
+        var out: VertexOutput;
+        out.tex_coord = tex_coord;
+        out.position = r_locals.transform * position;
+        return out;
+    }
+
+    [[group(0), binding(1)]]
+    var r_color: texture_2d<u32>;
+
+    [[stage(fragment)]]
+    fn fs_main(in: VertexOutput) -> [[location(0)]] vec4<f32> {
+        let tex = textureLoad(r_color, vec2<i32>(in.tex_coord * 256.0), 0);
+        let v = f32(tex.x) / 255.0;
+        return vec4<f32>(1.0 - (v * 5.0), 1.0 - (v * 15.0), 1.0 - (v * 50.0), 1.0);
+    }
+
+    [[stage(fragment)]]
+    fn fs_wire() -> [[location(0)]] vec4<f32> {
+        return vec4<f32>(0.0, 0.5, 0.0, 0.5);
+    }
+        };
+
+    /*
+    struct Locals<const BINDINGTYPE: wgpu::BufferBindingType> { transform : cgmath :: Matrix4 < f32 >, }
+    */
+
+    impl<const BINDINGTYPE: wgpu::BufferBindingType> pipeline::bind::WgpuType for Locals<BINDINGTYPE> {
+        fn bind(
+            &self,
+            device: &wgpu::Device,
+            qual: Option<pipeline::shared::QUALIFIER>,
+        ) -> pipeline::bind::BoundData {
+            use pipeline::align::Alignment;
+            pipeline::bind::BoundData::new_buffer(
+                device,
+                self.transform.align_bytes(),
+                1 as u64,
+                Self::size_of(),
+                qual,
+                Self::create_binding_type(),
+            )
+        }
+        fn size_of() -> usize {
+            use pipeline::align::Alignment;
+            <f32>::alignment_size()
+        }
+        fn create_binding_type() -> wgpu::BindingType {
+            wgpu::BindingType::Buffer {
+                ty: BINDINGTYPE,
+                has_dynamic_offset: false,
+                min_binding_size: wgpu::BufferSize::new(Self::size_of() as u64),
+            }
+        }
+        fn get_qualifiers() -> Option<pipeline::shared::QUALIFIER> {
+            match BINDINGTYPE {
+                wgpu::BufferBindingType::Uniform => Some(pipeline::shared::QUALIFIER::UNIFORM),
+                wgpu::BufferBindingType::Storage { read_only: _ } => {
+                    Some(pipeline::shared::QUALIFIER::BUFFER)
+                }
+            }
+        }
+    }
 
     let (program, _) =
         compile_valid_graphics_program!(device, context, GraphicsCompileArgs::default());
@@ -172,12 +214,17 @@ fn fs_wire() -> [[location(0)]] vec4<f32> {
     let vertex_tex_coords = Vertex::new(&device, &texture_coordinates);
     let indices = Indices::new(&device, &index_data);
 
-    let view_mat = BufferData::new(generate_view_matrix());
+    /* let view_mat = BufferData::new(generate_view_matrix());
 
-    let proj_mat = BufferData::new(generate_projection_matrix(
-        size.width as f32 / size.height as f32,
-    ));
-    let bind_group_view_proj = BindGroup2::new(&device, &view_mat, &proj_mat);
+        let proj_mat = BufferData::new(generate_projection_matrix(
+            size.width as f32 / size.height as f32,
+        ));
+    &view_mat, &proj_mat */
+
+    let locals = Locals {
+        transform: generate_view_matrix()
+            * generate_projection_matrix(size.width as f32 / size.height as f32),
+    };
 
     let sampler = SamplerData::new(wgpu::SamplerDescriptor {
         label: Some("sampler"),
@@ -212,7 +259,8 @@ fn fs_wire() -> [[location(0)]] vec4<f32> {
         queue.clone(),
     );
 
-    let bind_group_t_s_map = BindGroup2::new(&device, &texture, &sampler);
+    let bind_group_locals = BindGroup1::new(&device, &locals);
+    //let bind_group_t_s_map = BindGroup2::new(&device, &texture, &sampler);
 
     // A "chain" of buffers that we render on to the display
     let swap_chain = generate_swap_chain(&surface, &window, &device);
@@ -249,21 +297,21 @@ fn fs_wire() -> [[location(0)]] vec4<f32> {
                         },
                     );
 
-                    let context1 = (&context).set_a_Pos(&mut rpass, &vertex_position);
+                    let context1 = (&context).set_position(&mut rpass, &vertex_position);
 
                     {
-                        let context2 = context1.set_a_TexCoord(&mut rpass, &vertex_tex_coords);
+                        let context2 = context1.set_tex_coord(&mut rpass, &vertex_tex_coords);
                         {
-                            let context3 =
-                                context2.set_u_view_u_proj(&mut rpass, &bind_group_view_proj);
+                            let context3 = context2.set_r_locals(&mut rpass, &bind_group_locals);
 
                             {
-                                let context4 =
-                                    context3.set_t_Color_s_Color(&mut rpass, &bind_group_t_s_map);
+                                /* let context4 =
+                                context3.set_t_Color_s_Color(&mut rpass, &bind_group_t_s_map); */
 
                                 {
-                                    let _ = context4
-                                        .runnable(|| graphics_run_indices(&mut rpass, &indices, 1));
+                                    let _ = context3.runnable(&mut rpass, |r| {
+                                        graphics_run_indices(r, &indices, 1)
+                                    });
                                 }
                             }
                         }

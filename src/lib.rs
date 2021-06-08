@@ -10,6 +10,7 @@ pub mod helper;
 pub mod shared;
 pub mod read;
 pub mod write;
+pub mod align;
 
 pub mod wgpu_compute_header;
 pub mod wgpu_graphics_header;
