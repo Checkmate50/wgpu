@@ -30,7 +30,7 @@ pub trait WgpuType {
 
 /// This struct is used to hold traditional array like data such as single values, vectors, and matricies. It is parameterized on a `BINDINGTYPE` which specifies whether the end buffer is suppose to be a uniform or storage buffer.
 pub struct BufferData<const BINDINGTYPE: wgpu::BufferBindingType, T> {
-    data: T,
+    pub data: T,
 }
 
 impl<const BINDINGTYPE: wgpu::BufferBindingType, T> BufferData<BINDINGTYPE, T> {
@@ -291,7 +291,7 @@ pub enum SamplerFiltering {
 /// This struct is used to create samplers for a pipeline. It is parameterized on two enums which specify whether the sampler created should be a comparison sampler and whether it should be a filtering sampler.
 pub struct SamplerData<'a, const COMPARABLE: SamplerComparison, const FILTERABLE: SamplerFiltering>
 {
-    desc: wgpu::SamplerDescriptor<'a>,
+    pub desc: wgpu::SamplerDescriptor<'a>,
 }
 
 impl<'a, const COMPARABLE: SamplerComparison, const FILTERABLE: SamplerFiltering>
@@ -348,9 +348,9 @@ pub struct TextureData<
     const SAMPLETYPE: wgpu::TextureSampleType,
     const VIEWDIMENSION: wgpu::TextureViewDimension,
 > {
-    data: Option<Vec<u8>>,
-    desc: wgpu::TextureDescriptor<'a>,
-    view_desc: wgpu::TextureViewDescriptor<'a>,
+    pub data: Option<Vec<u8>>,
+    pub desc: wgpu::TextureDescriptor<'a>,
+    pub view_desc: wgpu::TextureViewDescriptor<'a>,
     queue: Rc<wgpu::Queue>,
 }
 
