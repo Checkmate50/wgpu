@@ -213,12 +213,10 @@ pub fn rotate_vec4(start: &[[f32; 4]], delta_y: f32) -> Vec<[f32; 4]> {
     vec![[temp_vec3.x, temp_vec3.y, temp_vec3.z, temp_vec3.w]]
 }
 
-/// For some examples, a list of example texels are needed to create a texture on the standard cube. 
+/// For some examples, a list of example texels are needed to create a texture on the standard cube.
 pub fn create_texels(size: usize) -> Vec<u8> {
-    use std::iter;
-
     (0..size * size)
-        .flat_map(|id| {
+        .map(|id| {
             // get high five for recognizing this ;)
             let cx = 3.0 * (id % size) as f32 / (size - 1) as f32 - 2.0;
             let cy = 2.0 * (id / size) as f32 / (size - 1) as f32 - 1.0;
@@ -229,10 +227,7 @@ pub fn create_texels(size: usize) -> Vec<u8> {
                 y = 2.0 * old_x * y + cy;
                 count += 1;
             }
-            iter::once(0xFF - (count * 5) as u8)
-                .chain(iter::once(0xFF - (count * 15) as u8))
-                .chain(iter::once(0xFF - (count * 50) as u8))
-                .chain(iter::once(1))
+            count
         })
         .collect()
 }

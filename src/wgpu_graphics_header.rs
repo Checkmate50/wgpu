@@ -122,7 +122,7 @@ pub async fn graphics_compile(
             module: &module,
             // The name of the method in shader.vert to use
             entry_point: &entry_points[0],
-            buffers: &vertex_binding_desc[..],
+            buffers: &vertex_binding_desc,
         },
         // Notice how the fragment and rasterization parts are optional
         fragment: Some(wgpu::FragmentState {

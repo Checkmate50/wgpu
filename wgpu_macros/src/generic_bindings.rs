@@ -103,13 +103,15 @@ impl Parse for Context {
         module
             .global_variables
             .iter()
-            .filter(|var| var.1.class == naga::StorageClass::Uniform)
+            // Filtering for uniform variables in bindgroups and handles to variable in bindgroups(like textures/samplers)
+            .filter(|var| var.1.class == naga::StorageClass::Uniform || var.1.class == naga::StorageClass::Handle)
             .for_each(|var| {
                 println!(
-                    "{} {:?} {:?}",
+                    "{} {:?} {:?} {:?}",
                     var.1.name.as_ref().unwrap(),
                     module.types.try_get(var.1.ty),
                     var.1.binding.as_ref().unwrap(),
+                    var.1.class,
                 );
                 params.push(Parameters {
                     location: var.1.binding.as_ref().unwrap().binding,
@@ -976,6 +978,8 @@ pub fn sub_module_generic_bindings(input: TokenStream) -> TokenStream {
     let context = format_ident!("Context{}", n1);
 
     let mut all_expanded = Vec::new();
+
+    println!("{:?}", params);
 
     // Setting up struct
     //let struct_set = std::collections::HashSet::new();

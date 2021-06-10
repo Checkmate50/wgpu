@@ -417,7 +417,6 @@ impl<
     fn size_of() -> usize {
         panic!("TODO: I haven't checked the size of this yet")
     }
-
     fn create_binding_type() -> wgpu::BindingType {
         wgpu::BindingType::Texture {
             multisampled: MULTISAMPLE == TextureMultisampled::True,

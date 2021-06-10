@@ -71,12 +71,12 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 
         [[stage(vertex)]]
         fn vs_main(
-            [[location(0)]] position: vec4<f32>,
+            [[location(0)]] position: vec3<f32>,
             [[location(1)]] tex_coord: vec2<f32>,
         ) -> VertexOutput {
             var out: VertexOutput;
             out.tex_coord = tex_coord;
-            out.position = r_locals.transform * position;
+            out.position = r_locals.transform * vec4<f32>(position.x,position.y,position.z,1.0);
             return out;
         }
 
@@ -96,45 +96,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         }
     }}
 
-    wgpu_macros::generic_bindings! {context =
-    struct VertexOutput {
-        [[location(0)]] tex_coord: vec2<f32>;
-        [[builtin(position)]] position: vec4<f32>;
-    };
-
-    [[block]]
-    struct Locals {
-        transform: mat4x4<f32>;
-    };
-    [[group(0), binding(0)]]
-    var r_locals: Locals;
-
-    [[stage(vertex)]]
-    fn vs_main(
-        [[location(0)]] position: vec4<f32>,
-        [[location(1)]] tex_coord: vec2<f32>,
-    ) -> VertexOutput {
-        var out: VertexOutput;
-        out.tex_coord = tex_coord;
-        out.position = r_locals.transform * position;
-        return out;
-    }
-
-    [[group(0), binding(1)]]
-    var r_color: texture_2d<u32>;
-
-    [[stage(fragment)]]
-    fn fs_main(in: VertexOutput) -> [[location(0)]] vec4<f32> {
-        let tex = textureLoad(r_color, vec2<i32>(in.tex_coord * 256.0), 0);
-        let v = f32(tex.x) / 255.0;
-        return vec4<f32>(1.0 - (v * 5.0), 1.0 - (v * 15.0), 1.0 - (v * 50.0), 1.0);
-    }
-
-    [[stage(fragment)]]
-    fn fs_wire() -> [[location(0)]] vec4<f32> {
-        return vec4<f32>(0.0, 0.5, 0.0, 0.5);
-    }
-        };
+    eager_binding! {context = pipeline!()};
 
     /*
     struct Locals<const BINDINGTYPE: wgpu::BufferBindingType> { transform : cgmath :: Matrix4 < f32 >, }
@@ -214,19 +176,11 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     let vertex_tex_coords = Vertex::new(&device, &texture_coordinates);
     let indices = Indices::new(&device, &index_data);
 
-    /* let view_mat = BufferData::new(generate_view_matrix());
-
-        let proj_mat = BufferData::new(generate_projection_matrix(
-            size.width as f32 / size.height as f32,
-        ));
-    &view_mat, &proj_mat */
-
     let locals = Locals {
-        transform: generate_view_matrix()
-            * generate_projection_matrix(size.width as f32 / size.height as f32),
+        transform: generate_projection_matrix(size.width as f32 / size.height as f32) * generate_view_matrix(),
     };
 
-    let sampler = SamplerData::new(wgpu::SamplerDescriptor {
+    /* let sampler = SamplerData::new(wgpu::SamplerDescriptor {
         label: Some("sampler"),
         address_mode_u: wgpu::AddressMode::ClampToEdge,
         address_mode_v: wgpu::AddressMode::ClampToEdge,
@@ -237,7 +191,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         lod_min_clamp: -100.0,
         lod_max_clamp: 100.0,
         ..Default::default()
-    });
+    }); */
 
     let tex_size = 256u32;
     let texture = TextureData::new(
@@ -251,7 +205,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            format: wgpu::TextureFormat::R8Uint,
             usage: wgpu::TextureUsage::SAMPLED | wgpu::TextureUsage::COPY_DST,
             label: None,
         },
@@ -259,8 +213,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         queue.clone(),
     );
 
-    let bind_group_locals = BindGroup1::new(&device, &locals);
-    //let bind_group_t_s_map = BindGroup2::new(&device, &texture, &sampler);
+    let bind_group_locals = BindGroup2::new(&device, &locals, &texture);
 
     // A "chain" of buffers that we render on to the display
     let swap_chain = generate_swap_chain(&surface, &window, &device);
@@ -302,7 +255,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                     {
                         let context2 = context1.set_tex_coord(&mut rpass, &vertex_tex_coords);
                         {
-                            let context3 = context2.set_r_locals(&mut rpass, &bind_group_locals);
+                            let context3 = context2.set_r_locals_r_color(&mut rpass, &bind_group_locals);
 
                             {
                                 /* let context4 =
