@@ -102,7 +102,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     struct Locals<const BINDINGTYPE: wgpu::BufferBindingType> { transform : cgmath :: Matrix4 < f32 >, }
     */
 
-    impl<const BINDINGTYPE: wgpu::BufferBindingType> pipeline::bind::WgpuType for Locals<BINDINGTYPE> {
+    /* impl<const BINDINGTYPE: wgpu::BufferBindingType> pipeline::bind::WgpuType for Locals<BINDINGTYPE> {
         fn bind(
             &self,
             device: &wgpu::Device,
@@ -111,7 +111,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
             use pipeline::align::Alignment;
             pipeline::bind::BoundData::new_buffer(
                 device,
-                self.transform.align_bytes(),
+                &[self.transform.align_bytes()].concat(),
                 1 as u64,
                 Self::size_of(),
                 qual,
@@ -138,7 +138,8 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
             }
         }
     }
-
+ */
+ 
     let (program, _) =
         compile_valid_graphics_program!(device, context, GraphicsCompileArgs::default());
 

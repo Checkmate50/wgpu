@@ -44,7 +44,7 @@ impl<const BINDINGTYPE: wgpu::BufferBindingType> WgpuType for BufferData<BINDING
     fn bind(&self, device: &wgpu::Device, qual: Option<QUALIFIER>) -> BoundData {
         BoundData::new_buffer(
             device,
-            self.data.align_bytes(),
+            &self.data.align_bytes(),
             1 as u64,
             Self::size_of(),
             qual,
@@ -73,7 +73,7 @@ impl<const BINDINGTYPE: wgpu::BufferBindingType> WgpuType for BufferData<BINDING
     fn bind(&self, device: &wgpu::Device, qual: Option<QUALIFIER>) -> BoundData {
         BoundData::new_buffer(
             device,
-            self.data.as_slice().as_bytes(),
+            &self.data.align_bytes(),
             self.data.len() as u64,
             Self::size_of(),
             qual,
@@ -81,7 +81,7 @@ impl<const BINDINGTYPE: wgpu::BufferBindingType> WgpuType for BufferData<BINDING
         )
     }
     fn size_of() -> usize {
-        std::mem::size_of::<[u32; 1]>()
+        <Vec<u32>>::alignment_size()
     }
     fn create_binding_type() -> wgpu::BindingType {
         wgpu::BindingType::Buffer {
@@ -102,7 +102,7 @@ impl<const BINDINGTYPE: wgpu::BufferBindingType> WgpuType for BufferData<BINDING
     fn bind(&self, device: &wgpu::Device, qual: Option<QUALIFIER>) -> BoundData {
         BoundData::new_buffer(
             device,
-            self.data.as_slice().as_bytes(),
+            &self.data.align_bytes(),
             self.data.len() as u64,
             Self::size_of(),
             qual,
@@ -110,7 +110,7 @@ impl<const BINDINGTYPE: wgpu::BufferBindingType> WgpuType for BufferData<BINDING
         )
     }
     fn size_of() -> usize {
-        std::mem::size_of::<[f32; 1]>()
+        <Vec<f32>>::alignment_size()
     }
     fn create_binding_type() -> wgpu::BindingType {
         wgpu::BindingType::Buffer {
@@ -131,16 +131,9 @@ impl<const BINDINGTYPE: wgpu::BufferBindingType> WgpuType
     for BufferData<BINDINGTYPE, Vec<[f32; 2]>>
 {
     fn bind(&self, device: &wgpu::Device, qual: Option<QUALIFIER>) -> BoundData {
-        let numbers: Vec<f32> = self
-            .data
-            .clone()
-            .into_iter()
-            .map(|x| x.to_vec())
-            .flatten()
-            .collect();
         BoundData::new_buffer(
             device,
-            numbers.as_slice().as_bytes(),
+            &self.data.align_bytes(),
             self.data.len() as u64,
             Self::size_of(),
             qual,
@@ -149,7 +142,7 @@ impl<const BINDINGTYPE: wgpu::BufferBindingType> WgpuType
     }
 
     fn size_of() -> usize {
-        std::mem::size_of::<[f32; 2]>()
+        <Vec<[f32;2]>>::alignment_size()
     }
     fn create_binding_type() -> wgpu::BindingType {
         wgpu::BindingType::Buffer {
@@ -165,24 +158,14 @@ impl<const BINDINGTYPE: wgpu::BufferBindingType> WgpuType
         }
     }
 }
+
 impl<const BINDINGTYPE: wgpu::BufferBindingType> WgpuType
     for BufferData<BINDINGTYPE, Vec<[f32; 3]>>
 {
     fn bind(&self, device: &wgpu::Device, qual: Option<QUALIFIER>) -> BoundData {
-        let numbers: Vec<f32> = self
-            .data
-            .clone()
-            .into_iter()
-            .map(|x| {
-                let mut y = x.to_vec();
-                y.push(0.0);
-                y
-            }) // We need to extend Vec3 -> Vec4 for alignment
-            .flatten()
-            .collect();
         BoundData::new_buffer(
             device,
-            numbers.as_slice().as_bytes(),
+            &self.data.align_bytes(),
             self.data.len() as u64,
             Self::size_of(),
             qual,
@@ -191,7 +174,7 @@ impl<const BINDINGTYPE: wgpu::BufferBindingType> WgpuType
     }
 
     fn size_of() -> usize {
-        std::mem::size_of::<[f32; 4]>()
+        <Vec<[f32;3]>>::alignment_size()
     }
     fn create_binding_type() -> wgpu::BindingType {
         wgpu::BindingType::Buffer {
@@ -207,20 +190,14 @@ impl<const BINDINGTYPE: wgpu::BufferBindingType> WgpuType
         }
     }
 }
+
 impl<const BINDINGTYPE: wgpu::BufferBindingType> WgpuType
     for BufferData<BINDINGTYPE, Vec<[f32; 4]>>
 {
     fn bind(&self, device: &wgpu::Device, qual: Option<QUALIFIER>) -> BoundData {
-        let numbers: Vec<f32> = self
-            .data
-            .clone()
-            .into_iter()
-            .map(|x| x.to_vec())
-            .flatten()
-            .collect();
         BoundData::new_buffer(
             device,
-            numbers.as_slice().as_bytes(),
+            &self.data.align_bytes(),
             self.data.len() as u64,
             Self::size_of(),
             qual,
@@ -229,7 +206,7 @@ impl<const BINDINGTYPE: wgpu::BufferBindingType> WgpuType
     }
 
     fn size_of() -> usize {
-        std::mem::size_of::<[f32; 4]>()
+        <Vec<[f32;4]>>::alignment_size()
     }
     fn create_binding_type() -> wgpu::BindingType {
         wgpu::BindingType::Buffer {
@@ -245,6 +222,7 @@ impl<const BINDINGTYPE: wgpu::BufferBindingType> WgpuType
         }
     }
 }
+
 impl<const BINDINGTYPE: wgpu::BufferBindingType> WgpuType
     for BufferData<BINDINGTYPE, cgmath::Matrix4<f32>>
 {
@@ -252,7 +230,7 @@ impl<const BINDINGTYPE: wgpu::BufferBindingType> WgpuType
 
         BoundData::new_buffer(
             device,
-            self.data.align_bytes(),
+            &self.data.align_bytes(),
             64,
             Self::size_of(),
             qual,
@@ -498,12 +476,14 @@ impl BoundData {
             _ => None,
         }
     }
+
     pub fn get_texture(self) -> wgpu::TextureView {
         match self {
             BoundData::Texture { view, .. } => view,
             _ => unreachable!(),
         }
     }
+
     pub fn get_sampler(self) -> wgpu::Sampler {
         match self {
             BoundData::Sampler { data, .. } => (data),

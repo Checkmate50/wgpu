@@ -1008,6 +1008,43 @@ pub fn sub_module_generic_bindings(input: TokenStream) -> TokenStream {
                     struct #struct_name<const BINDINGTYPE: wgpu::BufferBindingType> {
                         #(#field_name: #field_type,)*
                     }
+
+                    impl<const BINDINGTYPE: wgpu::BufferBindingType> pipeline::bind::WgpuType for Locals<BINDINGTYPE> {
+                        fn bind(
+                            &self,
+                            device: &wgpu::Device,
+                            qual: Option<pipeline::shared::QUALIFIER>,
+                        ) -> pipeline::bind::BoundData {
+                            use pipeline::align::Alignment;
+                            pipeline::bind::BoundData::new_buffer(
+                                device,
+                                &[#(self.#field_name.align_bytes(),)*].concat(),
+                                1 as u64, //todo this might not be correct
+                                Self::size_of(),
+                                qual,
+                                Self::create_binding_type(),
+                            )
+                        }
+                        fn size_of() -> usize {
+                            use pipeline::align::Alignment;
+                            #(<#field_type>::alignment_size())+*
+                        }
+                        fn create_binding_type() -> wgpu::BindingType {
+                            wgpu::BindingType::Buffer {
+                                ty: BINDINGTYPE,
+                                has_dynamic_offset: false,
+                                min_binding_size: wgpu::BufferSize::new(Self::size_of() as u64),
+                            }
+                        }
+                        fn get_qualifiers() -> Option<pipeline::shared::QUALIFIER> {
+                            match BINDINGTYPE {
+                                wgpu::BufferBindingType::Uniform => Some(pipeline::shared::QUALIFIER::UNIFORM),
+                                wgpu::BufferBindingType::Storage { read_only: _ } => {
+                                    Some(pipeline::shared::QUALIFIER::BUFFER)
+                                }
+                            }
+                        }
+                    }
                 });
             }
         })
