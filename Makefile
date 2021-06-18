@@ -5,11 +5,6 @@ trivial:
 
 .PHONY: trivial2
 trivial2:
-	#export RUST_BACKTRACE=1 && cargo +nightly run --example trivial_compute_invalid
-	cargo +nightly run --example trivial_compute_invalid
-
-.PHONY: trivial3
-trivial3:
 	#export RUST_BACKTRACE=1 && cargo +nightly run --example trivial_compute
 	cargo +nightly run --example trivial_compute_external
 
@@ -22,6 +17,11 @@ pipeline:
 hello:
 	#export RUST_BACKTRACE=1 && cargo +nightly run --example hello_compute
 	cargo +nightly run  --example hello_compute
+
+.PHONY: write
+write:
+	#export RUST_BACKTRACE=1 && cargo +nightly run --example write_compute
+	cargo +nightly run  --example write_compute
 
 .PHONY: boids
 boids:
@@ -52,6 +52,11 @@ cube:
 	cargo +nightly run --example cube
 	#cargo +nightly run --example cube --release
 
+.PHONY: no_scoping
+no_scoping:
+	cargo +nightly run --example why_we_need_scoping
+	#cargo +nightly run --example cube --release
+
 .PHONY: cube2
 cube2:
 	export RUST_BACKTRACE=1 && cargo +nightly run --example cube_texture
@@ -65,28 +70,27 @@ cube3:
 .PHONY: cube4
 cube4:
 	cargo +nightly run --example multicube
-	#cargo +nightly run --example cube_shadow --release
+	#cargo +nightly run --example multicube --release
 
 .PHONY: flat_color
 flat_color:
 	cargo +nightly run --example flat_color
 
-.PHONY: shadow
-shadow:
-	cargo +nightly run --example shadow
-
 .PHONY: sink
 sink:
 	cargo +nightly run --example sink
 
+build:
+	cargo +nightly build
+
 release:
-	cargo build --release
+	cargo +nightly build --release
 
 test:
-	cargo test
+	cargo +nightly test
 
 clean:
-	cargo clean
+	cargo +nightly clean
 
 check:
 	cargo +nightly clippy

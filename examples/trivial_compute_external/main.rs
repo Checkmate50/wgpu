@@ -12,6 +12,8 @@ pub use pipeline::AbstractBind;
 
 use std::convert::TryInto;
 
+mod shader;
+
 async fn execute_gpu() {
     let instance = wgpu::Instance::new(wgpu::BackendBit::PRIMARY);
     let adapter = instance
@@ -36,31 +38,6 @@ async fn execute_gpu() {
         )
         .await
         .expect("Failed to create device");
-
-    // qualifiers
-    // buffer: is a buffer?
-    // in: this parameter must be bound to before the program runs
-    //     thus it can be read inside of the program scope
-    // out: if this parameter is bound, it must be rebound after each iteration
-    //      Only out variables can be mutated
-    //      Only out variables can be read as a result of the program
-    //      If out has been unassigned then an error is raised when it is read
-    // loop: one or more of these loop annotations are required per program. Atm, the values bound is assumed to be of equal length and this gives the number of iterations(gl_GlobalInvocationID.x)
-    //      the size of any out buffers that need to be created
-
-    my_shader! {compute = {
-        [group1 [buffer loop in] uint[]] indices;
-        [group2 [buffer in out] uint[]] indices2;
-        //[[buffer out] uint[]] result;
-        //[... uint] xindex;
-        {{
-            void main() {
-                // uint xindex = gl_GlobalInvocationID.x;
-                uint index = gl_GlobalInvocationID.x;
-                indices2[index] = indices[index]+indices2[index];
-            }
-        }}
-    }}
 
     const S: ComputeShader = eager_compute_shader! {compute!()};
 

@@ -20,7 +20,7 @@ pub fn compile_shader(contents: String, shader: ShaderType, device: &wgpu::Devic
     /*         print!("{}", contents);
     print!("\n\n"); */
     let x = glsl_to_spirv::compile(&contents, shader);
-    debug!(x);
+    //debug!(x);
     let mut vert_file =
         x.unwrap_or_else(|_| panic!("{}: {}", "You gave a bad shader source", contents));
     let mut vs = Vec::new();
@@ -28,15 +28,14 @@ pub fn compile_shader(contents: String, shader: ShaderType, device: &wgpu::Devic
         .read_to_end(&mut vs)
         .expect("Somehow reading the file got interrupted");
     // Take the shader, ...,  and return
-    device.create_shader_module(&wgpu::read_spirv(std::io::Cursor::new(&vs[..])).unwrap())
+    device.create_shader_module(&wgpu::ShaderModuleDescriptor {
+        label: None,
+        source: wgpu::util::make_spirv(&vs[..]),
+        flags: wgpu::ShaderFlags::VALIDATION,
+    })
 }
 
-pub trait Program {
-    fn get_device(&self) -> &wgpu::Device;
-}
-
-// TODO functions to get the rust size and typing
-
+//todo phase out glsltype infavor of WgpuType
 #[derive(Debug, Clone, PartialEq)]
 #[allow(dead_code)]
 pub enum GLSLTYPE {
@@ -44,6 +43,7 @@ pub enum GLSLTYPE {
     Int,
     Uint,
     Float,
+    Vec1,
     Vec2,
     Uvec3,
     Vec3,
@@ -56,8 +56,10 @@ pub enum GLSLTYPE {
     ArrayVec3,
     ArrayVec4,
     Sampler,
+    SamplerShadow,
     TextureCube,
     Texture2D,
+    Texture2DArray,
 }
 
 impl GLSLTYPE {
@@ -67,9 +69,10 @@ impl GLSLTYPE {
             GLSLTYPE::Float => std::mem::size_of::<f32>(),
             GLSLTYPE::Int => std::mem::size_of::<i32>(),
             GLSLTYPE::Uint => std::mem::size_of::<u32>(),
+            GLSLTYPE::Vec1 => std::mem::size_of::<f32>(),
             GLSLTYPE::Vec2 => std::mem::size_of::<[f32; 2]>(),
             GLSLTYPE::Uvec3 => std::mem::size_of::<[u32; 3]>(),
-            GLSLTYPE::Vec3 => std::mem::size_of::<[f32; 3]>(),
+            GLSLTYPE::Vec3 => std::mem::size_of::<[f32; 4]>(),
             GLSLTYPE::Vec4 => std::mem::size_of::<[f32; 4]>(),
             GLSLTYPE::Mat4 => 64,
             GLSLTYPE::ArrayInt => panic!("TODO: I haven't checked the size of this yet"),
@@ -79,8 +82,10 @@ impl GLSLTYPE {
             GLSLTYPE::ArrayVec3 => panic!("TODO: I haven't checked the size of this yet"),
             GLSLTYPE::ArrayVec4 => panic!("TODO: I haven't checked the size of this yet"),
             GLSLTYPE::Sampler => panic!("TODO: I haven't checked the size of this yet"),
+            GLSLTYPE::SamplerShadow => panic!("TODO: I haven't checked the size of this yet"),
             GLSLTYPE::TextureCube => panic!("TODO: I haven't checked the size of this yet"),
             GLSLTYPE::Texture2D => panic!("TODO: I haven't checked the size of this yet"),
+            GLSLTYPE::Texture2DArray => panic!("TODO: I haven't checked the size of this yet"),
         }
     }
 }
@@ -92,6 +97,8 @@ impl fmt::Display for GLSLTYPE {
             GLSLTYPE::Float => write!(f, "float"),
             GLSLTYPE::Int => write!(f, "int"),
             GLSLTYPE::Uint => write!(f, "uint"),
+            // we have this as a vec1 to know it is an array of floats but glsl only has float
+            GLSLTYPE::Vec1 => write!(f, "float"),
             GLSLTYPE::Vec2 => write!(f, "vec2"),
             GLSLTYPE::Uvec3 => write!(f, "uvec3"),
             GLSLTYPE::Vec3 => write!(f, "vec3"),
@@ -104,8 +111,10 @@ impl fmt::Display for GLSLTYPE {
             GLSLTYPE::ArrayVec3 => write!(f, "vec3[]"),
             GLSLTYPE::ArrayVec4 => write!(f, "vec4[]"),
             GLSLTYPE::Sampler => write!(f, "sampler"),
+            GLSLTYPE::SamplerShadow => write!(f, "samplerShadow"),
             GLSLTYPE::TextureCube => write!(f, "textureCube"),
             GLSLTYPE::Texture2D => write!(f, "texture2D"),
+            GLSLTYPE::Texture2DArray => write!(f, "texture2DArray"),
         }
     }
 }
@@ -123,6 +132,9 @@ macro_rules! typing {
     };
     (float) => {
         pipeline::shared::GLSLTYPE::Float
+    };
+    (vec1) => {
+        pipeline::shared::GLSLTYPE::Vec1
     };
     (vec2) => {
         pipeline::shared::GLSLTYPE::Vec2
@@ -142,20 +154,28 @@ macro_rules! typing {
     (sampler) => {
         pipeline::shared::GLSLTYPE::Sampler
     };
+    (samplerShadow) => {
+        pipeline::shared::GLSLTYPE::SamplerShadow
+    };
     (textureCube) => {
         pipeline::shared::GLSLTYPE::TextureCube
     };
     (texture2D) => {
         pipeline::shared::GLSLTYPE::Texture2D
     };
+    (texture2DArray) => {
+        pipeline::shared::GLSLTYPE::Texture2DArray
+    };
 }
 
+//todo why do I have this again?
 pub const fn array_type(gtype: GLSLTYPE, depth: i64) -> GLSLTYPE {
     if depth == 1 {
         match gtype {
             GLSLTYPE::Float => GLSLTYPE::ArrayFloat,
             GLSLTYPE::Int => GLSLTYPE::ArrayInt,
             GLSLTYPE::Uint => GLSLTYPE::ArrayUint,
+            GLSLTYPE::Vec1 => GLSLTYPE::ArrayVec2,
             GLSLTYPE::Vec2 => GLSLTYPE::ArrayVec2,
             GLSLTYPE::Vec3 => GLSLTYPE::ArrayVec3,
             GLSLTYPE::Vec4 => GLSLTYPE::ArrayVec4,
@@ -180,6 +200,8 @@ pub enum QUALIFIER {
     IN,
     OUT,
     LOOP,
+    // things for samplers/textures
+    COMPARE,
 }
 
 // I assume there will only be one gl builtin qualifier so find that one and the match should return true
@@ -252,6 +274,9 @@ macro_rules! qualifying {
     (loop) => {
         pipeline::shared::QUALIFIER::LOOP
     };
+    (compare) => {
+        pipeline::shared::QUALIFIER::COMPARE
+    }; //todo add all the others
 }
 
 #[macro_export]
@@ -317,6 +342,7 @@ pub const fn has_uniform_qual(p: &[QUALIFIER]) -> bool {
 
 #[derive(Debug)]
 pub struct PARAMETER {
+    pub group: Option<&'static str>,
     pub qual: &'static [QUALIFIER],
     pub gtype: GLSLTYPE,
     pub name: &'static str,
@@ -330,14 +356,16 @@ pub struct PARAMETER {
 // https://doc.rust-lang.org/stable/rust-by-example/macros.html
 #[macro_export]
 macro_rules! shader {
-    ( $([[$($qualifier:tt)*] $type:ident $($brack:tt)*] $param:ident;)*
+    ( $([$($group:ident)? [$($qualifier:tt)*] $type:ident $($brack:tt)*] $param:ident;)*
       {$($tt:tt)*}) =>
       {
         {
             const S : &[pipeline::shared::PARAMETER] = &[$(
                 pipeline::shared::PARAMETER{qual:&[$(qualifying!($qualifier)),*],
-                                                      gtype:pipeline::shared::array_type(typing!($type), count_brackets!($($brack)*)),
-                                                      name:stringify!($param)}),*];
+                                            gtype:pipeline::shared::array_type(typing!($type), count_brackets!($($brack)*)),
+                                            name:stringify!($param),
+                                            group:{let mut x : Option<&'static str> = None; $(x = Some(stringify!($group)); )? x},
+                                        }),*];
 
 
             const B: &'static str = munch_body!($($tt)*);
@@ -367,7 +395,7 @@ macro_rules! shader {
 macro_rules! my_shader {
     ($name:tt = {$($tt:tt)*}) =>
         {
-        eager_macro_rules! { $eager_1
+        eager::eager_macro_rules! { $eager_1
             #[macro_export]
             macro_rules! $name{
                 ()=>{$($tt)*};

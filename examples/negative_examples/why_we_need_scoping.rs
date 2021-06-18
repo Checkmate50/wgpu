@@ -1,4 +1,5 @@
 #![recursion_limit = "1024"]
+#![feature(trace_macros)]
 #[macro_use]
 extern crate pipeline;
 
@@ -17,16 +18,15 @@ pub use pipeline::wgpu_graphics_header::{
 };
 
 use crate::pipeline::AbstractBind;
-pub use pipeline::bind::{BindGroup1, BindGroup2, BufferData, Indices, Vertex};
+pub use pipeline::bind::{BindGroup2, BufferData, Indices, Vertex};
 
-pub use pipeline::helper::{
-    generate_identity_matrix, generate_projection_matrix, generate_view_matrix, load_model,
-    rotate_vec3, rotation_y, scale,
-};
+pub use pipeline::helper::{generate_projection_matrix, generate_view_matrix, load_cube};
 
 async fn run(event_loop: EventLoop<()>, window: Window) {
     let size = window.inner_size();
 
+    // Create a surface to draw images on
+    // this is the new way wgpu does things... unsafe is kind of sad
     let instance = wgpu::Instance::new(wgpu::BackendBit::PRIMARY);
     let surface = unsafe { instance.create_surface(&window) };
     let adapter = instance
@@ -54,37 +54,28 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 
     my_shader! {vertex = {
         [[vertex in] vec3] a_position;
-        [[vertex in] vec3] a_normal;
-        [group1 [uniform in] vec3] Ambient;
-        [group2 [uniform in] vec3] LightDirection;
-        [group3 [uniform in] mat4] u_view;
-        [group3 [uniform in] mat4] u_proj;
-        [group4 [uniform in] mat4] u_model;
-        [[] int] gl_VertexID;
+        [[vertex in] vec3] vertexColor;
 
-        [[out] vec3] fragmentNormal;
+        [group1 [uniform in] mat4] u_view;
+        [group1 [uniform in] mat4] u_proj;
+
+        [[out] vec3] fragmentColor;
         [[out] vec4] gl_Position;
+
         {{
             void main() {
-
-                vec4 worldNormal = vec4(a_normal, 0.0) * inverse(u_model) * inverse(u_view);
-
-                fragmentNormal = worldNormal.xyz;
-
-                gl_Position = u_proj * u_view * u_model * vec4(a_position, 1.0);
+                fragmentColor = vertexColor;
+                gl_Position = u_proj * u_view * vec4(0.7 * a_position, 1.0);
             }
         }}
     }}
 
     my_shader! {fragment = {
-        [[in] vec3] fragmentNormal;
-        [group1 [uniform in] vec3] Ambient;
-        [group2 [uniform in] vec3] LightDirection;
+        [[in] vec3] fragmentColor;
         [[out] vec4] color;
         {{
             void main() {
-                vec3 fragColor = vec3(1.0, 0.0, 0.0);
-                color = vec4(Ambient + fragColor * max(dot(normalize(fragmentNormal), normalize(LightDirection)), 0.0), 1.0);
+                color = vec4(fragmentColor, 1.0);
             }
         }}
     }}
@@ -98,23 +89,94 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     let (program, _) =
         compile_valid_graphics_program!(device, context, S_V, S_F, GraphicsCompileArgs::default());
 
-    let (positions, normals, index_data) = load_model("src/models/teapot.obj");
+    let (positions, _, index_data) = load_cube();
 
-    let mut light_direction = vec![[20.0, 0.0, 0.0]];
-
-    let light_ambient = BufferData::new(vec![[0.1, 0.0, 0.0]]);
+    let color_data = BufferData::new(vec![
+        [0.583, 0.771, 0.014],
+        [0.609, 0.115, 0.436],
+        [0.327, 0.483, 0.844],
+        [0.822, 0.569, 0.201],
+        [0.435, 0.602, 0.223],
+        [0.310, 0.747, 0.185],
+        [0.597, 0.770, 0.761],
+        [0.559, 0.436, 0.730],
+        [0.359, 0.583, 0.152],
+        [0.483, 0.596, 0.789],
+        [0.559, 0.861, 0.639],
+        [0.195, 0.548, 0.859],
+        [0.014, 0.184, 0.576],
+        [0.771, 0.328, 0.970],
+        [0.406, 0.615, 0.116],
+        [0.676, 0.977, 0.133],
+        [0.971, 0.572, 0.833],
+        [0.140, 0.616, 0.489],
+        [0.997, 0.513, 0.064],
+        [0.945, 0.719, 0.592],
+        [0.543, 0.021, 0.978],
+        [0.279, 0.317, 0.505],
+        [0.167, 0.620, 0.077],
+        [0.347, 0.857, 0.137],
+        [0.055, 0.953, 0.042],
+        [0.714, 0.505, 0.345],
+        [0.783, 0.290, 0.734],
+        [0.722, 0.645, 0.174],
+        [0.302, 0.455, 0.848],
+        [0.225, 0.587, 0.040],
+        [0.517, 0.713, 0.338],
+        [0.053, 0.959, 0.120],
+        [0.393, 0.621, 0.362],
+        [0.673, 0.211, 0.457],
+        [0.820, 0.883, 0.371],
+        [0.982, 0.099, 0.879],
+    ]);
+    let bad_color_data = BufferData::new(vec![
+        [0.583, 0.771, 0.0],
+        [0.609, 0.115, 0.0],
+        [0.327, 0.483, 0.0],
+        [0.822, 0.569, 0.0],
+        [0.435, 0.602, 0.0],
+        [0.310, 0.747, 0.0],
+        [0.597, 0.770, 0.0],
+        [0.559, 0.436, 0.0],
+        [0.359, 0.583, 0.0],
+        [0.483, 0.596, 0.0],
+        [0.559, 0.861, 0.0],
+        [0.195, 0.548, 0.0],
+        [0.014, 0.184, 0.0],
+        [0.771, 0.328, 0.0],
+        [0.406, 0.615, 0.0],
+        [0.676, 0.977, 0.0],
+        [0.971, 0.572, 0.0],
+        [0.140, 0.616, 0.0],
+        [0.997, 0.513, 0.0],
+        [0.945, 0.719, 0.0],
+        [0.543, 0.021, 0.0],
+        [0.279, 0.317, 0.0],
+        [0.167, 0.620, 0.0],
+        [0.347, 0.857, 0.0],
+        [0.055, 0.953, 0.0],
+        [0.714, 0.505, 0.0],
+        [0.783, 0.290, 0.0],
+        [0.722, 0.645, 0.0],
+        [0.302, 0.455, 0.0],
+        [0.225, 0.587, 0.0],
+        [0.517, 0.713, 0.0],
+        [0.053, 0.959, 0.0],
+        [0.393, 0.621, 0.0],
+        [0.673, 0.211, 0.0],
+        [0.820, 0.883, 0.0],
+        [0.982, 0.099, 0.0],
+    ]);
 
     let view_mat = BufferData::new(generate_view_matrix());
 
     let proj_mat = BufferData::new(generate_projection_matrix(size.width as f32 / size.height as f32));
 
-    let mut model_mat_init = generate_identity_matrix();
-    model_mat_init = scale(model_mat_init, 0.7);
-
     let vertex_position = Vertex::new(&device, &BufferData::new(positions));
-    let vertex_normal = Vertex::new(&device, &BufferData::new(normals));
+    let vertex_color = Vertex::new(&device, &color_data);
+    let bad_vertex_color = Vertex::new(&device, &bad_color_data);
     let indices = Indices::new(&device, &index_data);
-    let bind_group_ambient = BindGroup1::new(&device, &light_ambient);
+
     let bind_group_view_proj = BindGroup2::new(&device, &view_mat, &proj_mat);
 
     // A "chain" of buffers that we render on to the display
@@ -128,17 +190,10 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
             Event::RedrawRequested(_) => {
                 let mut init_encoder =
                     device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-
                 let frame = swap_chain
                     .get_current_frame()
                     .expect("Timeout when acquiring next swap chain texture")
                     .output;
-
-                light_direction = rotate_vec3(&light_direction, 0.05);
-                let bind_group_light_dir = BindGroup1::new(&device, &BufferData::new(light_direction.clone()));
-
-                model_mat_init = rotation_y(model_mat_init, 0.05);
-                let bind_group_model = BindGroup1::new(&device, &BufferData::new(model_mat_init));
                 {
                     let mut rpass = setup_render_pass(
                         &program,
@@ -157,33 +212,20 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                         },
                     );
 
-                    {
-                        let context1 = (&context).set_a_position(&mut rpass, &vertex_position);
-                        {
-                            let context2 = (&context1).set_a_normal(&mut rpass, &vertex_normal);
-                            {
-                                let context3 =
-                                    (&context2).set_Ambient(&mut rpass, &bind_group_ambient);
-                                {
-                                    let context4 = (&context3)
-                                        .set_u_view_u_proj(&mut rpass, &bind_group_view_proj);
-                                    {
-                                        let context5 = (&context4)
-                                            .set_LightDirection(&mut rpass, &bind_group_light_dir);
-                                        {
-                                            let context6 = (&context5)
-                                                .set_u_model(&mut rpass, &bind_group_model);
-                                            {
-                                                context6.runnable(|| {
-                                                    graphics_run_indices(&mut rpass, &indices, 1)
-                                                });
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    //
+                    // Handle the setup for the pipeline
+                    //
+
+                    let context1 = (&context).set_a_position(&mut rpass, &vertex_position);
+
+                    let context2 = (&context1).set_vertexColor(&mut rpass, &vertex_color);
+
+                    let context3 = context2.set_u_view_u_proj(&mut rpass, &bind_group_view_proj);
+
+                    // Without scoping for each context, that uses the previous context, I've inserted a call here to change the vertexColor. This should only be visible in the bad_context, as that is where it is bound, but the effect is shown when you try to run context3. Remember, at no point in the chain of context's to create context3 did we bind this bad_vertex_color and we still see the effect.
+                    let bad_context = context1.set_vertexColor(&mut rpass, &bad_vertex_color);
+
+                    let _ = context3.runnable(|| graphics_run_indices(&mut rpass, &indices, 1));
                 }
                 queue.submit(Some(init_encoder.finish()));
             }
@@ -204,7 +246,6 @@ fn main() {
     let window = winit::window::WindowBuilder::new()
         .build(&event_loop)
         .unwrap();
-    /* let window = winit::window::Window::new(&event_loop).unwrap(); */
 
     // Why do we need to be async? Because of event_loop?
     futures::executor::block_on(run(event_loop, window));

@@ -12,6 +12,7 @@ pub use pipeline::AbstractBind;
 
 use std::convert::TryInto;
 use std::rc::Rc;
+use zerocopy::AsBytes;
 
 async fn execute_gpu() {
     // qualifiers
@@ -82,13 +83,17 @@ async fn execute_gpu() {
 
     let program = compile(&S, &device, context.get_layout(&device)).await;
 
-    let indices = BufferData::new(vec![1, 2, 3, 4]);
+    let indices = BufferData::new(vec![0, 0, 0, 0]);
 
     let bg_i = BindGroup1::new(&device, &indices);
 
     {
         let mut encoder =
             device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        let y = bg_i.setup_write_0(&device, 0..16);
+        y.write(&device).await.unwrap().copy_from_slice(vec![1,2,3,4].as_bytes());
+        y.collect(&mut encoder);
+
         {
             let mut cpass =
                 encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: None });

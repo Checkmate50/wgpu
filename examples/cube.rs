@@ -1,5 +1,10 @@
+#![recursion_limit = "1024"]
+#![feature(trace_macros)]
 #[macro_use]
 extern crate pipeline;
+
+#[macro_use]
+extern crate eager;
 
 use winit::{
     event::{Event, WindowEvent},
@@ -7,43 +12,65 @@ use winit::{
     window::Window,
 };
 
-pub use static_assertions::const_assert;
-
-pub use pipeline::wgpu_graphics_header;
 pub use pipeline::wgpu_graphics_header::{
-    compile_buffer, default_bind_group, generate_swap_chain, setup_render_pass,
-    valid_fragment_shader, valid_vertex_shader, GraphicsBindings, GraphicsShader,
-    OutGraphicsBindings,
+    generate_swap_chain, graphics_run_indices, setup_render_pass, GraphicsCompileArgs,
+    GraphicsShader,
 };
 
-pub use pipeline::shared;
-pub use pipeline::shared::{
-    bind_fvec, bind_mat4, bind_vec3, is_gl_builtin, ready_to_run, update_bind_context, Bindings,
-};
+pub use pipeline::bind::{BindGroup2, BufferData, Indices, Vertex};
+pub use pipeline::AbstractBind;
 
-pub use pipeline::helper::load_cube;
+pub use pipeline::helper::{generate_projection_matrix, generate_view_matrix, load_cube};
 
 async fn run(event_loop: EventLoop<()>, window: Window) {
     let size = window.inner_size();
 
-    const VERTEXT: (GraphicsShader, [&str; 32], [&str; 32]) = graphics_shader! {
+    // Create a surface to draw images on
+    // this is the new way wgpu does things... unsafe is kind of sad
+    let instance = wgpu::Instance::new(wgpu::BackendBit::PRIMARY);
+    let surface = unsafe { instance.create_surface(&window) };
+    let adapter = instance
+        .request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::default(),
+            // Request an adapter which can render to our surface
+            compatible_surface: Some(&surface),
+        })
+        .await
+        .expect("Failed to find an appropiate adapter");
+
+    // The device manages the connection and resources of the adapter
+    // The queue is a literal queue of tasks for the gpu
+    let (device, queue) = adapter
+        .request_device(
+            &wgpu::DeviceDescriptor {
+                label: None,
+                features: wgpu::Features::empty(),
+                limits: wgpu::Limits::default(),
+            },
+            None,
+        )
+        .await
+        .expect("Failed to create device");
+
+    my_shader! {vertex = {
         [[vertex in] vec3] a_position;
         [[vertex in] vec3] vertexColor;
-        [[uniform in] mat4] u_view;
-        [[uniform in] mat4] u_proj;
 
+        [group1 [uniform in] mat4] u_view;
+        [group1 [uniform in] mat4] u_proj;
 
         [[out] vec3] fragmentColor;
         [[out] vec4] gl_Position;
+
         {{
             void main() {
                 fragmentColor = vertexColor;
-                gl_Position = u_proj * u_view * vec4(0.3 * a_position, 1.0);
+                gl_Position = u_proj * u_view * vec4(0.7 * a_position, 1.0);
             }
         }}
-    };
+    }}
 
-    const FRAGMENT: (GraphicsShader, [&str; 32], [&str; 32]) = graphics_shader! {
+    my_shader! {fragment = {
         [[in] vec3] fragmentColor;
         [[out] vec4] color;
         {{
@@ -51,18 +78,20 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                 color = vec4(fragmentColor, 1.0);
             }
         }}
-    };
+    }}
 
-    const S_V: GraphicsShader = VERTEXT.0;
-    const STARTING_BIND_CONTEXT: [&str; 32] = VERTEXT.1;
-    const S_F: GraphicsShader = FRAGMENT.0;
+    const S_V: GraphicsShader = eager_graphics_shader! {vertex!()};
 
-    let (program, template_bindings, template_out_bindings, _) =
-        compile_valid_graphics_program!(window, S_V, S_F);
+    const S_F: GraphicsShader = eager_graphics_shader! {fragment!()};
+
+    eager_binding! {context = vertex!(), fragment!()};
+
+    let (program, _) =
+        compile_valid_graphics_program!(device, context, S_V, S_F, GraphicsCompileArgs::default());
 
     let (positions, _, index_data) = load_cube();
 
-    let color_data = vec![
+    let color_data = BufferData::new(vec![
         [0.583, 0.771, 0.014],
         [0.609, 0.115, 0.436],
         [0.327, 0.483, 0.844],
@@ -99,36 +128,21 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         [0.673, 0.211, 0.457],
         [0.820, 0.883, 0.371],
         [0.982, 0.099, 0.879],
-    ];
+    ]);
+    let view_mat = BufferData::new(generate_view_matrix());
 
-    let light_direction = vec![[20.0, 0.0, 20.0]];
+    let proj_mat = BufferData::new(generate_projection_matrix(
+        size.width as f32 / size.height as f32,
+    ));
 
-    let light_ambient = vec![[0.1, 0.0, 0.0]];
+    let vertex_position = Vertex::new(&device, &BufferData::new(positions));
+    let vertex_color = Vertex::new(&device, &color_data);
+    let indices = Indices::new(&device, &index_data);
 
-    fn generate_view(aspect_ratio: f32) -> cgmath::Matrix4<f32> {
-        let mx_view = cgmath::Matrix4::look_at(
-            cgmath::Point3::new(1.5f32, -5.0, 3.0),
-            cgmath::Point3::new(0f32, 0.0, 0.0),
-            cgmath::Vector3::unit_z(),
-        );
-        mx_view
-    }
-
-    fn generate_projection(aspect_ratio: f32) -> cgmath::Matrix4<f32> {
-        let mx_projection = cgmath::perspective(cgmath::Deg(45f32), aspect_ratio, 1.0, 10.0);
-        let mx_correction = cgmath::Matrix4::new(
-            1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.5, 0.0, 0.0, 0.0, 0.5, 1.0,
-        );
-
-        mx_correction * mx_projection
-    }
-
-    let view_mat = generate_view(size.width as f32 / size.height as f32);
-
-    let proj_mat = generate_projection(size.width as f32 / size.height as f32);
+    let bind_group_view_proj = BindGroup2::new(&device, &view_mat, &proj_mat);
 
     // A "chain" of buffers that we render on to the display
-    let mut swap_chain = generate_swap_chain(&program, &window);
+    let swap_chain = generate_swap_chain(&surface, &window, &device);
 
     event_loop.run(move |event, _, control_flow: &mut ControlFlow| {
         *control_flow = ControlFlow::Poll;
@@ -136,98 +150,49 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
             // Everything that can be processed has been so we can now redraw the image on our window
             Event::MainEventsCleared => window.request_redraw(),
             Event::RedrawRequested(_) => {
-                let mut init_encoder = program
-                    .device
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-
-                let mut frame = swap_chain
-                    .get_next_texture()
-                    .expect("Timeout when acquiring next swap chain texture");
-
-                let mut rpass = setup_render_pass(&program, &mut init_encoder, &frame);
-                let mut bind_group = default_bind_group(&program);
-
-                let mut bindings: GraphicsBindings = template_bindings.clone();
-                let mut out_bindings: OutGraphicsBindings = template_out_bindings.clone();
-                const BIND_CONTEXT_1: [&str; 32] =
-                    update_bind_context(&STARTING_BIND_CONTEXT, "a_position");
-                bind_vec3(
-                    &program,
-                    &mut bindings,
-                    &mut out_bindings,
-                    &positions,
-                    "a_position".to_string(),
-                );
+                let mut init_encoder =
+                    device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+                let frame = swap_chain
+                    .get_current_frame()
+                    .expect("Timeout when acquiring next swap chain texture")
+                    .output;
                 {
-                    const BIND_CONTEXT_2: [&str; 32] =
-                        update_bind_context(&BIND_CONTEXT_1, "u_view");
-                    bind_mat4(
+                    let mut rpass = setup_render_pass(
                         &program,
-                        &mut bindings,
-                        &mut out_bindings,
-                        view_mat,
-                        "u_view".to_string(),
+                        &mut init_encoder,
+                        wgpu::RenderPassDescriptor {
+                            label: None,
+                            color_attachments: &[wgpu::RenderPassColorAttachmentDescriptor {
+                                attachment: &frame.view,
+                                resolve_target: None,
+                                ops: wgpu::Operations {
+                                    load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                                    store: true,
+                                },
+                            }],
+                            depth_stencil_attachment: None,
+                        },
                     );
-                    {
-                        const BIND_CONTEXT_3: [&str; 32] =
-                            update_bind_context(&BIND_CONTEXT_2, "vertexColor");
-                        bind_vec3(
-                            &program,
-                            &mut bindings,
-                            &mut out_bindings,
-                            &color_data,
-                            "vertexColor".to_string(),
-                        );
 
+                    //
+                    // Handle the setup for the pipeline
+                    //
+
+                    let context1 = (&context).set_a_position(&mut rpass, &vertex_position);
+
+                    {
+                        let context2 = (&context1).set_vertexColor(&mut rpass, &vertex_color);
                         {
-                            const BIND_CONTEXT_4: [&str; 32] =
-                                update_bind_context(&BIND_CONTEXT_3, "u_proj");
-                            bind_mat4(
-                                &program,
-                                &mut bindings,
-                                &mut out_bindings,
-                                proj_mat,
-                                "u_proj".to_string(),
-                            );
+                            let context3 =
+                                context2.set_u_view_u_proj(&mut rpass, &bind_group_view_proj);
                             {
-                                /*                             const BIND_CONTEXT_5: [&str; 32] =
-                                    update_bind_context!(BIND_CONTEXT_4, "vertexAmbient");
-                                bind_vec3(
-                                    &program,
-                                    &mut bindings,
-                                    &mut out_bindings,
-                                    &light_ambient,
-                                    "vertexAmbient".to_string(),
-                                ); */
-                                {
-                                    /*                                     const BIND_CONTEXT_6: [&str; 32] = update_bind_context!(
-                                        BIND_CONTEXT_5,
-                                        "vertexLightDirection"
-                                    );
-                                    bind_vec3(
-                                        &program,
-                                        &mut bindings,
-                                        &mut out_bindings,
-                                        &light_direction,
-                                        "vertexLightDirection".to_string(),
-                                    ); */
-                                    {
-                                        ready_to_run(BIND_CONTEXT_4);
-                                        wgpu_graphics_header::graphics_run_indicies(
-                                            &program,
-                                            rpass,
-                                            &mut bind_group,
-                                            &mut bindings,
-                                            &mut out_bindings,
-                                            &index_data,
-                                        );
-                                    }
-                                }
+                                let _ =
+                                    context3.runnable(|| graphics_run_indices(&mut rpass, &indices, 1));
                             }
                         }
                     }
                 }
-                program.queue.submit(&[init_encoder.finish()]);
+                queue.submit(Some(init_encoder.finish()));
             }
             // When the window closes we are done. Change the status
             Event::WindowEvent {
@@ -246,7 +211,6 @@ fn main() {
     let window = winit::window::WindowBuilder::new()
         .build(&event_loop)
         .unwrap();
-    /* let window = winit::window::Window::new(&event_loop).unwrap(); */
 
     // Why do we need to be async? Because of event_loop?
     futures::executor::block_on(run(event_loop, window));
