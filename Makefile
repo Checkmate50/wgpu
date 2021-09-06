@@ -72,6 +72,11 @@ cube4:
 	cargo +nightly run --example multicube
 	#cargo +nightly run --example multicube --release
 
+.PHONY: cube5
+cube5:
+	cargo +nightly run --example cube_nested_struct
+	#cargo +nightly run --example cube_nested_struct --release
+
 .PHONY: flat_color
 flat_color:
 	cargo +nightly run --example flat_color

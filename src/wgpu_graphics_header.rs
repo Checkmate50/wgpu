@@ -52,6 +52,8 @@ impl Default for GraphicsCompileArgs {
     }
 }
 
+// The function underneath the compile valid graphics program macro
+// Sets up the graphics pipeline and returns it in the GraphicsProgram struct
 pub async fn graphics_compile(
     vec_buffer: &mut [wgpu::VertexAttribute; 32],
     device: &wgpu::Device,
@@ -61,6 +63,7 @@ pub async fn graphics_compile(
     module: &ShaderModule,
     args: GraphicsCompileArgs,
 ) -> GraphicsProgram {
+    //let mut past_sizes = 0; I would think I would need to set the offset by the amount of past sizes but I think I don't need to because everything ends up as separate vertex buffers
     for (idx, size)  in vertex_sizes.iter().enumerate() {
         vec_buffer[idx] = wgpu::VertexAttribute {
             offset: 0,
@@ -76,6 +79,7 @@ pub async fn graphics_compile(
 
             }
         };
+        //past_sizes += *size as u64;
     }
 
     let mut vertex_binding_desc = Vec::new();
@@ -89,7 +93,7 @@ pub async fn graphics_compile(
         });
     }
 
-    debug!(vertex_binding_desc);
+    //debug!(vertex_binding_desc);
 
     let bind_group_layout_ref: Vec<&wgpu::BindGroupLayout> =
         bind_group_layout.iter().map(|a| a).collect();

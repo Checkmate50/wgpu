@@ -43,7 +43,7 @@
     }}
     \end{lstlisting}
 
-    The bulk of the work happens in the Vertex shader(cite figure) which iterates over two vertex buffers containing a position value and a color value. There are 3 uniform matrices: the view, projection, and model matrices which are declared as uniform and are organized in their own groups.
+    The bulk of the work happens in the Vertex shader(cite figure), which iterates over two vertex buffers containing a position value and a color value. There are three matrices: the view, projection, and model matrices which are declared as uniform and are organized in their own groups.
     %todo finish
 
 \section{How my library/dsl prevents this bug}
@@ -56,7 +56,7 @@
 This library provides four parts: a macro that which used to declare a shader, a macro that takes in shaders and produces a ``Context'' type, methods for binding data to the GPU, and sub-libraries that are specific to running a compute or graphics pipeline.
 
 \subsection{The shader macro}
-Currently shaders are implemented in a modified GLSL-like syntax using the \lstinline{my_shader!} macro. This macro takes in a name which the shader will be set to, a list of parameters, and the main body of the shader which is valid GLSL. For each parameter, it takes a group name if it is part of a bind group, a list of qualifiers, a GLSL type and the parameter name.
+Currently, shaders are implemented in a modified GLSL-like syntax using the \lstinline{my_shader!} macro. This macro takes in a name which the shader will be set to, a list of parameters, and the main body of the shader which is valid GLSL. For each parameter, it takes a group name if it is part of a bind group, a list of qualifiers, a GLSL type and the parameter name.
 
 The name of the shader can then be used later as a macro to call the shader when you want to use it. This is useful as at compile time, a shader can be declared using \lstinline{my_shader!} in one file and then used in a different file.
 \subsection{The Context and set functions}

@@ -97,5 +97,5 @@ macro_rules! eager_graphics_shader {
 
 #[macro_export]
 macro_rules! eager_binding {
-    ($context_name:tt = $($macro_name:tt!()),*) => {eager! { lazy! { wgpu_macros::generic_bindings! { $context_name = eager!{ $($macro_name!()),*}}}}}
+    ($($entry_ty:ident = $entry_name:tt),* ; let $context_name:tt = $($macro_name:tt!()),*) => {eager! { lazy! { wgpu_macros::generic_bindings! {$($entry_ty = $entry_name,)* let $context_name = eager!{ $($macro_name!()),*}}}}}
 }

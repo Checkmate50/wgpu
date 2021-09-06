@@ -57,9 +57,13 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
             [[builtin(position)]] position: vec4<f32>;
         };
 
+        struct InnerLocals {
+            transform: mat4x4<f32>;
+        };
+
         [[block]]
         struct Locals {
-            transform: mat4x4<f32>;
+            inner: InnerLocals;
         };
         [[group(0), binding(0)]]
         var r_locals: Locals;
@@ -71,7 +75,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         ) -> VertexOutput {
             var out: VertexOutput;
             out.fragmentColor = color;
-            out.position = r_locals.transform * vec4<f32>(position.x, position.y, position.z, 1.0);
+            out.position = r_locals.inner.transform * vec4<f32>(position.x, position.y, position.z, 1.0);
             return out;
         }
 
@@ -127,9 +131,15 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         [0.982, 0.099, 0.879],
     ]);
 
-    let locals = BindGroup1::new(&device, &Locals {
-        transform: generate_projection_matrix(size.width as f32 / size.height as f32) * generate_view_matrix(),
-    });
+    let locals = BindGroup1::new(
+        &device,
+        &Locals {
+            inner: InnerLocals {
+                transform: generate_projection_matrix(size.width as f32 / size.height as f32)
+                    * generate_view_matrix(),
+            },
+        },
+    );
 
     let vertex_position = Vertex::new(&device, &BufferData::new(positions));
     let vertex_color = Vertex::new(&device, &color_data);
@@ -177,11 +187,10 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                     {
                         let context2 = (&context1).set_color(&mut rpass, &vertex_color);
                         {
-                            let context3 =
-                                context2.set_r_locals(&mut rpass, &locals);
+                            let context3 = context2.set_r_locals(&mut rpass, &locals);
                             {
-                                let _ =
-                                    context3.runnable(&mut rpass, |r| graphics_run_indices(r, &indices, 1));
+                                let _ = context3
+                                    .runnable(&mut rpass, |r| graphics_run_indices(r, &indices, 1));
                             }
                         }
                     }

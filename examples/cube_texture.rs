@@ -96,50 +96,50 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         }
     }}
 
-    eager_binding! {context = pipeline!()};
+    eager_binding! {vertex = "vs_main", fragment = "fs_main"; let context = pipeline!()};
 
     /*
     struct Locals<const BINDINGTYPE: wgpu::BufferBindingType> { transform : cgmath :: Matrix4 < f32 >, }
     */
 
     /* impl<const BINDINGTYPE: wgpu::BufferBindingType> pipeline::bind::WgpuType for Locals<BINDINGTYPE> {
-        fn bind(
-            &self,
-            device: &wgpu::Device,
-            qual: Option<pipeline::shared::QUALIFIER>,
-        ) -> pipeline::bind::BoundData {
-            use pipeline::align::Alignment;
-            pipeline::bind::BoundData::new_buffer(
-                device,
-                &[self.transform.align_bytes()].concat(),
-                1 as u64,
-                Self::size_of(),
-                qual,
-                Self::create_binding_type(),
-            )
-        }
-        fn size_of() -> usize {
-            use pipeline::align::Alignment;
-            <f32>::alignment_size()
-        }
-        fn create_binding_type() -> wgpu::BindingType {
-            wgpu::BindingType::Buffer {
-                ty: BINDINGTYPE,
-                has_dynamic_offset: false,
-                min_binding_size: wgpu::BufferSize::new(Self::size_of() as u64),
-            }
-        }
-        fn get_qualifiers() -> Option<pipeline::shared::QUALIFIER> {
-            match BINDINGTYPE {
-                wgpu::BufferBindingType::Uniform => Some(pipeline::shared::QUALIFIER::UNIFORM),
-                wgpu::BufferBindingType::Storage { read_only: _ } => {
-                    Some(pipeline::shared::QUALIFIER::BUFFER)
-                }
-            }
-        }
-    }
- */
- 
+           fn bind(
+               &self,
+               device: &wgpu::Device,
+               qual: Option<pipeline::shared::QUALIFIER>,
+           ) -> pipeline::bind::BoundData {
+               use pipeline::align::Alignment;
+               pipeline::bind::BoundData::new_buffer(
+                   device,
+                   &[self.transform.align_bytes()].concat(),
+                   1 as u64,
+                   Self::size_of(),
+                   qual,
+                   Self::create_binding_type(),
+               )
+           }
+           fn size_of() -> usize {
+               use pipeline::align::Alignment;
+               <f32>::alignment_size()
+           }
+           fn create_binding_type() -> wgpu::BindingType {
+               wgpu::BindingType::Buffer {
+                   ty: BINDINGTYPE,
+                   has_dynamic_offset: false,
+                   min_binding_size: wgpu::BufferSize::new(Self::size_of() as u64),
+               }
+           }
+           fn get_qualifiers() -> Option<pipeline::shared::QUALIFIER> {
+               match BINDINGTYPE {
+                   wgpu::BufferBindingType::Uniform => Some(pipeline::shared::QUALIFIER::UNIFORM),
+                   wgpu::BufferBindingType::Storage { read_only: _ } => {
+                       Some(pipeline::shared::QUALIFIER::BUFFER)
+                   }
+               }
+           }
+       }
+    */
+
     let (program, _) =
         compile_valid_graphics_program!(device, context, GraphicsCompileArgs::default());
 
@@ -178,7 +178,8 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     let indices = Indices::new(&device, &index_data);
 
     let locals = Locals {
-        transform: generate_projection_matrix(size.width as f32 / size.height as f32) * generate_view_matrix(),
+        transform: generate_projection_matrix(size.width as f32 / size.height as f32)
+            * generate_view_matrix(),
     };
 
     /* let sampler = SamplerData::new(wgpu::SamplerDescriptor {
@@ -256,17 +257,12 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                     {
                         let context2 = context1.set_tex_coord(&mut rpass, &vertex_tex_coords);
                         {
-                            let context3 = context2.set_r_locals_r_color(&mut rpass, &bind_group_locals);
+                            let context3 =
+                                context2.set_r_locals_r_color(&mut rpass, &bind_group_locals);
 
                             {
-                                /* let context4 =
-                                context3.set_t_Color_s_Color(&mut rpass, &bind_group_t_s_map); */
-
-                                {
-                                    let _ = context3.runnable(&mut rpass, |r| {
-                                        graphics_run_indices(r, &indices, 1)
-                                    });
-                                }
+                                let _ = context3
+                                    .runnable(&mut rpass, |r| graphics_run_indices(r, &indices, 1));
                             }
                         }
                     }

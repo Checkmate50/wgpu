@@ -1,7 +1,7 @@
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
 use syn::parse::{Parse, ParseStream, Result};
-use syn::{parse_macro_input, Ident, Token};
+use syn::{parse_macro_input, Ident, LitStr, Token};
 
 use std::collections::HashMap;
 use std::iter;
@@ -9,12 +9,9 @@ use zerocopy::AsBytes as _;
 
 use rand::Rng;
 
-// This is a parameter which is often written like :
-// `[group1 [buffer loop in out] uint[]] indices`
-// where `group1` is the name of the group for this parameter
-// where `[buffer loop in out]` is a list of qualifiers
-// where `uint[]` is the type
-// where `indices` is the name of the parameter
+// This is a parameter which will need to be bound to.
+// A parameter either has a group or it doesn't
+//
 #[derive(Debug, Clone)]
 struct Parameters {
     location: u32,
@@ -30,8 +27,37 @@ impl PartialEq for Parameters {
 }
 impl Eq for Parameters {}
 
-// Contains the parameters of one or more shaders which make up a pipeline context
-// Will be created for the user at `context`
+enum EntryFunction {
+    Vertex(LitStr),
+    Fragment(LitStr),
+    Compute(LitStr),
+}
+
+impl Parse for EntryFunction {
+    fn parse(input: ParseStream) -> Result<Self> {
+        let entry = input.parse::<Ident>()?;
+        input.parse::<Token![=]>()?;
+        let name = input.parse::<LitStr>()?;
+        input.parse::<Token![,]>()?;
+        match entry.to_string().as_str() {
+            "vertex" => Ok(EntryFunction::Vertex(name)),
+            "fragment" => Ok(EntryFunction::Fragment(name)),
+            "compute" => Ok(EntryFunction::Compute(name)),
+            _ => panic!("not a valid entry point"),
+        }
+    }
+}
+
+fn is_entry_function(e: &naga::EntryPoint, vec_f: &Vec<EntryFunction>) -> bool {
+    vec_f.iter().any(|x| match x {
+        EntryFunction::Vertex(n) => n.value() == e.name,
+        EntryFunction::Fragment(n) => n.value() == e.name,
+        EntryFunction::Compute(n) => n.value() == e.name,
+    })
+}
+
+// Contains the 'params'(Parameters) of one or more shaders which make up a pipeline context which will be created for the user at `context`
+// This also contains the full naga `module` for the shader provided along with it's verification `info`
 struct Context {
     context: Ident,
     params: Vec<Parameters>,
@@ -41,6 +67,14 @@ struct Context {
 
 impl Parse for Context {
     fn parse(input: ParseStream) -> Result<Self> {
+        let mut entry_functions = Vec::new();
+        // find entry points
+        while !input.peek(Token![let]) {
+            entry_functions.push(input.parse::<EntryFunction>()?);
+        }
+
+        // Ready to parse the shader
+        input.parse::<Token![let]>()?;
         let context = input.parse::<Ident>()?;
         input.parse::<Token![=]>()?;
 
@@ -57,6 +91,7 @@ impl Parse for Context {
             })?;
         }
 
+        // Validate the nage module
         let info = naga::valid::Validator::new(
             naga::valid::ValidationFlags::all(),
             naga::valid::Capabilities::all(),
@@ -65,46 +100,50 @@ impl Parse for Context {
         .unwrap();
 
         let mut params: Vec<Parameters> = Vec::new();
-
         module.entry_points.iter().for_each(|f| {
             println!("{:?}", f.name);
-            f.function.arguments.iter().for_each(|arg| {
-                match (arg.name.as_ref(), arg.ty, arg.binding.as_ref()) {
-                    //https://docs.rs/naga/0.4.2/naga/enum.BuiltIn.html Most builtin's are just provided by the runtime. Some of these like position or baseVertex are probably something I should look at todo
-                    (Some(name), ty, Some(naga::Binding::BuiltIn(_))) => {
-                        println!("Builtin {} {:?}", name, module.types.try_get(ty))
+            if is_entry_function(f, &entry_functions) {
+                f.function.arguments.iter().for_each(|arg| {
+                    match (arg.name.as_ref(), arg.binding.as_ref()) {
+                        //https://docs.rs/naga/0.4.2/naga/enum.BuiltIn.html Most builtin's are just provided by the runtime. Some of these like position or baseVertex are probably something I should look at todo
+                        (Some(name), Some(naga::Binding::BuiltIn(_))) => {
+                            println!("Builtin {} {:?}", name, module.types.try_get(arg.ty))
+                        }
+                        (Some(name), Some(naga::Binding::Location { location, .. })) => {
+                            println!(
+                                "Location {} {:?} {:?}",
+                                name,
+                                location,
+                                module.types.try_get(arg.ty)
+                            );
+                            params.push(Parameters {
+                                location: *location,
+                                group: None,
+                                glsl_type: module.types.try_get(arg.ty).unwrap().clone(),
+                                name: quote::format_ident!("{}", name),
+                            })
+                        }
+                        //todo I'm not sure when this case fires and would like to know
+                        (None, _) => {
+                            println!("idk why there is no name")
+                        }
+                        //todo I wondered when None would get triggered. For example, if a fragment shader takes in a struct, that counts as a None Binding.
+                        (_, None) => {
+                            println!("hi")
+                        }
                     }
-                    (Some(name), ty, Some(naga::Binding::Location { location, .. })) => {
-                        println!(
-                            "Location {} {:?} {:?}",
-                            name,
-                            location,
-                            module.types.try_get(ty)
-                        );
-                        params.push(Parameters {
-                            location: *location,
-                            group: None,
-                            glsl_type: module.types.try_get(ty).unwrap().clone(),
-                            name: quote::format_ident!("{}", name),
-                        })
-                    }
-                    //todo I'm not sure when this case fires and would like to know
-                    (None, _, _) => {
-                        println!("idk why there is no name")
-                    }
-                    //todo I wondered when None would get triggered. For example, if a fragment shader takes in a struct, that counts as a None Binding.
-                    (_, _, None) => {
-                        println!("hi")
-                    }
-                }
-            })
+                })
+            }
         });
-        // todo should this also use StorageClass::Storage??
         module
             .global_variables
             .iter()
             // Filtering for uniform variables in bindgroups and handles to variable in bindgroups(like textures/samplers)
-            .filter(|var| var.1.class == naga::StorageClass::Uniform || var.1.class == naga::StorageClass::Handle)
+            // todo should this also use StorageClass::Storage??
+            .filter(|var| {
+                var.1.class == naga::StorageClass::Uniform
+                    || var.1.class == naga::StorageClass::Handle
+            })
             .for_each(|var| {
                 println!(
                     "{} {:?} {:?} {:?}",
@@ -129,6 +168,7 @@ impl Parse for Context {
     }
 }
 
+// Convert the naga VectorSize to it's corresponding number as a string
 fn numerize(dim: &naga::VectorSize) -> &str {
     match dim {
         naga::VectorSize::Bi => "2",
@@ -137,10 +177,12 @@ fn numerize(dim: &naga::VectorSize) -> &str {
     }
 }
 
+// Convert u8 to u32
 fn byteify(width: &u8) -> u32 {
     *width as u32 * 8
 }
 
+// create the cgmath::Matrix type. This is assumed to be a square matrix with dimension `dim` and type `f<width>`
 fn create_mat_type(
     data_type: &mut syn::punctuated::Punctuated<syn::PathSegment, syn::token::Colon2>,
     dim: &naga::VectorSize,
@@ -173,16 +215,6 @@ fn create_mat_type(
             lt_token: Token!(<)(proc_macro2::Span::call_site()),
             gt_token: Token!(>)(proc_macro2::Span::call_site()),
         }),
-    });
-}
-
-fn create_type(
-    data_type: &mut syn::punctuated::Punctuated<syn::PathSegment, syn::token::Colon2>,
-    unit_type: syn::Ident,
-) {
-    data_type.push(syn::PathSegment {
-        ident: unit_type,
-        arguments: syn::PathArguments::None,
     });
 }
 
@@ -645,6 +677,17 @@ fn create_new_base_type(
         }
         naga::Type {
             name: _,
+            inner: naga::TypeInner::Array {
+                base: (),
+                size: (),
+                stride: (),
+            },
+        } => {
+           // [f32; size]
+            unimplemented!()
+        }
+        naga::Type {
+            name: _,
             inner:
                 naga::TypeInner::Matrix {
                     columns,
@@ -661,7 +704,7 @@ fn create_new_base_type(
             name: Some(name), // the name of the struct
             inner:
                 naga::TypeInner::Struct {
-                    top_level: true,
+                    top_level: _, // Whether this is the root struct or an inner struct
                     members: _,
                     span: _,
                 },
@@ -983,71 +1026,80 @@ pub fn sub_module_generic_bindings(input: TokenStream) -> TokenStream {
 
     // Setting up struct
     //let struct_set = std::collections::HashSet::new();
-    params.clone().into_iter().for_each(|p| {
-        p.get_params().into_iter().for_each(|x| {
-            if let naga::Type {
-                name: Some(name),
-                inner:
-                    naga::TypeInner::Struct {
-                        top_level: true,
-                        span: _,
-                        mut members,
-                    },
-            } = x.glsl_type
-            {
-                members.sort_by(|a, b| a.offset.cmp(&b.offset));
-                let (mut field_name, mut field_type) = (Vec::new(), Vec::new());
-                members.iter().for_each(|m| {
-                    field_name.push(format_ident!("{}", m.name.as_ref().unwrap()));
-                    field_type.push(create_new_base_type(
-                        shader_params.module.types.try_get(m.ty).unwrap(),
-                    ))
-                });
-                let struct_name = format_ident!("{}", name);
-                all_expanded.push(quote! {
-                    struct #struct_name<const BINDINGTYPE: wgpu::BufferBindingType> {
-                        #(#field_name: #field_type,)*
-                    }
+    shader_params.module.types.iter().for_each(|(_,t)| {
+        if let naga::Type {
+            name: Some(name),
+            inner:
+                naga::TypeInner::Struct {
+                    top_level:_,
+                    span: _,
+                    mut members,
+                },
+        } = t.clone()
+        {
+            members.sort_by(|a, b| a.offset.cmp(&b.offset));
+            let (mut field_name, mut field_type) = (Vec::new(), Vec::new());
+            members.iter().for_each(|m| {
+                field_name.push(format_ident!("{}", m.name.as_ref().unwrap()));
+                field_type.push(create_new_base_type(
+                    shader_params.module.types.try_get(m.ty).unwrap(),
+                ))
+            });
+            let struct_name = format_ident!("{}", name);
+            all_expanded.push(quote! {
+                struct #struct_name<const BINDINGTYPE: wgpu::BufferBindingType> {
+                    #(#field_name: #field_type,)*
+                }
 
-                    impl<const BINDINGTYPE: wgpu::BufferBindingType> pipeline::bind::WgpuType for Locals<BINDINGTYPE> {
-                        fn bind(
-                            &self,
-                            device: &wgpu::Device,
-                            qual: Option<pipeline::shared::QUALIFIER>,
-                        ) -> pipeline::bind::BoundData {
-                            use pipeline::align::Alignment;
-                            pipeline::bind::BoundData::new_buffer(
-                                device,
-                                &[#(self.#field_name.align_bytes(),)*].concat(),
-                                1 as u64, //todo this might not be correct
-                                Self::size_of(),
-                                qual,
-                                Self::create_binding_type(),
-                            )
+                impl<const BINDINGTYPE: wgpu::BufferBindingType> pipeline::bind::WgpuType for #struct_name<BINDINGTYPE> {
+                    fn bind(
+                        &self,
+                        device: &wgpu::Device,
+                        qual: Option<pipeline::shared::QUALIFIER>,
+                    ) -> pipeline::bind::BoundData {
+                        use pipeline::align::Alignment;
+                        pipeline::bind::BoundData::new_buffer(
+                            device,
+                            &self.align_bytes(),
+                            1 as u64, //todo this might not be correct
+                            Self::size_of(),
+                            qual,
+                            Self::create_binding_type(),
+                        )
+                    }
+                    fn size_of() -> usize {
+                        use pipeline::align::Alignment;
+                        <#struct_name<BINDINGTYPE>>::alignment_size()
+                    }
+                    fn create_binding_type() -> wgpu::BindingType {
+                        wgpu::BindingType::Buffer {
+                            ty: BINDINGTYPE,
+                            has_dynamic_offset: false,
+                            min_binding_size: wgpu::BufferSize::new(Self::size_of() as u64),
                         }
-                        fn size_of() -> usize {
-                            use pipeline::align::Alignment;
-                            #(<#field_type>::alignment_size())+*
-                        }
-                        fn create_binding_type() -> wgpu::BindingType {
-                            wgpu::BindingType::Buffer {
-                                ty: BINDINGTYPE,
-                                has_dynamic_offset: false,
-                                min_binding_size: wgpu::BufferSize::new(Self::size_of() as u64),
-                            }
-                        }
-                        fn get_qualifiers() -> Option<pipeline::shared::QUALIFIER> {
-                            match BINDINGTYPE {
-                                wgpu::BufferBindingType::Uniform => Some(pipeline::shared::QUALIFIER::UNIFORM),
-                                wgpu::BufferBindingType::Storage { read_only: _ } => {
-                                    Some(pipeline::shared::QUALIFIER::BUFFER)
-                                }
+                    }
+                    fn get_qualifiers() -> Option<pipeline::shared::QUALIFIER> {
+                        match BINDINGTYPE {
+                            wgpu::BufferBindingType::Uniform => Some(pipeline::shared::QUALIFIER::UNIFORM),
+                            wgpu::BufferBindingType::Storage { read_only: _ } => {
+                                Some(pipeline::shared::QUALIFIER::BUFFER)
                             }
                         }
                     }
-                });
-            }
-        })
+                }
+
+                impl<const BINDINGTYPE: wgpu::BufferBindingType> pipeline::align::Alignment for #struct_name<BINDINGTYPE> {
+                    fn alignment_size() -> usize {
+                        use pipeline::align::Alignment;
+                        #(<#field_type>::alignment_size())+*
+                    }
+                    fn align_bytes(&self) -> Vec<u8> {
+                        [#(self.#field_name.align_bytes(),)*].concat()
+                    }
+                }
+
+            });
+        }
     });
 
     // Setting up context
